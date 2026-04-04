@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<DualArmExoticaConfig>
+  <RRTConnectSolver Name="DualArmRRTConnectSolver">
+    <Timeout>10.0</Timeout>
+    <Range>0.2</Range>
+  </RRTConnectSolver>
+
+  <SamplingProblem Name="DualArmSamplingProblem">
+    <PlanningScene>
+      <Scene>
+        <JointGroup>dual_arms</JointGroup>
+        <URDF>__URDF_PATH__</URDF>
+        <SRDF>__SRDF_PATH__</SRDF>
+      </Scene>
+    </PlanningScene>
+
+    <Maps>
+      <CollisionCheck Name="Collision" SelfCollision="1" />
+    </Maps>
+
+    <Equality>
+      <Task Task="Collision"/>
+    </Equality>
+
+    <StartState>__START_STATE__</StartState>
+    <Goal>__GOAL_STATE__</Goal>
+  </SamplingProblem>
+</DualArmExoticaConfig>

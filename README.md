@@ -12,6 +12,7 @@ This workspace contains the dual-arm MoveIt stack, EXOTica integration, scene de
 - [Launch Files](#launch-files)
 - [Test Scripts](#test-scripts)
 - [Skills And Runtime Nodes](#skills-and-runtime-nodes)
+- [Teleoperation](#teleoperation)
 - [How EXOTica Is Implemented](#how-exotica-is-implemented)
 - [Operational Notes](#operational-notes)
 
@@ -453,6 +454,40 @@ This is why the skill runtime can use Servo internally while the stable planning
 
 </details>
 
+## Teleoperation
+
+<details>
+<summary><strong>Hand teleoperation documentation</strong></summary>
+
+The current hand-tracking teleop path is documented in:
+
+- [TELEOPERATION.md](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/TELEOPERATION.md)
+
+Current implementation summary:
+
+- package:
+  - `arm_teleop`
+- robot backend:
+  - `nr_dual_arm_moveit_config`
+- gesture mapping:
+  - right fist toggles `uf850_arm`
+  - left fist toggles `xarm5_arm_no_slide`
+  - right pinky pinch toggles `rg6_gripper`
+  - left pinky pinch toggles `xarm_gripper`
+- launch-time arm gating:
+  - `enable_uf850:=true|false`
+  - `enable_xarm5:=true|false`
+
+The detailed document includes:
+
+- script-by-script implementation notes
+- ROS topic contract
+- why each topic exists
+- calibration and EXOTica control flow
+- Unity/Meta Quest replacement strategy
+
+</details>
+
 ## How EXOTica Is Implemented
 
 <details open>
@@ -539,6 +574,10 @@ That means the EXOTica planner is not using a separate hand-maintained robot mod
   - real hardware drives the main planning state
   - Isaac mirrors the real robot through the relay path
 - `isaac` alone is the only mode that should use the filtered joint-state path by default.
+- TCP floor limits are now enforced for downward motion to avoid table collisions:
+  - `rg6_tcp`: `z >= 0.92962`
+  - `screwdriver_tcp`: `z >= 0.91775`
+- The webcam EXOTica teleop launch now waits for `/exotica/ready` before starting `exotica_arm_teleop`.
 
 </details>
 

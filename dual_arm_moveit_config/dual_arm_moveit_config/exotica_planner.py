@@ -876,9 +876,12 @@ class ExoticaSingleArmPosePlanner:
             self.node.get_logger().error(f"[EXOTica/{self.group_name}] {self.last_error}")
             return None
             
-        self.node.get_logger().info(
-            f"[EXOTica/{self.group_name}] IK solved in {_time.time()-t0:.3f}s with error {best_error:.4f}m"
-        )
+        solve_duration = _time.time() - t0
+        log_message = f"[EXOTica/{self.group_name}] IK solved in {solve_duration:.3f}s with error {best_error:.4f}m"
+        if solve_duration >= 0.2:
+            self.node.get_logger().warning(log_message)
+        else:
+            self.node.get_logger().debug(log_message)
 
         return {
             joint_name: float(best_solution[index])

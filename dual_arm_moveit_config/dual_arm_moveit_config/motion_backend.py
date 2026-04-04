@@ -24,6 +24,11 @@ from dual_arm_moveit_config.exotica_planner import ExoticaDualArmPlanner, Exotic
 
 
 class MotionBackend:
+    _MIN_TCP_Z_LIMITS = {
+        "rg6_tcp": 0.92962,
+        "screwdriver_tcp": 0.91775,
+    }
+
     def __init__(self, node: Node, group_name: str):
         self.node = node
         self.group_name = group_name
@@ -57,6 +62,7 @@ class MotionBackend:
             self.servo_namespace = "/uf_servo_node"
             self.default_ik_link = "rg6_tcp"
             self.joint_prefixes = ("uf850_",)
+        self.min_tcp_z = self._MIN_TCP_Z_LIMITS.get(self.default_ik_link)
 
         self._service_cb_group = ReentrantCallbackGroup()
         self._move_group_client = ActionClient(self.node, MoveGroup, "move_action")
@@ -180,6 +186,18 @@ class MotionBackend:
                     f"{self._single_arm_exotica_planner.last_error}"
                 )
 
+    def _clamp_target_z(self, requested_z: float, context: str) -> float:
+        if self.min_tcp_z is None:
+            return float(requested_z)
+        requested_z = float(requested_z)
+        if requested_z < self.min_tcp_z:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] {context}: requested z={requested_z:.5f} is below "
+                f"table limit z={self.min_tcp_z:.5f} for {self.default_ik_link}. Clamping."
+            )
+            return float(self.min_tcp_z)
+        return requested_z
+
     def _joint_state_callback(self, msg: JointState):
         for index, name in enumerate(msg.name):
             if len(msg.position) > index:
@@ -250,6 +268,8 @@ class MotionBackend:
 
     def _ensure_trajectory_mode(self, timeout_sec: float = 5.0) -> bool:
         self._publish_zero_twist()
+        if not self._in_servo_mode:
+            return self._switch_controller_mode("trajectory", timeout_sec=timeout_sec)
         if self._servo_stop_client is not None:
             self._call_trigger_sync(self._servo_stop_client, timeout_sec, "stop_servo")
         self._switch_controller_mode("trajectory", timeout_sec=timeout_sec)
@@ -576,6 +596,8 @@ class MotionBackend:
             f"[{self.backend_kind}] move_to_pose_robust: target=({x:.3f},{y:.3f},{z:.3f}) "
             f"frame={frame_id} velocity={velocity}"
         )
+        if frame_id == "base_link":
+            z = self._clamp_target_z(z, "move_to_pose_robust")
         if not self._ensure_trajectory_mode():
             self.node.get_logger().error(f"[{self.backend_kind}] move_to_pose_robust: failed to enter trajectory mode")
             return False
@@ -649,6 +671,8 @@ class MotionBackend:
             f"[{self.backend_kind}] move_to_pose_exotica: target=({x:.3f},{y:.3f},{z:.3f}) "
             f"frame={frame_id} velocity={velocity}"
         )
+        if frame_id == "base_link":
+            z = self._clamp_target_z(z, "move_to_pose_exotica")
         if not self._ensure_trajectory_mode():
             self.node.get_logger().error(f"[{self.backend_kind}] move_to_pose_exotica: failed to enter trajectory mode")
             return False
@@ -715,6 +739,8 @@ class MotionBackend:
         velocity: float = 0.1,
         frame_id: str = "base_link",
     ) -> bool:
+        if frame_id == "base_link":
+            z = self._clamp_target_z(z, "move_cartesian_to_pose")
         if not self._ensure_trajectory_mode():
             return False
         if not self._cartesian_client.wait_for_service(timeout_sec=2.0):
@@ -822,6 +848,13 @@ class MotionBackend:
                 try:
                     current_tf = self.tf_buffer.lookup_transform("base_link", self.default_ik_link, rclpy.time.Time())
                     current_z = float(current_tf.transform.translation.z)
+                    if self.min_tcp_z is not None and current_z <= self.min_tcp_z + 1e-3:
+                        self.node.get_logger().warning(
+                            f"[{self.backend_kind}] Servo tactile descent reached table limit "
+                            f"z={self.min_tcp_z:.5f} for {self.default_ik_link}. Stopping."
+                        )
+                        self._publish_zero_twist()
+                        return False
                     if abs(current_z - start_z) > 0.003:
                         movement_detected = True
                 except Exception:
@@ -915,6 +948,15 @@ class MotionBackend:
         start_y = float(start_tf.transform.translation.y)
         start_z = float(start_tf.transform.translation.z)
         target_depth = abs(float(descent_distance_m))
+        if self.min_tcp_z is not None:
+            allowed_depth = max(0.0, start_z - self.min_tcp_z)
+            if target_depth > allowed_depth:
+                self.node.get_logger().warning(
+                    f"[{self.backend_kind}] EXOTica tactile descent requested "
+                    f"{target_depth*1000:.1f}mm from z={start_z:.5f}, but table limit "
+                    f"for {self.default_ik_link} only allows {allowed_depth*1000:.1f}mm. Clamping."
+                )
+                target_depth = allowed_depth
         step_m = max(abs(float(step_m)), 0.00025)
         loop_dt = 1.0 / max(float(rate_hz), 1.0)
         self.node.get_logger().info(
@@ -969,6 +1011,7 @@ class MotionBackend:
                 break
 
             commanded_z = max(start_z - target_depth, commanded_z - step_m)
+            commanded_z = self._clamp_target_z(commanded_z, "move_linear_z_with_effort_stop_exotica")
             target_joints = self._single_arm_exotica_planner.solve_pose_goal_joint_positions(
                 seed_positions,
                 [start_x, start_y, commanded_z, roll, pitch, yaw],
@@ -1075,6 +1118,7 @@ class MotionBackend:
                 return "DONE"
 
             tx, ty, tz, tr, tp, tyaw = (float(v) for v in target)
+            tz = self._clamp_target_z(tz, "move_cartesian_realtime_exotica")
 
             # Step clamping: interpolate target so EE never jumps more than max_step_m
             if ee_link:
@@ -1211,6 +1255,14 @@ class MotionBackend:
         while rclpy.ok() and time.time() < deadline:
             try:
                 current = self.tf_buffer.lookup_transform("base_link", self.default_ik_link, rclpy.time.Time())
+                if distance < 0.0 and self.min_tcp_z is not None:
+                    if float(current.transform.translation.z) <= self.min_tcp_z + 1e-3:
+                        self.node.get_logger().warning(
+                            f"[{self.backend_kind}] Servo Z motion reached table limit "
+                            f"z={self.min_tcp_z:.5f} for {self.default_ik_link}. Stopping."
+                        )
+                        self._publish_zero_twist()
+                        return False
                 travelled = abs(current.transform.translation.z - start_z)
                 if travelled >= abs(distance) - 0.002:
                     self._publish_zero_twist()
