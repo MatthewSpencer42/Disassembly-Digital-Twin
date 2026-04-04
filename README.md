@@ -470,13 +470,17 @@ Current implementation summary:
 - robot backend:
   - `nr_dual_arm_moveit_config`
 - gesture mapping:
-  - right fist toggles `uf850_arm`
-  - left fist toggles `xarm5_arm_no_slide`
-  - right pinky pinch toggles `rg6_gripper`
-  - left pinky pinch toggles `xarm_gripper`
+  - fist toggles the arm assigned to that hand
+  - pinky pinch toggles the gripper assigned to that hand
 - launch-time arm gating:
   - `enable_uf850:=true|false`
   - `enable_xarm5:=true|false`
+- launch-time hand assignment:
+  - `uf850_hand:=right|left`
+  - `xarm5_hand:=right|left`
+- webcam UI behavior:
+  - disabled robots show `OFF`
+  - enabled robots show the resolved assigned hand and enable state
 
 The detailed document includes:
 

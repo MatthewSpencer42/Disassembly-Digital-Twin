@@ -44,8 +44,9 @@ The current teleop runtime is built on:
 Important detail:
 
 - teleop now uses the `nr` MoveIt/EXOTica stack
-- the right arm uses `rg6_tcp`
-- the left arm uses `xarm_gripper_tcp`
+- active hand-to-arm ownership is configurable at launch
+- `uf850_arm` uses `rg6_tcp`
+- `xarm5_arm_no_slide` uses `xarm_gripper_tcp`
 
 The runtime launch is:
 
@@ -84,6 +85,7 @@ What it publishes:
 - index-pinch state for each hand
 - pinky-pinch state for each hand
 - debug text
+- UI status feedback by hand side
 
 What it does not do:
 
@@ -166,8 +168,8 @@ These are the normalized topics that the robot-side teleop logic consumes.
 
 | Topic | Type | Meaning |
 |---|---|---|
-| `/teleop_status/right_arm_enabled` | `std_msgs/Bool` | whether UF850 teleop is currently enabled |
-| `/teleop_status/left_arm_enabled` | `std_msgs/Bool` | whether xArm5 teleop is currently enabled |
+| `/teleop_status/right_arm_enabled` | `std_msgs/Bool` | whether the robot currently assigned to the right hand is enabled |
+| `/teleop_status/left_arm_enabled` | `std_msgs/Bool` | whether the robot currently assigned to the left hand is enabled |
 
 ### Teleop service
 
@@ -212,10 +214,10 @@ Important separation:
 
 Current mapping:
 
-- right hand:
+- hand assigned to `uf850_arm`:
   - fist: toggle `uf850_arm` teleop enabled/disabled
   - pinky pinch: toggle `rg6_gripper` open/close
-- left hand:
+- hand assigned to `xarm5_arm_no_slide`:
   - fist: toggle `xarm5_arm_no_slide` teleop enabled/disabled
   - pinky pinch: toggle `xarm_gripper` open/close
 
@@ -241,8 +243,10 @@ From [webcam_exotica_teleop.launch.py](/home/adip/workspace/disassembly_ws/src/a
 | `use_rviz` | `true` | whether MoveIt RViz is launched |
 | `use_sim_time` | `false` | forwarded into the MoveIt stack |
 | `exotica_ready_timeout` | `90.0` | seconds to wait for `/exotica/ready` |
-| `enable_uf850` | `true` | allow right-hand teleop for UF850 |
-| `enable_xarm5` | `true` | allow left-hand teleop for xArm5 |
+| `enable_uf850` | `true` | allow UF850 teleop |
+| `enable_xarm5` | `true` | allow xArm5 teleop |
+| `uf850_hand` | `right` | assign UF850 to `right` or `left` |
+| `xarm5_hand` | `left` | assign xArm5 to `right` or `left` |
 | `config_file` | package yaml | teleop/tracker parameter file |
 
 Examples:
@@ -254,7 +258,8 @@ ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   hardware_type:=fake \
   use_rviz:=true \
   enable_uf850:=false \
-  enable_xarm5:=true
+  enable_xarm5:=true \
+  xarm5_hand:=right
 ```
 
 Only UF850 teleop:
@@ -265,6 +270,23 @@ ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   enable_uf850:=true \
   enable_xarm5:=false
 ```
+
+Swap both hands:
+
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=fake \
+  uf850_hand:=left \
+  xarm5_hand:=right
+```
+
+Assignment rules:
+
+- if both arms are enabled and both are assigned to the same hand, `xarm5_hand` is forced to the opposite hand
+- if one arm is disabled, the enabled arm may use either hand
+- the webcam UI follows the resolved mapping and enable flags:
+  - disabled robot shows `OFF`
+  - enabled robot shows assigned hand and current state
 
 ### Important YAML parameters
 
@@ -290,6 +312,10 @@ Teleop motion parameters:
 - `max_joint_velocity_rad_s`
 - `max_joint_step_rad`
 - `max_target_step_m`
+- `enable_uf850`
+- `enable_xarm5`
+- `uf850.hand`
+- `xarm5.hand`
 
 Workspace/safety parameters:
 
@@ -330,7 +356,7 @@ Used because hand-tracking failures are hard to debug from robot motion alone. T
 
 ### Arm-enabled status topics
 
-Used because the tracker overlay shows whether each arm is currently enabled. This helps the operator understand whether a gesture edge was actually registered.
+Used because the tracker overlay shows whether the robot assigned to each hand is currently enabled. This helps the operator understand whether a gesture edge was actually registered, even when hands are reassigned at launch.
 
 ## How To Replace Webcam With Meta Quest Unity
 
@@ -413,6 +439,7 @@ These should stay exactly the same if possible:
 - workspace clamps
 - TCP floor safety limits
 - per-arm enable launch arguments
+- per-arm hand-assignment launch arguments
 
 ### If a Quest-specific node is added
 
@@ -421,6 +448,7 @@ The clean structure is:
 - `quest_hand_tracker.py` or Unity publisher
 - same `/teleop_hand_tracking/...` topics
 - same `webcam_exotica_teleop.launch.py` shape, or a parallel `quest_exotica_teleop.launch.py`
+- same `enable_*` and `*.hand` launch arguments if you want operator behavior parity with the webcam path
 
 In other words, swap this:
 

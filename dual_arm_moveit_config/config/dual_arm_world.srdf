@@ -125,4 +125,6 @@
   <disable_collisions link1="FT300" link2="xarm5_camera_stand" reason="Adjacent"/>
   <disable_collisions link1="xarm5_camera_stand" link2="screwdriver_base_link" reason="Adjacent"/>
   <disable_collisions link1="screwdriver_base_link" link2="screwdriver_tcp" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="rg6_L_inner_knuckle" reason="Never"/>
+  <disable_collisions link1="base_link" link2="rg6_R_inner_knuckle" reason="Never"/>
 </robot>

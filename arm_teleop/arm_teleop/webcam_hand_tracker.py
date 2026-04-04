@@ -32,6 +32,12 @@ class WebcamHandTracker(Node):
         self.declare_parameter("pinky_pinch_off_threshold", 0.080)
         self.declare_parameter("fist_on_threshold", 0.085)
         self.declare_parameter("fist_off_threshold", 0.110)
+        self.declare_parameter("depth_scale_gain", 0.80)
+        self.declare_parameter("depth_raw_blend", 0.15)
+        self.declare_parameter("enable_uf850", True)
+        self.declare_parameter("enable_xarm5", True)
+        self.declare_parameter("uf850.hand", "right")
+        self.declare_parameter("xarm5.hand", "left")
 
         self.right_pub = self.create_publisher(PoseStamped, "/teleop_hand_tracking/right/wrist", 10)
         self.left_pub = self.create_publisher(PoseStamped, "/teleop_hand_tracking/left/wrist", 10)
@@ -55,6 +61,14 @@ class WebcamHandTracker(Node):
         self._pinky_pinch_off_threshold = float(self.get_parameter("pinky_pinch_off_threshold").value)
         self._fist_on_threshold = float(self.get_parameter("fist_on_threshold").value)
         self._fist_off_threshold = float(self.get_parameter("fist_off_threshold").value)
+        self._depth_scale_gain = float(self.get_parameter("depth_scale_gain").value)
+        self._depth_raw_blend = max(0.0, min(1.0, float(self.get_parameter("depth_raw_blend").value)))
+        self._enable_uf850 = bool(self.get_parameter("enable_uf850").value)
+        self._enable_xarm5 = bool(self.get_parameter("enable_xarm5").value)
+        self._uf850_hand = self._normalize_hand_name(str(self.get_parameter("uf850.hand").value), "right")
+        self._xarm5_hand = self._normalize_hand_name(str(self.get_parameter("xarm5.hand").value), "left")
+        if self._enable_uf850 and self._enable_xarm5 and self._uf850_hand == self._xarm5_hand:
+            self._xarm5_hand = "left" if self._uf850_hand == "right" else "right"
         self._pinch_state = {"left": False, "right": False}
         self._pinky_pinch_state = {"left": False, "right": False}
         self._fist_state = {"left": False, "right": False}
@@ -107,6 +121,10 @@ class WebcamHandTracker(Node):
         self.timer = self.create_timer(self._period, self._tick)
         self.get_logger().info("Webcam hand tracker started. Topics: /teleop_hand_tracking/{left,right}/wrist")
 
+    def _normalize_hand_name(self, value: str, default: str) -> str:
+        hand = value.strip().lower()
+        return hand if hand in ("left", "right") else default
+
     def destroy_node(self):
         try:
             self.cap.release()
@@ -131,10 +149,18 @@ class WebcamHandTracker(Node):
         index_mcp = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.INDEX_FINGER_MCP])
         middle_mcp = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.MIDDLE_FINGER_MCP])
         pinky_mcp = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.PINKY_MCP])
-        palm_center = [
+        raw_palm_center = [
             (wrist[0] + index_mcp[0] + middle_mcp[0] + pinky_mcp[0]) / 4.0,
             (wrist[1] + index_mcp[1] + middle_mcp[1] + pinky_mcp[1]) / 4.0,
             (wrist[2] + index_mcp[2] + middle_mcp[2] + pinky_mcp[2]) / 4.0,
+        ]
+        palm_width = sum((index_mcp[i] - pinky_mcp[i]) ** 2 for i in range(3)) ** 0.5
+        palm_height = sum((wrist[i] - middle_mcp[i]) ** 2 for i in range(3)) ** 0.5
+        palm_scale_depth = 0.5 * (palm_width + palm_height) * self._depth_scale_gain
+        palm_center = [
+            raw_palm_center[0],
+            raw_palm_center[1],
+            self._depth_raw_blend * raw_palm_center[2] + (1.0 - self._depth_raw_blend) * palm_scale_depth,
         ]
 
         x_axis = normalize([index_mcp[i] - wrist[i] for i in range(3)])
@@ -227,6 +253,34 @@ class WebcamHandTracker(Node):
 
     def _left_arm_enabled_cb(self, msg: Bool):
         self._arm_enabled["left"] = bool(msg.data)
+
+    def _robot_enabled(self, robot_name: str) -> bool:
+        if robot_name == "uf850":
+            return self._enable_uf850 and self._arm_enabled[self._uf850_hand]
+        if robot_name == "xarm5":
+            return self._enable_xarm5 and self._arm_enabled[self._xarm5_hand]
+        return False
+
+    def _robot_status_text(self, robot_name: str) -> tuple[str, tuple[int, int, int]]:
+        if robot_name == "uf850":
+            if not self._enable_uf850:
+                return "UF850 (NONE): OFF", (0, 140, 255)
+            hand_name = self._uf850_hand.upper()
+            enabled = self._robot_enabled("uf850")
+            return (
+                f"UF850 ({hand_name}): {'ENABLED' if enabled else 'DISABLED'}",
+                (0, 255, 0) if enabled else (0, 140, 255),
+            )
+        if robot_name == "xarm5":
+            if not self._enable_xarm5:
+                return "XARM5 (NONE): OFF", (0, 140, 255)
+            hand_name = self._xarm5_hand.upper()
+            enabled = self._robot_enabled("xarm5")
+            return (
+                f"XARM5 ({hand_name}): {'ENABLED' if enabled else 'DISABLED'}",
+                (0, 255, 0) if enabled else (0, 140, 255),
+            )
+        return "UNKNOWN: OFF", (0, 140, 255)
 
     def _tick(self):
         ok, frame = self.cap.read()
@@ -322,24 +376,26 @@ class WebcamHandTracker(Node):
 
         if self._show_visualization:
             status = f"L:{'yes' if 'left' in tracked else 'no'} R:{'yes' if 'right' in tracked else 'no'}"
+            uf850_text, uf850_color = self._robot_status_text("uf850")
+            xarm5_text, xarm5_color = self._robot_status_text("xarm5")
             self.cv2.putText(frame, "Webcam Hand Tracking", (20, 30), self.cv2.FONT_HERSHEY_SIMPLEX, 0.9, (40, 220, 40), 2)
             self.cv2.putText(frame, status, (20, 60), self.cv2.FONT_HERSHEY_SIMPLEX, 0.7, (40, 220, 220), 2)
             self.cv2.putText(
                 frame,
-                f"UF850: {'ENABLED' if self._arm_enabled['right'] else 'DISABLED'}",
+                uf850_text,
                 (20, 90),
                 self.cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
-                (0, 255, 0) if self._arm_enabled["right"] else (0, 140, 255),
+                uf850_color,
                 2,
             )
             self.cv2.putText(
                 frame,
-                f"XARM5: {'ENABLED' if self._arm_enabled['left'] else 'DISABLED'}",
+                xarm5_text,
                 (20, 120),
                 self.cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
-                (0, 255, 0) if self._arm_enabled["left"] else (0, 140, 255),
+                xarm5_color,
                 2,
             )
             self.cv2.imshow("Webcam Hand Tracking", frame)

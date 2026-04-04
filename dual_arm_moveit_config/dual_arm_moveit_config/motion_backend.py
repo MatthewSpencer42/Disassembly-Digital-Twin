@@ -28,6 +28,10 @@ class MotionBackend:
         "rg6_tcp": 0.92962,
         "screwdriver_tcp": 0.91775,
     }
+    _TCP_X_LIMITS = {
+        "rg6_tcp": (0.647599, 1.24581),
+        "screwdriver_tcp": (0.659775, 1.11148),
+    }
 
     def __init__(self, node: Node, group_name: str):
         self.node = node
@@ -63,6 +67,9 @@ class MotionBackend:
             self.default_ik_link = "rg6_tcp"
             self.joint_prefixes = ("uf850_",)
         self.min_tcp_z = self._MIN_TCP_Z_LIMITS.get(self.default_ik_link)
+        x_limits = self._TCP_X_LIMITS.get(self.default_ik_link)
+        self.min_tcp_x = x_limits[0] if x_limits is not None else None
+        self.max_tcp_x = x_limits[1] if x_limits is not None else None
 
         self._service_cb_group = ReentrantCallbackGroup()
         self._move_group_client = ActionClient(self.node, MoveGroup, "move_action")
@@ -197,6 +204,22 @@ class MotionBackend:
             )
             return float(self.min_tcp_z)
         return requested_z
+
+    def _clamp_target_x(self, requested_x: float, context: str) -> float:
+        requested_x = float(requested_x)
+        if self.min_tcp_x is not None and requested_x < self.min_tcp_x:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] {context}: requested x={requested_x:.5f} is below "
+                f"backward limit x={self.min_tcp_x:.5f} for {self.default_ik_link}. Clamping."
+            )
+            return float(self.min_tcp_x)
+        if self.max_tcp_x is not None and requested_x > self.max_tcp_x:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] {context}: requested x={requested_x:.5f} is above "
+                f"forward limit x={self.max_tcp_x:.5f} for {self.default_ik_link}. Clamping."
+            )
+            return float(self.max_tcp_x)
+        return requested_x
 
     def _joint_state_callback(self, msg: JointState):
         for index, name in enumerate(msg.name):
@@ -597,6 +620,7 @@ class MotionBackend:
             f"frame={frame_id} velocity={velocity}"
         )
         if frame_id == "base_link":
+            x = self._clamp_target_x(x, "move_to_pose_robust")
             z = self._clamp_target_z(z, "move_to_pose_robust")
         if not self._ensure_trajectory_mode():
             self.node.get_logger().error(f"[{self.backend_kind}] move_to_pose_robust: failed to enter trajectory mode")
@@ -672,6 +696,7 @@ class MotionBackend:
             f"frame={frame_id} velocity={velocity}"
         )
         if frame_id == "base_link":
+            x = self._clamp_target_x(x, "move_to_pose_exotica")
             z = self._clamp_target_z(z, "move_to_pose_exotica")
         if not self._ensure_trajectory_mode():
             self.node.get_logger().error(f"[{self.backend_kind}] move_to_pose_exotica: failed to enter trajectory mode")
@@ -740,6 +765,7 @@ class MotionBackend:
         frame_id: str = "base_link",
     ) -> bool:
         if frame_id == "base_link":
+            x = self._clamp_target_x(x, "move_cartesian_to_pose")
             z = self._clamp_target_z(z, "move_cartesian_to_pose")
         if not self._ensure_trajectory_mode():
             return False
@@ -1118,6 +1144,7 @@ class MotionBackend:
                 return "DONE"
 
             tx, ty, tz, tr, tp, tyaw = (float(v) for v in target)
+            tx = self._clamp_target_x(tx, "move_cartesian_realtime_exotica")
             tz = self._clamp_target_z(tz, "move_cartesian_realtime_exotica")
 
             # Step clamping: interpolate target so EE never jumps more than max_step_m
