@@ -5,6 +5,8 @@ import time
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
@@ -19,8 +21,11 @@ from arm_teleop.hand_math import (
     vec_scale,
     vec_sub,
 )
-from dual_arm_moveit_config.motion_backend import MotionBackend
-from dual_arm_moveit_config.exotica_planner import ExoticaSingleArmPosePlanner
+from nr_dual_arm_moveit_config.motion_backend import MotionBackend
+from nr_dual_arm_moveit_config.exotica_planner import (
+    ExoticaSingleArmPosePlanner,
+    RemoteExoticaIKClient,
+)
 
 
 class ExoticaArmTeleop(Node):
@@ -35,9 +40,14 @@ class ExoticaArmTeleop(Node):
         self.declare_parameter("position_filter_alpha", 0.25)
         self.declare_parameter("orientation_filter_alpha", 0.2)
         self.declare_parameter("joint_filter_alpha", 0.35)
+        self.declare_parameter("joint_command_gain", 0.35)
+        self.declare_parameter("max_joint_velocity_rad_s", 0.8)
+        self.declare_parameter("max_joint_step_rad", 0.08)
         self.declare_parameter("max_target_step_m", 0.03)
         self.declare_parameter("planner_retry_sec", 2.0)
         self.declare_parameter("planner_init_delay_sec", 8.0)
+        self.declare_parameter("enable_uf850", True)
+        self.declare_parameter("enable_xarm5", True)
         self.declare_parameter("workspace_min", [-0.70, -0.85, 0.00])
         self.declare_parameter("workspace_max", [0.90, 0.85, 1.20])
         self.declare_parameter("uf850.min_tcp_z", 0.92962)
@@ -53,7 +63,9 @@ class ExoticaArmTeleop(Node):
         self._translation_scale_xyz = [float(v) for v in self.get_parameter("translation_scale_xyz").value]
         self._position_alpha = clamp(float(self.get_parameter("position_filter_alpha").value), 0.01, 1.0)
         self._orientation_alpha = clamp(float(self.get_parameter("orientation_filter_alpha").value), 0.01, 1.0)
-        self._joint_alpha = clamp(float(self.get_parameter("joint_filter_alpha").value), 0.01, 1.0)
+        self._joint_alpha = clamp(float(self.get_parameter("joint_command_gain").value), 0.01, 1.0)
+        self._max_joint_velocity = max(float(self.get_parameter("max_joint_velocity_rad_s").value), 0.01)
+        self._max_joint_step = max(float(self.get_parameter("max_joint_step_rad").value), 0.001)
         self._max_target_step = max(float(self.get_parameter("max_target_step_m").value), 0.002)
         self._planner_retry_sec = max(float(self.get_parameter("planner_retry_sec").value), 0.5)
         self._planner_init_delay_sec = max(float(self.get_parameter("planner_init_delay_sec").value), 0.0)
@@ -72,7 +84,9 @@ class ExoticaArmTeleop(Node):
             "right": {"msg": None, "stamp": 0.0},
             "left": {"msg": None, "stamp": 0.0},
         }
-        self._pinch_state = {"right": False, "left": False}
+        self._cb_group = ReentrantCallbackGroup()
+        self._fist_state = {"right": False, "left": False}
+        self._pinky_pinch_state = {"right": False, "left": False}
         self._status_pub = {
             "right": self.create_publisher(Bool, "/teleop_status/right_arm_enabled", 10),
             "left": self.create_publisher(Bool, "/teleop_status/left_arm_enabled", 10),
@@ -82,7 +96,7 @@ class ExoticaArmTeleop(Node):
             "right": {
                 "label": "right/uf850",
                 "planner_group": "uf850_arm",
-                "backend": MotionBackend(self, "uf850_arm"),
+                "backend": MotionBackend(self, "uf850_arm", defer_exotica_init=True),
                 "min_tcp_z": float(self.get_parameter("uf850.min_tcp_z").value),
                 "track_orientation": bool(self.get_parameter("uf850.track_orientation").value),
                 "origin_hand_pos": None,
@@ -94,13 +108,18 @@ class ExoticaArmTeleop(Node):
                 "last_command_time": 0.0,
                 "last_planner_retry_time": 0.0,
                 "last_planner_error_time": 0.0,
+                "teleop_allowed": bool(self.get_parameter("enable_uf850").value),
                 "enabled": False,
                 "calibrated": False,
+                "gripper_backend": MotionBackend(self, "rg6_gripper"),
+                "gripper_open_position": -0.625,
+                "gripper_closed_position": 0.625,
+                "gripper_closed": False,
             },
             "left": {
                 "label": "left/xarm5",
                 "planner_group": "xarm5_arm_no_slide",
-                "backend": MotionBackend(self, "xarm5_arm"),
+                "backend": MotionBackend(self, "xarm5_arm", defer_exotica_init=True),
                 "min_tcp_z": float(self.get_parameter("xarm5.min_tcp_z").value),
                 "track_orientation": False,
                 "origin_hand_pos": None,
@@ -112,21 +131,74 @@ class ExoticaArmTeleop(Node):
                 "last_command_time": 0.0,
                 "last_planner_retry_time": 0.0,
                 "last_planner_error_time": 0.0,
+                "teleop_allowed": bool(self.get_parameter("enable_xarm5").value),
                 "enabled": False,
                 "calibrated": False,
+                "gripper_backend": MotionBackend(self, "xarm_gripper"),
+                "gripper_joint_name": "xarm_gripper_right_drive_joint",
+                "gripper_open_position": 0.0,
+                "gripper_closed_position": 0.854,
+                "gripper_closed": False,
             },
         }
 
-        self.create_subscription(PoseStamped, "/teleop_hand_tracking/right/wrist", self._right_cb, 10)
-        self.create_subscription(PoseStamped, "/teleop_hand_tracking/left/wrist", self._left_cb, 10)
-        self.create_subscription(Bool, "/teleop_hand_tracking/right/pinch", self._right_pinch_cb, 10)
-        self.create_subscription(Bool, "/teleop_hand_tracking/left/pinch", self._left_pinch_cb, 10)
-        self.create_service(Trigger, "~/recalibrate", self._handle_recalibrate)
+        self.create_subscription(
+            PoseStamped,
+            "/teleop_hand_tracking/right/wrist",
+            self._right_cb,
+            10,
+            callback_group=self._cb_group,
+        )
+        self.create_subscription(
+            PoseStamped,
+            "/teleop_hand_tracking/left/wrist",
+            self._left_cb,
+            10,
+            callback_group=self._cb_group,
+        )
+        self.create_subscription(
+            Bool,
+            "/teleop_hand_tracking/right/fist",
+            self._right_fist_cb,
+            10,
+            callback_group=self._cb_group,
+        )
+        self.create_subscription(
+            Bool,
+            "/teleop_hand_tracking/left/fist",
+            self._left_fist_cb,
+            10,
+            callback_group=self._cb_group,
+        )
+        self.create_subscription(
+            Bool,
+            "/teleop_hand_tracking/right/pinky_pinch",
+            self._right_pinky_pinch_cb,
+            10,
+            callback_group=self._cb_group,
+        )
+        self.create_subscription(
+            Bool,
+            "/teleop_hand_tracking/left/pinky_pinch",
+            self._left_pinky_pinch_cb,
+            10,
+            callback_group=self._cb_group,
+        )
+        self.create_service(
+            Trigger,
+            "~/recalibrate",
+            self._handle_recalibrate,
+            callback_group=self._cb_group,
+        )
 
         self._last_status_log = 0.0
-        self.timer = self.create_timer(1.0 / self._rate_hz, self._tick)
+        self.timer = self.create_timer(
+            1.0 / self._rate_hz,
+            self._tick,
+            callback_group=self._cb_group,
+        )
         self.get_logger().info(
-            "EXOTica arm teleop node started. Right hand toggles uf850, left hand toggles xarm5. "
+            "EXOTica arm teleop node started. Fist toggles arm teleop, and pinky pinch toggles gripper open/close. "
             "xarm5 orientation tracking is locked off."
         )
         self._publish_arm_enabled_status()
@@ -137,33 +209,67 @@ class ExoticaArmTeleop(Node):
     def _left_cb(self, msg: PoseStamped):
         self._store_hand_state("left", msg)
 
-    def _right_pinch_cb(self, msg: Bool):
-        self._handle_pinch("right", bool(msg.data))
+    def _right_fist_cb(self, msg: Bool):
+        self._handle_fist("right", bool(msg.data))
 
-    def _left_pinch_cb(self, msg: Bool):
-        self._handle_pinch("left", bool(msg.data))
+    def _left_fist_cb(self, msg: Bool):
+        self._handle_fist("left", bool(msg.data))
+
+    def _right_pinky_pinch_cb(self, msg: Bool):
+        self._handle_pinky_pinch("right", bool(msg.data))
+
+    def _left_pinky_pinch_cb(self, msg: Bool):
+        self._handle_pinky_pinch("left", bool(msg.data))
 
     def _store_hand_state(self, hand: str, msg: PoseStamped):
         self._hand_state[hand]["msg"] = msg
         self._hand_state[hand]["stamp"] = time.monotonic()
 
-    def _handle_pinch(self, hand: str, current: bool):
-        previous = self._pinch_state[hand]
-        self._pinch_state[hand] = current
+    def _handle_fist(self, hand: str, current: bool):
+        previous = self._fist_state[hand]
+        self._fist_state[hand] = current
         if current and not previous:
             arm = self._arms[hand]
+            if not arm["teleop_allowed"]:
+                self.get_logger().info(f"[{arm['label']}] Teleoperation is disabled by launch configuration.")
+                return
             arm["enabled"] = not arm["enabled"]
             arm["calibrated"] = False
             arm["target_pose"] = None
             state = "ENABLED" if arm["enabled"] else "DISABLED"
-            self.get_logger().info(f"[{arm['label']}] Teleoperation {state} via {hand} pinch toggle.")
+            self.get_logger().info(f"[{arm['label']}] Teleoperation {state} via {hand} fist toggle.")
             self._publish_arm_enabled_status()
+
+    def _handle_pinky_pinch(self, hand: str, current: bool):
+        previous = self._pinky_pinch_state[hand]
+        self._pinky_pinch_state[hand] = current
+        if current and not previous:
+            arm = self._arms[hand]
+            if not arm["teleop_allowed"]:
+                return
+            arm["gripper_closed"] = not arm["gripper_closed"]
+            closed = arm["gripper_closed"]
+            state = "closed" if closed else "open"
+            if self._command_gripper(arm, closed):
+                self.get_logger().info(f"[{arm['label']}] Gripper toggled {state} via pinky pinch.")
+            else:
+                self.get_logger().warning(f"[{arm['label']}] Failed to toggle gripper {state}.")
 
     def _publish_arm_enabled_status(self):
         for hand_name, arm in self._arms.items():
             msg = Bool()
-            msg.data = bool(arm["enabled"])
+            msg.data = bool(arm["enabled"] and arm["teleop_allowed"])
             self._status_pub[hand_name].publish(msg)
+
+    def _command_gripper(self, arm: dict, closed: bool) -> bool:
+        target = arm["gripper_closed_position"] if closed else arm["gripper_open_position"]
+        backend = arm["gripper_backend"]
+        if arm["label"] == "right/uf850":
+            return backend.move_gripper(target, velocity=0.5)
+        return backend.move_to_joint_positions(
+            {arm["gripper_joint_name"]: float(target)},
+            velocity=0.5,
+        )
 
     def _handle_recalibrate(self, _request, response):
         for arm in self._arms.values():
@@ -226,14 +332,25 @@ class ExoticaArmTeleop(Node):
             return False
         arm["last_planner_retry_time"] = now
 
-        self.get_logger().info(
-            f"[{arm['label']}] Initializing local EXOTica planner for {arm['planner_group']}."
-        )
-        backend._single_arm_exotica_planner = ExoticaSingleArmPosePlanner(
-            self,
-            arm["planner_group"],
-            hardware_type=self._hardware_type,
-        )
+        if self.count_publishers("/exotica/ready") > 0:
+            self.get_logger().info(
+                f"[{arm['label']}] Connecting to remote EXOTica IK server for {arm['planner_group']}."
+            )
+            backend._single_arm_exotica_planner = RemoteExoticaIKClient(
+                self,
+                arm["planner_group"],
+                hardware_type=self._hardware_type,
+                skip_ready_wait=True,
+            )
+        else:
+            self.get_logger().info(
+                f"[{arm['label']}] Initializing local EXOTica planner for {arm['planner_group']}."
+            )
+            backend._single_arm_exotica_planner = ExoticaSingleArmPosePlanner(
+                self,
+                arm["planner_group"],
+                hardware_type=self._hardware_type,
+            )
         return bool(
             backend._single_arm_exotica_planner is not None
             and backend._single_arm_exotica_planner.available
@@ -354,27 +471,33 @@ class ExoticaArmTeleop(Node):
             return
 
         filtered = {}
+        max_step_from_velocity = self._max_joint_velocity / self._rate_hz
+        max_joint_step = min(self._max_joint_step, max_step_from_velocity)
         for name in planner.controlled_joint_names:
             previous = float(arm["seed_joints"].get(name, backend.current_joint_positions.get(name, 0.0)))
             solved = float(result[name])
-            filtered[name] = previous + self._joint_alpha * (solved - previous)
+            target = previous + self._joint_alpha * (solved - previous)
+            delta = clamp(target - previous, -max_joint_step, max_joint_step)
+            filtered[name] = previous + delta
 
         backend._publish_direct_joint_command(filtered)
         arm["seed_joints"] = dict(filtered)
         arm["last_command_time"] = time.monotonic()
 
     def _tick(self):
-        enabled_arms = [arm for arm in self._arms.values() if arm["enabled"]]
+        enabled_arms = [arm for arm in self._arms.values() if arm["enabled"] and arm["teleop_allowed"]]
         if not enabled_arms:
             now = time.monotonic()
             if now - self._last_status_log > 1.5:
-                self.get_logger().info("Teleoperation disabled. Pinch right hand for uf850 or left hand for xarm5.")
+                self.get_logger().info(
+                    "Teleoperation disabled. Fist toggles an arm, pinky pinch toggles gripper."
+                )
                 self._last_status_log = now
             return
 
         active_hands = 0
         for hand_name, arm in self._arms.items():
-            if not arm["enabled"]:
+            if not arm["enabled"] or not arm["teleop_allowed"]:
                 continue
             if not arm["calibrated"]:
                 if not self._calibrate_arm(hand_name, arm):
@@ -395,19 +518,26 @@ class ExoticaArmTeleop(Node):
         if active_hands == 0:
             now = time.monotonic()
             if now - self._last_status_log > 1.5:
-                self.get_logger().warning("No enabled arm currently has a tracked hand. Holding last commanded joint targets.")
+                self.get_logger().warning(
+                    "No enabled arm currently has a tracked hand. Holding last commanded joint targets."
+                )
                 self._last_status_log = now
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = None
+    executor = None
     try:
         node = ExoticaArmTeleop()
-        rclpy.spin(node)
+        executor = MultiThreadedExecutor(num_threads=4)
+        executor.add_node(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        if executor is not None:
+            executor.shutdown()
         if node is not None:
             node.destroy_node()
         if rclpy.ok():

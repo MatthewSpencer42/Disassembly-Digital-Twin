@@ -268,6 +268,8 @@ class MotionBackend:
 
     def _ensure_trajectory_mode(self, timeout_sec: float = 5.0) -> bool:
         self._publish_zero_twist()
+        if not self._in_servo_mode:
+            return self._switch_controller_mode("trajectory", timeout_sec=timeout_sec)
         if self._servo_stop_client is not None:
             self._call_trigger_sync(self._servo_stop_client, timeout_sec, "stop_servo")
         self._switch_controller_mode("trajectory", timeout_sec=timeout_sec)

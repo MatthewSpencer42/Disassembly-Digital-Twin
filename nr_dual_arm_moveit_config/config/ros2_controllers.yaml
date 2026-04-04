@@ -1,0 +1,119 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    uf850_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    xarm5_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    xarm5_servo_controller:
+      type: position_controllers/JointGroupPositionController
+
+    rg6_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    xarm_gripper_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    slider_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    uf850_servo_controller:
+      type: position_controllers/JointGroupPositionController
+
+joint_state_broadcaster:
+  ros__parameters:
+    interfaces:
+      - position
+      - velocity
+      - effort
+
+uf850_controller:
+  ros__parameters:
+    joints:
+      - uf850_joint1
+      - uf850_joint2
+      - uf850_joint3
+      - uf850_joint4
+      - uf850_joint5
+      - uf850_joint6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    open_loop_control: true
+    allow_nonzero_velocity_at_trajectory_end: true
+
+xarm5_controller:
+  ros__parameters:
+    joints:
+      - xarm5_joint1
+      - xarm5_joint2
+      - xarm5_joint3
+      - xarm5_joint4
+      - xarm5_joint5
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    open_loop_control: true
+    allow_nonzero_velocity_at_trajectory_end: true
+
+xarm5_servo_controller:
+  ros__parameters:
+    joints:
+      - xarm5_joint1
+      - xarm5_joint2
+      - xarm5_joint3
+      - xarm5_joint4
+      - xarm5_joint5
+
+rg6_controller:
+  ros__parameters:
+    joints:
+      - rg6_right_drive_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    allow_nonzero_velocity_at_trajectory_end: true
+
+xarm_gripper_controller:
+  ros__parameters:
+    joints:
+      - xarm_gripper_right_drive_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    allow_nonzero_velocity_at_trajectory_end: true
+
+slider_controller:
+  ros__parameters:
+    joints:
+      - uf_slide_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    allow_nonzero_velocity_at_trajectory_end: true
+
+uf850_servo_controller:
+  ros__parameters:
+    joints:
+      - uf850_joint1
+      - uf850_joint2
+      - uf850_joint3
+      - uf850_joint4
+      - uf850_joint5
+      - uf850_joint6

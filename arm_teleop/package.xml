@@ -13,7 +13,7 @@
   <depend>std_srvs</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
-  <depend>dual_arm_moveit_config</depend>
+  <depend>nr_dual_arm_moveit_config</depend>
   <depend>opencv-python</depend>
 
   <test_depend>ament_copyright</test_depend>

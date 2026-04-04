@@ -28,11 +28,19 @@ class WebcamHandTracker(Node):
         self.declare_parameter("publish_rate_hz", 30.0)
         self.declare_parameter("pinch_on_threshold", 0.055)
         self.declare_parameter("pinch_off_threshold", 0.075)
+        self.declare_parameter("pinky_pinch_on_threshold", 0.060)
+        self.declare_parameter("pinky_pinch_off_threshold", 0.080)
+        self.declare_parameter("fist_on_threshold", 0.085)
+        self.declare_parameter("fist_off_threshold", 0.110)
 
         self.right_pub = self.create_publisher(PoseStamped, "/teleop_hand_tracking/right/wrist", 10)
         self.left_pub = self.create_publisher(PoseStamped, "/teleop_hand_tracking/left/wrist", 10)
         self.right_pinch_pub = self.create_publisher(Bool, "/teleop_hand_tracking/right/pinch", 10)
         self.left_pinch_pub = self.create_publisher(Bool, "/teleop_hand_tracking/left/pinch", 10)
+        self.right_pinky_pinch_pub = self.create_publisher(Bool, "/teleop_hand_tracking/right/pinky_pinch", 10)
+        self.left_pinky_pinch_pub = self.create_publisher(Bool, "/teleop_hand_tracking/left/pinky_pinch", 10)
+        self.right_fist_pub = self.create_publisher(Bool, "/teleop_hand_tracking/right/fist", 10)
+        self.left_fist_pub = self.create_publisher(Bool, "/teleop_hand_tracking/left/fist", 10)
         self.debug_pub = self.create_publisher(String, "/teleop_hand_tracking/debug", 10)
         self.create_subscription(Bool, "/teleop_status/right_arm_enabled", self._right_arm_enabled_cb, 10)
         self.create_subscription(Bool, "/teleop_status/left_arm_enabled", self._left_arm_enabled_cb, 10)
@@ -43,7 +51,13 @@ class WebcamHandTracker(Node):
         self._period = 1.0 / max(float(self.get_parameter("publish_rate_hz").value), 1.0)
         self._pinch_on_threshold = float(self.get_parameter("pinch_on_threshold").value)
         self._pinch_off_threshold = float(self.get_parameter("pinch_off_threshold").value)
+        self._pinky_pinch_on_threshold = float(self.get_parameter("pinky_pinch_on_threshold").value)
+        self._pinky_pinch_off_threshold = float(self.get_parameter("pinky_pinch_off_threshold").value)
+        self._fist_on_threshold = float(self.get_parameter("fist_on_threshold").value)
+        self._fist_off_threshold = float(self.get_parameter("fist_off_threshold").value)
         self._pinch_state = {"left": False, "right": False}
+        self._pinky_pinch_state = {"left": False, "right": False}
+        self._fist_state = {"left": False, "right": False}
         self._arm_enabled = {"right": False, "left": False}
 
         try:
@@ -154,6 +168,47 @@ class WebcamHandTracker(Node):
         self._pinch_state[label] = current
         return current, distance
 
+    def _compute_pinky_pinch(self, hand_landmarks, label: str) -> tuple[bool, float]:
+        thumb_tip = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.THUMB_TIP])
+        pinky_tip = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.PINKY_TIP])
+        distance = sum((thumb_tip[i] - pinky_tip[i]) ** 2 for i in range(3)) ** 0.5
+        previous = self._pinky_pinch_state.get(label, False)
+        if previous:
+            current = distance < self._pinky_pinch_off_threshold
+        else:
+            current = distance < self._pinky_pinch_on_threshold
+        self._pinky_pinch_state[label] = current
+        return current, distance
+
+    def _compute_fist(self, hand_landmarks, label: str) -> tuple[bool, float]:
+        wrist = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.WRIST])
+        index_mcp = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.INDEX_FINGER_MCP])
+        middle_mcp = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.MIDDLE_FINGER_MCP])
+        pinky_mcp = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.PINKY_MCP])
+        palm_center = [
+            (wrist[0] + index_mcp[0] + middle_mcp[0] + pinky_mcp[0]) / 4.0,
+            (wrist[1] + index_mcp[1] + middle_mcp[1] + pinky_mcp[1]) / 4.0,
+            (wrist[2] + index_mcp[2] + middle_mcp[2] + pinky_mcp[2]) / 4.0,
+        ]
+        tip_indices = (
+            self.mp.solutions.hands.HandLandmark.INDEX_FINGER_TIP,
+            self.mp.solutions.hands.HandLandmark.MIDDLE_FINGER_TIP,
+            self.mp.solutions.hands.HandLandmark.RING_FINGER_TIP,
+            self.mp.solutions.hands.HandLandmark.PINKY_TIP,
+        )
+        tip_distances = []
+        for tip_index in tip_indices:
+            tip = self._normalized_point(hand_landmarks.landmark[tip_index])
+            tip_distances.append(sum((tip[i] - palm_center[i]) ** 2 for i in range(3)) ** 0.5)
+        average_distance = sum(tip_distances) / max(len(tip_distances), 1)
+        previous = self._fist_state.get(label, False)
+        if previous:
+            current = average_distance < self._fist_off_threshold
+        else:
+            current = average_distance < self._fist_on_threshold
+        self._fist_state[label] = current
+        return current, average_distance
+
     def _publish_pose(self, publisher, position: list[float], quat: list[float]):
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -197,15 +252,23 @@ class WebcamHandTracker(Node):
                 if pose is None:
                     continue
                 pinch, pinch_distance = self._compute_pinch(hand_landmarks, label)
+                pinky_pinch, pinky_pinch_distance = self._compute_pinky_pinch(hand_landmarks, label)
+                fist, fist_metric = self._compute_fist(hand_landmarks, label)
                 tracked[label] = {
                     "pose": pose,
                     "pinch": pinch,
                     "pinch_distance": pinch_distance,
+                    "pinky_pinch": pinky_pinch,
+                    "pinky_pinch_distance": pinky_pinch_distance,
+                    "fist": fist,
+                    "fist_metric": fist_metric,
                 }
                 wrist, quat = pose
                 debug_lines.append(
                     f"{label}: pos=({wrist[0]:+.3f},{wrist[1]:+.3f},{wrist[2]:+.3f}) "
                     f"pinch={'on' if pinch else 'off'} d={pinch_distance:.3f} "
+                    f"pinky={'on' if pinky_pinch else 'off'} d={pinky_pinch_distance:.3f} "
+                    f"fist={'on' if fist else 'off'} m={fist_metric:.3f} "
                     f"quat=({quat[0]:+.2f},{quat[1]:+.2f},{quat[2]:+.2f},{quat[3]:+.2f})"
                 )
                 if self._show_visualization:
@@ -221,7 +284,7 @@ class WebcamHandTracker(Node):
                     y_px = int(wrist_px.y * frame.shape[0])
                     self.cv2.putText(
                         frame,
-                        f"{label.upper()} {'PINCH' if pinch else ''}",
+                        f"{label.upper()} {'PINCH' if pinch else ''} {'FIST' if fist else ''} {'PINKY' if pinky_pinch else ''}",
                         (x_px + 10, y_px - 10),
                         self.cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
@@ -240,6 +303,18 @@ class WebcamHandTracker(Node):
         left_pinch_msg = Bool()
         left_pinch_msg.data = bool(tracked.get("left", {}).get("pinch", False))
         self.left_pinch_pub.publish(left_pinch_msg)
+        right_pinky_msg = Bool()
+        right_pinky_msg.data = bool(tracked.get("right", {}).get("pinky_pinch", False))
+        self.right_pinky_pinch_pub.publish(right_pinky_msg)
+        left_pinky_msg = Bool()
+        left_pinky_msg.data = bool(tracked.get("left", {}).get("pinky_pinch", False))
+        self.left_pinky_pinch_pub.publish(left_pinky_msg)
+        right_fist_msg = Bool()
+        right_fist_msg.data = bool(tracked.get("right", {}).get("fist", False))
+        self.right_fist_pub.publish(right_fist_msg)
+        left_fist_msg = Bool()
+        left_fist_msg.data = bool(tracked.get("left", {}).get("fist", False))
+        self.left_fist_pub.publish(left_fist_msg)
 
         debug_msg = String()
         debug_msg.data = " | ".join(debug_lines) if debug_lines else "no hands tracked"

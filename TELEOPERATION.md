@@ -1,222 +1,447 @@
-# Teleoperation Architecture for `agentic_disassembly`
+# Teleoperation Architecture
 
-## Current Direction
+Implementation guide for the hand-tracking teleoperation stack in `/home/adip/workspace/disassembly_ws/src/agentic_disassembly`.
 
-This workspace now uses a dedicated package, [arm_teleop](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop), for human hand tracking and arm teleoperation.
+## Contents
 
-The current implementation scope is intentionally narrow:
+- [Overview](#overview)
+- [Current Runtime](#current-runtime)
+- [Key Scripts](#key-scripts)
+- [Topic Contract](#topic-contract)
+- [Control Flow](#control-flow)
+- [Gesture Mapping](#gesture-mapping)
+- [Launch Arguments And Tuning](#launch-arguments-and-tuning)
+- [Why Each Topic Exists](#why-each-topic-exists)
+- [How To Replace Webcam With Meta Quest Unity](#how-to-replace-webcam-with-meta-quest-unity)
 
-- arm planning only
-- no gripper control
-- right hand drives `uf850_arm`
-- left hand drives `xarm5_arm`
-- hand tracking is separated from teleoperation so the tracking backend can be swapped later
+## Overview
 
-This follows the useful part of the Open-Teach design: keep the tracker-specific code separate from the robot-side teleoperation logic. In Open-Teach, that separation appears as a tracker/input path, a robot/operator wrapper, and a robot communication layer. In this workspace the equivalent split is:
+The teleoperation stack is split into two replaceable halves:
 
-- tracking provider: webcam today, Quest later
-- normalized hand pose topics: tracker output contract
-- teleoperation controller: EXOTica-backed robot-side mapping and command streaming
+- tracking/input side:
+  - produces normalized hand state topics
+- robot/control side:
+  - consumes those topics
+  - solves EXOTica IK
+  - streams joint commands to the active controllers
 
-## Why A Separate Package
-
-The existing teleop code in [teleop_bridge.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/hardware/teleop_bridge.py) is joystick-to-MoveIt-Servo teleoperation. It is not the right place for webcam or VR hand tracking because it is tied to joystick semantics, deadman behavior, and Servo controller switching.
-
-The workspace already had the better building block for this task in [motion_backend.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py):
-
-- EXOTica single-arm IK support
-- direct trajectory-controller joint streaming
-- warm-started pose solving
-- filtered realtime EXOTica motion logic
-
-So the cleanest design is:
-
-1. keep teleoperation in its own package
-2. reuse the existing EXOTica backend from `dual_arm_moveit_config`
-3. keep hand tracking replaceable
-
-## Package Layout
-
-The new package is [arm_teleop](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop).
-
-Main files:
-
-- [webcam_hand_tracker.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/webcam_hand_tracker.py)
-- [exotica_arm_teleop.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/exotica_arm_teleop.py)
-- [hand_math.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/hand_math.py)
-- [webcam_exotica_teleop.launch.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/launch/webcam_exotica_teleop.launch.py)
-- [webcam_exotica_teleop.yaml](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/config/webcam_exotica_teleop.yaml)
-
-## ROS Graph
-
-### Tracking side
-
-The webcam tracker publishes normalized wrist poses:
-
-- `/teleop_hand_tracking/right/wrist`
-- `/teleop_hand_tracking/left/wrist`
-- `/teleop_hand_tracking/debug`
-
-The tracker is currently implemented with:
-
-- OpenCV for webcam capture and visualization
-- MediaPipe Hands for landmark detection
-
-The visualization window is part of the tracker node. It shows:
-
-- the laptop webcam image
-- hand landmarks
-- left/right hand labels
-- live tracking status
-
-This is the place where a Meta Quest backend can later be swapped in. The teleop node should not care whether the source is:
+This split is deliberate. It means the tracking backend can change from:
 
 - laptop webcam + MediaPipe
 - Meta Quest hand tracking
-- another RGB or depth tracker
+- Unity-based Quest bridge
+- another vision or XR tracker
 
-as long as the output topics stay the same.
+without changing the robot teleoperation logic, as long as the ROS topic contract stays the same.
 
-### Teleoperation side
+## Current Runtime
 
-The teleoperation node subscribes only to the wrist pose topics above and uses:
+The current teleop runtime is built on:
 
-- `right` hand pose -> `uf850_arm`
-- `left` hand pose -> `xarm5_arm`
+- [arm_teleop](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop)
+- [nr_dual_arm_moveit_config](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/nr_dual_arm_moveit_config)
 
-It reuses [MotionBackend](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py) from `dual_arm_moveit_config` to:
+Important detail:
 
-- access current joint states
-- access TCP transforms
-- reuse EXOTica single-arm pose solving
-- stream filtered joint targets through the active trajectory controller
+- teleop now uses the `nr` MoveIt/EXOTica stack
+- the right arm uses `rg6_tcp`
+- the left arm uses `xarm_gripper_tcp`
 
-## Control Pipeline
-
-The implemented control path is:
-
-1. webcam tracker estimates hand landmarks
-2. wrist, index MCP, and pinky MCP define a stable hand frame
-3. tracker publishes `PoseStamped` wrist poses for left and right hands
-4. teleop node waits for both hands, joint states, and current robot TCP poses
-5. teleop node calibrates by storing:
-   - hand origin pose for each hand
-   - robot origin TCP pose for each arm
-6. runtime motion uses pose deltas:
-   - hand translation delta -> robot translation delta
-   - hand orientation delta -> robot orientation delta when enabled
-7. target pose is filtered and clamped
-8. EXOTica solves single-arm pose IK
-9. filtered joint commands are streamed to the trajectory controller
-
-## Coordinate Mapping
-
-The webcam tracker produces a normalized hand-centric coordinate system. The teleop node converts that into `base_link` motion using a configurable 3x3 rotation matrix:
-
-- default mapping: camera depth -> robot `x`
-- default mapping: image horizontal -> robot `y`
-- default mapping: image vertical -> robot `z`
-
-The exact mapping lives in [webcam_exotica_teleop.yaml](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/config/webcam_exotica_teleop.yaml) under `camera_to_base_rotation`.
-
-This is expected to need tuning on the real setup. That is normal.
-
-## Orientation Policy
-
-The two arms do not currently use the same orientation policy:
-
-- `uf850`: orientation tracking enabled
-- `xarm5`: orientation tracking disabled by default
-
-This is intentional. The `xarm5` setup in this workspace is more constrained, so the safer initial behavior is position-driven teleoperation with fixed TCP orientation. That can be relaxed later if testing shows stable pose solving.
-
-## Calibration Behavior
-
-Calibration is automatic.
-
-The teleop node calibrates when all of the following are true:
-
-- right hand is being tracked
-- left hand is being tracked
-- arm joint states are available
-- both current TCP transforms can be read
-
-The teleop node also exposes a recalibration service:
-
-- `/exotica_arm_teleop/recalibrate`
-
-This clears the current origins and asks the operator to hold a new neutral pose.
-
-## Launch
-
-Build:
+The runtime launch is:
 
 ```bash
 cd /home/adip/workspace/disassembly_ws
-colcon build --packages-select arm_teleop
+source /opt/ros/humble/setup.bash
 source install/setup.bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py hardware_type:=real use_rviz:=true
 ```
 
-Run:
+Bringup order:
 
-```bash
-ros2 launch arm_teleop webcam_exotica_teleop.launch.py hardware_type:=real
-```
+1. start `nr_dual_arm_moveit_config/exotica.launch.py`
+2. start webcam hand tracker
+3. wait for `/exotica/ready`
+4. start the teleop controller
 
-Optional useful overrides:
+That wait is required so the teleop node does not start sending remote EXOTica IK requests before the server is ready.
+
+## Key Scripts
+
+### [webcam_hand_tracker.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/webcam_hand_tracker.py)
+
+Purpose:
+
+- capture webcam frames with OpenCV
+- detect hands with MediaPipe
+- convert landmarks into a normalized wrist pose
+- compute gesture booleans
+- publish a tracker-independent ROS topic interface
+
+What it publishes:
+
+- wrist pose for each hand
+- fist state for each hand
+- index-pinch state for each hand
+- pinky-pinch state for each hand
+- debug text
+
+What it does not do:
+
+- no robot logic
+- no IK
+- no MoveIt calls
+- no controller switching
+
+This is the file to replace if the input source changes from webcam to Quest/Unity.
+
+### [exotica_arm_teleop.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/exotica_arm_teleop.py)
+
+Purpose:
+
+- consume the normalized hand topics
+- toggle each arm teleop on/off
+- calibrate hand origin to current TCP origin
+- convert hand deltas into target robot TCP deltas
+- solve single-arm EXOTica IK
+- stream filtered joint targets to arm controllers
+- toggle grippers from gesture input
+
+Important implementation details:
+
+- runs under `MultiThreadedExecutor`
+- uses `ReentrantCallbackGroup`
+- this is required because remote EXOTica IK requests wait for asynchronous responses, and a single-threaded executor caused reply starvation and timeouts
+
+### [hand_math.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/hand_math.py)
+
+Purpose:
+
+- shared quaternion, vector, and interpolation helpers
+
+This keeps the tracker and teleop nodes simpler and avoids duplicating frame math.
+
+### [wait_for_exotica_ready.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/wait_for_exotica_ready.py)
+
+Purpose:
+
+- block teleop startup until `/exotica/ready` is seen
+
+This prevents the old startup race where teleop tried to attach to EXOTica too early and then fell back into slower local planner paths.
+
+### [webcam_exotica_teleop.launch.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/launch/webcam_exotica_teleop.launch.py)
+
+Purpose:
+
+- compose the tracker, MoveIt/EXOTica bringup, readiness wait, and teleop node into one operator launch
+
+### [webcam_exotica_teleop.yaml](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/config/webcam_exotica_teleop.yaml)
+
+Purpose:
+
+- tune gesture thresholds
+- tune filtering
+- tune joint streaming limits
+- set workspace bounds
+- set per-arm enable defaults
+
+## Topic Contract
+
+### Tracker output topics
+
+These are the normalized topics that the robot-side teleop logic consumes.
+
+| Topic | Type | Meaning |
+|---|---|---|
+| `/teleop_hand_tracking/right/wrist` | `geometry_msgs/PoseStamped` | normalized right-hand wrist pose |
+| `/teleop_hand_tracking/left/wrist` | `geometry_msgs/PoseStamped` | normalized left-hand wrist pose |
+| `/teleop_hand_tracking/right/fist` | `std_msgs/Bool` | right-hand fist detection |
+| `/teleop_hand_tracking/left/fist` | `std_msgs/Bool` | left-hand fist detection |
+| `/teleop_hand_tracking/right/pinch` | `std_msgs/Bool` | right-hand thumb-index pinch |
+| `/teleop_hand_tracking/left/pinch` | `std_msgs/Bool` | left-hand thumb-index pinch |
+| `/teleop_hand_tracking/right/pinky_pinch` | `std_msgs/Bool` | right-hand thumb-pinky pinch |
+| `/teleop_hand_tracking/left/pinky_pinch` | `std_msgs/Bool` | left-hand thumb-pinky pinch |
+| `/teleop_hand_tracking/debug` | `std_msgs/String` | tracker-side human-readable debug line |
+
+### Teleop status topics
+
+| Topic | Type | Meaning |
+|---|---|---|
+| `/teleop_status/right_arm_enabled` | `std_msgs/Bool` | whether UF850 teleop is currently enabled |
+| `/teleop_status/left_arm_enabled` | `std_msgs/Bool` | whether xArm5 teleop is currently enabled |
+
+### Teleop service
+
+| Service | Type | Meaning |
+|---|---|---|
+| `/exotica_arm_teleop/recalibrate` | `std_srvs/Trigger` | clear stored origins and force recalibration |
+
+### EXOTica readiness topic
+
+| Topic | Type | Meaning |
+|---|---|---|
+| `/exotica/ready` | `std_msgs/Bool` | EXOTica server is initialized and can accept remote IK requests |
+
+## Control Flow
+
+The current robot-side flow is:
+
+1. the tracker publishes normalized hand pose and gesture topics
+2. the teleop node stores the latest hand states with timestamps
+3. a fist edge toggles the corresponding arm teleop enabled/disabled
+4. when an enabled arm sees valid tracking, joint states, and a TCP transform, teleop calibrates:
+   - hand origin pose
+   - robot TCP origin pose
+   - current seed joints
+5. every tick:
+   - current hand delta is converted to robot target delta
+   - translation is rotated from camera frame into robot `base_link`
+   - position is clamped to the configured workspace
+   - TCP Z is clamped against hard table-clearance limits
+   - target pose is filtered
+   - EXOTica solves IK for the arm
+   - solved joints are filtered and velocity-limited
+   - direct joint streaming publishes to the arm trajectory controller topic
+6. a pinky-pinch edge toggles that hand’s gripper open/close
+
+Important separation:
+
+- arm motion uses EXOTica IK and arm controllers
+- gripper toggles use the dedicated gripper controller path
+
+## Gesture Mapping
+
+Current mapping:
+
+- right hand:
+  - fist: toggle `uf850_arm` teleop enabled/disabled
+  - pinky pinch: toggle `rg6_gripper` open/close
+- left hand:
+  - fist: toggle `xarm5_arm_no_slide` teleop enabled/disabled
+  - pinky pinch: toggle `xarm_gripper` open/close
+
+Current non-use of index pinch:
+
+- thumb-index pinch is still published by the tracker
+- the teleop node no longer uses it for enable logic
+
+Why keep publishing it:
+
+- it is still useful as a stable normalized gesture channel
+- it can be reused later for another operator function without changing the tracker topic contract
+
+## Launch Arguments And Tuning
+
+### Launch arguments
+
+From [webcam_exotica_teleop.launch.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/launch/webcam_exotica_teleop.launch.py):
+
+| Argument | Default | Meaning |
+|---|---:|---|
+| `hardware_type` | `real` | `fake`, `real`, `isaac`, or `twin` |
+| `use_rviz` | `true` | whether MoveIt RViz is launched |
+| `use_sim_time` | `false` | forwarded into the MoveIt stack |
+| `exotica_ready_timeout` | `90.0` | seconds to wait for `/exotica/ready` |
+| `enable_uf850` | `true` | allow right-hand teleop for UF850 |
+| `enable_xarm5` | `true` | allow left-hand teleop for xArm5 |
+| `config_file` | package yaml | teleop/tracker parameter file |
+
+Examples:
+
+Only xArm5 teleop:
 
 ```bash
 ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   hardware_type:=fake \
-  use_rviz:=true
+  use_rviz:=true \
+  enable_uf850:=false \
+  enable_xarm5:=true
 ```
 
-The launch file:
+Only UF850 teleop:
 
-- starts the existing MoveIt + EXOTica stack from `dual_arm_moveit_config`
-- starts the webcam tracker
-- waits for `/exotica/ready`
-- only then starts the arm teleoperation node
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=real \
+  enable_uf850:=true \
+  enable_xarm5:=false
+```
 
-## Current Limits
+### Important YAML parameters
 
-Current implementation limits are deliberate:
+From [webcam_exotica_teleop.yaml](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/config/webcam_exotica_teleop.yaml):
 
-- no gripper integration
-- no pinch-to-action mapping
-- no Quest backend yet
-- no custom ROS message package yet
-- no explicit safety supervisor beyond workspace clamps, target filtering, EXOTica failure rejection, and TCP Z floor limits
+Tracker-side gesture parameters:
 
-## Table Clearance Limits
+- `pinch_on_threshold`
+- `pinch_off_threshold`
+- `pinky_pinch_on_threshold`
+- `pinky_pinch_off_threshold`
+- `fist_on_threshold`
+- `fist_off_threshold`
 
-The teleop path now enforces the same hard lower TCP Z limits that are used in the shared motion backend:
+Teleop motion parameters:
 
-- `uf850` / `rg6_tcp`:
-  - `z >= 0.92962`
-- `xarm5` / `screwdriver_tcp`:
-  - `z >= 0.91775`
+- `control_rate_hz`
+- `translation_scale`
+- `translation_scale_xyz`
+- `position_filter_alpha`
+- `orientation_filter_alpha`
+- `joint_command_gain`
+- `max_joint_velocity_rad_s`
+- `max_joint_step_rad`
+- `max_target_step_m`
 
-These values were taken from the validated table-clearance screenshots and are applied as a lower Z clamp in the teleop workspace, in addition to the existing upper workspace clamp.
+Workspace/safety parameters:
 
-The current tracker interface is simple enough that a Quest backend can later publish the same wrist topics and reuse the same teleoperation controller unchanged.
+- `workspace_min`
+- `workspace_max`
+- `uf850.min_tcp_z`
+- `xarm5.min_tcp_z`
 
-## Next Recommended Steps
+## Why Each Topic Exists
 
-1. Tune `camera_to_base_rotation` and `translation_scale` on the real robot.
-2. Add a Quest tracking node that publishes the same wrist topics.
-3. Add a more explicit `tracking_valid` topic or custom message once the interface stabilizes.
-4. Add an enable/disable deadman input for safer real-robot use.
-5. Add a TF or RViz visualization of tracked hand frames for easier calibration.
+### Wrist pose topics
 
-## External References
+Used because the robot teleop controller needs a continuous hand pose signal, not raw landmarks.
 
-The design direction here was informed by Open-Teach:
+Why `PoseStamped`:
 
-- website: https://open-teach.github.io/
-- repository: https://github.com/aadhithya14/Open-Teach
-- teleop usage: https://github.com/aadhithya14/Open-Teach/blob/main/docs/teleop_data_collect.md
-- extension model: https://github.com/aadhithya14/Open-Teach/blob/main/docs/add_your_own_robot.md
-- Quest UI notes: https://github.com/aadhithya14/Open-Teach/blob/main/docs/vr.md
+- gives position and orientation together
+- carries a frame id and timestamp
+- easy to replace across backends
 
-The part reused conceptually is the separation between tracker-specific input handling and robot-specific teleoperation logic. The code in this workspace is not a direct port of Open-Teach; it is a workspace-specific EXOTica-based implementation that fits the existing dual-arm stack.
+### Gesture boolean topics
+
+Used because discrete operator state changes should not be inferred from pose every time on the robot side.
+
+Why the tracker publishes booleans directly:
+
+- keeps gesture thresholds on the input side
+- avoids duplicating detector logic in every teleop consumer
+- makes Unity/Quest replacement easier, because the replacement can publish the same booleans
+
+### Debug topic
+
+Used because hand-tracking failures are hard to debug from robot motion alone. The debug string exposes:
+
+- hand presence
+- gesture state
+- tracker-side pose summary
+
+### Arm-enabled status topics
+
+Used because the tracker overlay shows whether each arm is currently enabled. This helps the operator understand whether a gesture edge was actually registered.
+
+## How To Replace Webcam With Meta Quest Unity
+
+The correct replacement strategy is:
+
+- do not rewrite the robot teleop node first
+- replace only the tracker/input side
+- keep the ROS topic contract unchanged
+
+### Recommended architecture
+
+Unity/Quest side:
+
+1. read Quest hand tracking in Unity
+2. compute a hand pose per hand
+3. compute gesture booleans per hand
+4. publish the same ROS topics as the webcam tracker
+
+Robot/ROS side:
+
+- keep [exotica_arm_teleop.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/exotica_arm_teleop.py) unchanged
+
+### Minimum Unity outputs required
+
+Unity should publish:
+
+- `/teleop_hand_tracking/right/wrist`
+- `/teleop_hand_tracking/left/wrist`
+- `/teleop_hand_tracking/right/fist`
+- `/teleop_hand_tracking/left/fist`
+- `/teleop_hand_tracking/right/pinky_pinch`
+- `/teleop_hand_tracking/left/pinky_pinch`
+
+Optional but recommended:
+
+- `/teleop_hand_tracking/right/pinch`
+- `/teleop_hand_tracking/left/pinch`
+- `/teleop_hand_tracking/debug`
+
+### Message choices for Unity
+
+Best path:
+
+- use ROS-TCP-Connector or another Unity ROS bridge
+- publish the same ROS 2 message types already used now:
+  - `geometry_msgs/PoseStamped`
+  - `std_msgs/Bool`
+  - `std_msgs/String`
+
+### Coordinate-frame work for Quest
+
+The hard part is not ROS publishing. The hard part is frame normalization.
+
+Unity/Quest must provide a hand pose that is equivalent in meaning to the current webcam tracker output:
+
+- a stable hand-centered position
+- a stable hand orientation
+- handedness-resolved left/right topics
+
+Two valid strategies:
+
+1. publish raw Quest-local hand poses and keep using `camera_to_base_rotation`-style conversion in ROS
+2. publish already-normalized teleop poses in Unity, so ROS only consumes them directly
+
+Recommended first step:
+
+- keep the normalization policy in ROS as much as possible
+- publish a stable Quest hand pose into the same wrist topics
+- then retune only the rotation/scaling parameters
+
+That keeps Unity simpler and preserves most of the tuning path already used for webcam teleop.
+
+### What should not change for Quest
+
+These should stay exactly the same if possible:
+
+- teleop arm enable semantics
+- gripper toggle semantics
+- EXOTica IK and streaming controller logic
+- workspace clamps
+- TCP floor safety limits
+- per-arm enable launch arguments
+
+### If a Quest-specific node is added
+
+The clean structure is:
+
+- `quest_hand_tracker.py` or Unity publisher
+- same `/teleop_hand_tracking/...` topics
+- same `webcam_exotica_teleop.launch.py` shape, or a parallel `quest_exotica_teleop.launch.py`
+
+In other words, swap this:
+
+- [webcam_hand_tracker.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/webcam_hand_tracker.py)
+
+with a Quest provider, but keep this:
+
+- [exotica_arm_teleop.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/exotica_arm_teleop.py)
+
+## Notes
+
+Current hard TCP floor limits:
+
+- UF850 / `rg6_tcp`: `z >= 0.92962`
+- xArm5 / `xarm_gripper_tcp`: `z >= 0.91775`
+
+Current arm-side EXOTica stack:
+
+- [nr_dual_arm_moveit_config](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/nr_dual_arm_moveit_config)
+
+Current key design rule:
+
+- the hand-tracker side is replaceable
+- the robot teleop side should remain tracker-agnostic

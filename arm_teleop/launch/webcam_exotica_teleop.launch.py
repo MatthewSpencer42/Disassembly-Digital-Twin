@@ -11,13 +11,15 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     package_share = Path(get_package_share_directory("arm_teleop"))
-    dual_arm_launch_dir = Path(get_package_share_directory("dual_arm_moveit_config")) / "launch"
+    dual_arm_launch_dir = Path(get_package_share_directory("nr_dual_arm_moveit_config")) / "launch"
 
     hardware_type = LaunchConfiguration("hardware_type")
     use_rviz = LaunchConfiguration("use_rviz")
     use_sim_time = LaunchConfiguration("use_sim_time")
     config_file = LaunchConfiguration("config_file")
     exotica_ready_timeout = LaunchConfiguration("exotica_ready_timeout")
+    enable_uf850 = LaunchConfiguration("enable_uf850")
+    enable_xarm5 = LaunchConfiguration("enable_xarm5")
 
     webcam_tracker = Node(
         package="arm_teleop",
@@ -40,7 +42,15 @@ def generate_launch_description():
         executable="exotica_arm_teleop",
         name="exotica_arm_teleop",
         output="screen",
-        parameters=[config_file, {"hardware_type": hardware_type, "use_sim_time": use_sim_time}],
+        parameters=[
+            config_file,
+            {
+                "hardware_type": hardware_type,
+                "use_sim_time": use_sim_time,
+                "enable_uf850": enable_uf850,
+                "enable_xarm5": enable_xarm5,
+            },
+        ],
     )
 
     def _start_teleop_after_ready(event, _context):
@@ -54,6 +64,8 @@ def generate_launch_description():
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("exotica_ready_timeout", default_value="90.0"),
+            DeclareLaunchArgument("enable_uf850", default_value="true"),
+            DeclareLaunchArgument("enable_xarm5", default_value="true"),
             DeclareLaunchArgument(
                 "config_file",
                 default_value=str(package_share / "config" / "webcam_exotica_teleop.yaml"),

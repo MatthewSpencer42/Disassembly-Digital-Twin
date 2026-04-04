@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<robot name="nr_dual_arm" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="hardware_type" default="fake"/>
+  <xacro:arg name="joint_commands_topic" default="/isaac_joint_commands"/>
+  <xacro:arg name="joint_states_topic" default="/isaac_joint_states"/>
+
+  <xacro:include filename="$(find nr_dual_arm_description)/urdf/nr_dual_arm.xacro"/>
+  <xacro:include filename="ros2_control.xacro"/>
+
+  <link name="world"/>
+  <joint name="world_fixed" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="world"/>
+    <child link="base_link"/>
+  </joint>
+
+  <xacro:nr_dual_arm_ros2_control
+    name="DualArmSystem"
+    hardware_type="$(arg hardware_type)"
+    joint_commands_topic="$(arg joint_commands_topic)"
+    joint_states_topic="$(arg joint_states_topic)"/>
+</robot>

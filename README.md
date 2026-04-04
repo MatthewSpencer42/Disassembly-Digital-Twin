@@ -12,6 +12,7 @@ This workspace contains the dual-arm MoveIt stack, EXOTica integration, scene de
 - [Launch Files](#launch-files)
 - [Test Scripts](#test-scripts)
 - [Skills And Runtime Nodes](#skills-and-runtime-nodes)
+- [Teleoperation](#teleoperation)
 - [How EXOTica Is Implemented](#how-exotica-is-implemented)
 - [Operational Notes](#operational-notes)
 
@@ -450,6 +451,40 @@ Registered console scripts from `disassembly_skill/setup.py`:
 - after Servo motion, the backend returns to the trajectory-controller path
 
 This is why the skill runtime can use Servo internally while the stable planning runtime keeps Servo off by default.
+
+</details>
+
+## Teleoperation
+
+<details>
+<summary><strong>Hand teleoperation documentation</strong></summary>
+
+The current hand-tracking teleop path is documented in:
+
+- [TELEOPERATION.md](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/TELEOPERATION.md)
+
+Current implementation summary:
+
+- package:
+  - `arm_teleop`
+- robot backend:
+  - `nr_dual_arm_moveit_config`
+- gesture mapping:
+  - right fist toggles `uf850_arm`
+  - left fist toggles `xarm5_arm_no_slide`
+  - right pinky pinch toggles `rg6_gripper`
+  - left pinky pinch toggles `xarm_gripper`
+- launch-time arm gating:
+  - `enable_uf850:=true|false`
+  - `enable_xarm5:=true|false`
+
+The detailed document includes:
+
+- script-by-script implementation notes
+- ROS topic contract
+- why each topic exists
+- calibration and EXOTica control flow
+- Unity/Meta Quest replacement strategy
 
 </details>
 
