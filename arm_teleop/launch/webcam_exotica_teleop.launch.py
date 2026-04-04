@@ -20,13 +20,23 @@ def generate_launch_description():
     exotica_ready_timeout = LaunchConfiguration("exotica_ready_timeout")
     enable_uf850 = LaunchConfiguration("enable_uf850")
     enable_xarm5 = LaunchConfiguration("enable_xarm5")
+    uf850_hand = LaunchConfiguration("uf850_hand")
+    xarm5_hand = LaunchConfiguration("xarm5_hand")
 
     webcam_tracker = Node(
         package="arm_teleop",
         executable="webcam_hand_tracker",
         name="webcam_hand_tracker",
         output="screen",
-        parameters=[config_file],
+        parameters=[
+            config_file,
+            {
+                "enable_uf850": enable_uf850,
+                "enable_xarm5": enable_xarm5,
+                "uf850.hand": uf850_hand,
+                "xarm5.hand": xarm5_hand,
+            },
+        ],
     )
 
     wait_for_exotica = Node(
@@ -49,6 +59,8 @@ def generate_launch_description():
                 "use_sim_time": use_sim_time,
                 "enable_uf850": enable_uf850,
                 "enable_xarm5": enable_xarm5,
+                "uf850.hand": uf850_hand,
+                "xarm5.hand": xarm5_hand,
             },
         ],
     )
@@ -66,6 +78,8 @@ def generate_launch_description():
             DeclareLaunchArgument("exotica_ready_timeout", default_value="90.0"),
             DeclareLaunchArgument("enable_uf850", default_value="true"),
             DeclareLaunchArgument("enable_xarm5", default_value="true"),
+            DeclareLaunchArgument("uf850_hand", default_value="right"),
+            DeclareLaunchArgument("xarm5_hand", default_value="left"),
             DeclareLaunchArgument(
                 "config_file",
                 default_value=str(package_share / "config" / "webcam_exotica_teleop.yaml"),

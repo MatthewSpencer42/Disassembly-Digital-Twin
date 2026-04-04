@@ -14,12 +14,16 @@ webcam_hand_tracker:
     pinky_pinch_off_threshold: 0.080
     fist_on_threshold: 0.085
     fist_off_threshold: 0.110
+    depth_scale_gain: 0.80
+    depth_raw_blend: 0.15
 
 exotica_arm_teleop:
   ros__parameters:
     control_rate_hz: 15.0
     enable_uf850: true
     enable_xarm5: true
+    uf850.hand: right
+    xarm5.hand: left
     tracking_timeout_sec: 0.35
     translation_scale: 1.0
     translation_scale_xyz: [1.4, 1.4, 2.6]
@@ -32,6 +36,10 @@ exotica_arm_teleop:
     max_target_step_m: 0.03
     workspace_min: [-0.70, -0.85, 0.00]
     workspace_max: [0.90, 0.85, 1.20]
+    uf850.min_tcp_x: 0.647599
+    uf850.max_tcp_x: 1.24581
+    xarm5.min_tcp_x: 0.659775
+    xarm5.max_tcp_x: 1.11148
     camera_to_base_rotation:
       [0.0, 0.0, 1.0,
        -1.0, 0.0, 0.0,

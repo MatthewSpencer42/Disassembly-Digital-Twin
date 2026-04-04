@@ -48,9 +48,15 @@ class ExoticaArmTeleop(Node):
         self.declare_parameter("planner_init_delay_sec", 8.0)
         self.declare_parameter("enable_uf850", True)
         self.declare_parameter("enable_xarm5", True)
+        self.declare_parameter("uf850.hand", "right")
+        self.declare_parameter("xarm5.hand", "left")
         self.declare_parameter("workspace_min", [-0.70, -0.85, 0.00])
         self.declare_parameter("workspace_max", [0.90, 0.85, 1.20])
+        self.declare_parameter("uf850.min_tcp_x", 0.647599)
+        self.declare_parameter("uf850.max_tcp_x", 1.24581)
         self.declare_parameter("uf850.min_tcp_z", 0.92962)
+        self.declare_parameter("xarm5.min_tcp_x", 0.659775)
+        self.declare_parameter("xarm5.max_tcp_x", 1.11148)
         self.declare_parameter("xarm5.min_tcp_z", 0.91775)
         self.declare_parameter("camera_to_base_rotation", [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
         self.declare_parameter("uf850.track_orientation", True)
@@ -91,56 +97,79 @@ class ExoticaArmTeleop(Node):
             "right": self.create_publisher(Bool, "/teleop_status/right_arm_enabled", 10),
             "left": self.create_publisher(Bool, "/teleop_status/left_arm_enabled", 10),
         }
+        uf850_enabled = bool(self.get_parameter("enable_uf850").value)
+        xarm5_enabled = bool(self.get_parameter("enable_xarm5").value)
+        uf850_hand = self._normalize_hand_name(str(self.get_parameter("uf850.hand").value), "uf850", "right")
+        xarm5_hand = self._normalize_hand_name(str(self.get_parameter("xarm5.hand").value), "xarm5", "left")
+        if uf850_enabled and xarm5_enabled and uf850_hand == xarm5_hand:
+            fallback = "left" if uf850_hand == "right" else "right"
+            self.get_logger().warning(
+                f"uf850.hand and xarm5.hand both resolved to '{uf850_hand}'. "
+                f"Forcing xarm5.hand to '{fallback}'."
+            )
+            xarm5_hand = fallback
 
-        self._arms = {
-            "right": {
-                "label": "right/uf850",
-                "planner_group": "uf850_arm",
-                "backend": MotionBackend(self, "uf850_arm", defer_exotica_init=True),
-                "min_tcp_z": float(self.get_parameter("uf850.min_tcp_z").value),
-                "track_orientation": bool(self.get_parameter("uf850.track_orientation").value),
-                "origin_hand_pos": None,
-                "origin_hand_quat": None,
-                "origin_robot_pos": None,
-                "origin_robot_quat": None,
-                "target_pose": None,
-                "seed_joints": None,
-                "last_command_time": 0.0,
-                "last_planner_retry_time": 0.0,
-                "last_planner_error_time": 0.0,
-                "teleop_allowed": bool(self.get_parameter("enable_uf850").value),
-                "enabled": False,
-                "calibrated": False,
-                "gripper_backend": MotionBackend(self, "rg6_gripper"),
-                "gripper_open_position": -0.625,
-                "gripper_closed_position": 0.625,
-                "gripper_closed": False,
-            },
-            "left": {
-                "label": "left/xarm5",
-                "planner_group": "xarm5_arm_no_slide",
-                "backend": MotionBackend(self, "xarm5_arm", defer_exotica_init=True),
-                "min_tcp_z": float(self.get_parameter("xarm5.min_tcp_z").value),
-                "track_orientation": False,
-                "origin_hand_pos": None,
-                "origin_hand_quat": None,
-                "origin_robot_pos": None,
-                "origin_robot_quat": None,
-                "target_pose": None,
-                "seed_joints": None,
-                "last_command_time": 0.0,
-                "last_planner_retry_time": 0.0,
-                "last_planner_error_time": 0.0,
-                "teleop_allowed": bool(self.get_parameter("enable_xarm5").value),
-                "enabled": False,
-                "calibrated": False,
-                "gripper_backend": MotionBackend(self, "xarm_gripper"),
-                "gripper_joint_name": "xarm_gripper_right_drive_joint",
-                "gripper_open_position": 0.0,
-                "gripper_closed_position": 0.854,
-                "gripper_closed": False,
-            },
+        uf850_arm = {
+            "robot_name": "uf850",
+            "label": f"{uf850_hand}/uf850",
+            "planner_group": "uf850_arm",
+            "backend": MotionBackend(self, "uf850_arm", defer_exotica_init=True),
+            "min_tcp_x": float(self.get_parameter("uf850.min_tcp_x").value),
+            "max_tcp_x": float(self.get_parameter("uf850.max_tcp_x").value),
+            "min_tcp_z": float(self.get_parameter("uf850.min_tcp_z").value),
+            "track_orientation": bool(self.get_parameter("uf850.track_orientation").value),
+            "origin_hand_pos": None,
+            "origin_hand_quat": None,
+            "origin_robot_pos": None,
+            "origin_robot_quat": None,
+            "target_pose": None,
+            "seed_joints": None,
+            "last_command_time": 0.0,
+            "last_planner_retry_time": 0.0,
+            "last_planner_error_time": 0.0,
+            "last_limit_log_time": 0.0,
+            "teleop_allowed": uf850_enabled,
+            "enabled": False,
+            "calibrated": False,
+            "gripper_backend": MotionBackend(self, "rg6_gripper"),
+            "gripper_open_position": -0.625,
+            "gripper_closed_position": 0.625,
+            "gripper_closed": False,
         }
+        xarm5_arm = {
+            "robot_name": "xarm5",
+            "label": f"{xarm5_hand}/xarm5",
+            "planner_group": "xarm5_arm_no_slide",
+            "backend": MotionBackend(self, "xarm5_arm", defer_exotica_init=True),
+            "min_tcp_x": float(self.get_parameter("xarm5.min_tcp_x").value),
+            "max_tcp_x": float(self.get_parameter("xarm5.max_tcp_x").value),
+            "min_tcp_z": float(self.get_parameter("xarm5.min_tcp_z").value),
+            "track_orientation": False,
+            "origin_hand_pos": None,
+            "origin_hand_quat": None,
+            "origin_robot_pos": None,
+            "origin_robot_quat": None,
+            "target_pose": None,
+            "seed_joints": None,
+            "last_command_time": 0.0,
+            "last_planner_retry_time": 0.0,
+            "last_planner_error_time": 0.0,
+            "last_limit_log_time": 0.0,
+            "teleop_allowed": xarm5_enabled,
+            "enabled": False,
+            "calibrated": False,
+            "gripper_backend": MotionBackend(self, "xarm_gripper"),
+            "gripper_joint_name": "xarm_gripper_right_drive_joint",
+            "gripper_open_position": 0.0,
+            "gripper_closed_position": 0.854,
+            "gripper_closed": False,
+        }
+        self._arms = {"right": None, "left": None}
+        for hand_name, arm in sorted(
+            [(uf850_hand, uf850_arm), (xarm5_hand, xarm5_arm)],
+            key=lambda item: bool(item[1]["teleop_allowed"]),
+        ):
+            self._arms[hand_name] = arm
 
         self.create_subscription(
             PoseStamped,
@@ -198,10 +227,20 @@ class ExoticaArmTeleop(Node):
             callback_group=self._cb_group,
         )
         self.get_logger().info(
-            "EXOTica arm teleop node started. Fist toggles arm teleop, and pinky pinch toggles gripper open/close. "
+            f"EXOTica arm teleop node started. uf850 is on {uf850_hand}, xarm5 is on {xarm5_hand}. "
+            "Fist toggles arm teleop, and pinky pinch toggles gripper open/close. "
             "xarm5 orientation tracking is locked off."
         )
         self._publish_arm_enabled_status()
+
+    def _normalize_hand_name(self, value: str, robot_name: str, default: str) -> str:
+        hand = value.strip().lower()
+        if hand in ("left", "right"):
+            return hand
+        self.get_logger().warning(
+            f"Invalid {robot_name}.hand='{value}'. Falling back to '{default}'."
+        )
+        return default
 
     def _right_cb(self, msg: PoseStamped):
         self._store_hand_state("right", msg)
@@ -230,6 +269,8 @@ class ExoticaArmTeleop(Node):
         self._fist_state[hand] = current
         if current and not previous:
             arm = self._arms[hand]
+            if arm is None:
+                return
             if not arm["teleop_allowed"]:
                 self.get_logger().info(f"[{arm['label']}] Teleoperation is disabled by launch configuration.")
                 return
@@ -245,6 +286,8 @@ class ExoticaArmTeleop(Node):
         self._pinky_pinch_state[hand] = current
         if current and not previous:
             arm = self._arms[hand]
+            if arm is None:
+                return
             if not arm["teleop_allowed"]:
                 return
             arm["gripper_closed"] = not arm["gripper_closed"]
@@ -257,6 +300,8 @@ class ExoticaArmTeleop(Node):
 
     def _publish_arm_enabled_status(self):
         for hand_name, arm in self._arms.items():
+            if arm is None:
+                continue
             msg = Bool()
             msg.data = bool(arm["enabled"] and arm["teleop_allowed"])
             self._status_pub[hand_name].publish(msg)
@@ -273,6 +318,8 @@ class ExoticaArmTeleop(Node):
 
     def _handle_recalibrate(self, _request, response):
         for arm in self._arms.values():
+            if arm is None:
+                continue
             arm["calibrated"] = False
             arm["origin_hand_pos"] = None
             arm["origin_hand_quat"] = None
@@ -388,15 +435,36 @@ class ExoticaArmTeleop(Node):
         return True
 
     def _clamp_position(self, arm: dict, position):
+        min_x = float(arm.get("min_tcp_x", self._workspace_min[0]))
+        max_x = float(arm.get("max_tcp_x", self._workspace_max[0]))
         min_z = max(
             float(self._workspace_min[2]),
             float(arm.get("min_tcp_z", arm["backend"].min_tcp_z or self._workspace_min[2])),
         )
-        return [
-            clamp(position[0], self._workspace_min[0], self._workspace_max[0]),
-            clamp(position[1], self._workspace_min[1], self._workspace_max[1]),
-            clamp(position[2], min_z, self._workspace_max[2]),
-        ]
+        clamped_min_x = max(self._workspace_min[0], min_x)
+        clamped_max_x = min(self._workspace_max[0], max_x)
+        clamped_x = clamp(position[0], clamped_min_x, clamped_max_x)
+        clamped_y = clamp(position[1], self._workspace_min[1], self._workspace_max[1])
+        clamped_z = clamp(position[2], min_z, self._workspace_max[2])
+
+        now = time.monotonic()
+        if now - arm["last_limit_log_time"] > 1.0:
+            if clamped_x != position[0]:
+                direction = "backward" if position[0] < clamped_min_x else "forward"
+                limit_x = clamped_min_x if direction == "backward" else clamped_max_x
+                self.get_logger().warning(
+                    f"[{arm['label']}] TCP {direction} X limit reached: requested x={position[0]:.5f}, "
+                    f"clamped to x={limit_x:.5f}."
+                )
+                arm["last_limit_log_time"] = now
+            elif clamped_z != position[2]:
+                self.get_logger().warning(
+                    f"[{arm['label']}] TCP lower Z limit reached: requested z={position[2]:.5f}, "
+                    f"clamped to z={min_z:.5f}."
+                )
+                arm["last_limit_log_time"] = now
+
+        return [clamped_x, clamped_y, clamped_z]
 
     def _target_from_hand(self, hand_name: str, arm: dict):
         hand_pose = self._hand_pose(hand_name)
@@ -485,7 +553,11 @@ class ExoticaArmTeleop(Node):
         arm["last_command_time"] = time.monotonic()
 
     def _tick(self):
-        enabled_arms = [arm for arm in self._arms.values() if arm["enabled"] and arm["teleop_allowed"]]
+        enabled_arms = [
+            arm
+            for arm in self._arms.values()
+            if arm is not None and arm["enabled"] and arm["teleop_allowed"]
+        ]
         if not enabled_arms:
             now = time.monotonic()
             if now - self._last_status_log > 1.5:
@@ -497,6 +569,8 @@ class ExoticaArmTeleop(Node):
 
         active_hands = 0
         for hand_name, arm in self._arms.items():
+            if arm is None:
+                continue
             if not arm["enabled"] or not arm["teleop_allowed"]:
                 continue
             if not arm["calibrated"]:

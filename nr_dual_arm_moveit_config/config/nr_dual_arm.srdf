@@ -170,6 +170,8 @@
   <disable_collisions link1="xarm_gripper_left_outer_knuckle" link2="xarm_gripper_left_finger" reason="Adjacent"/>
   <disable_collisions link1="xarm_gripper_right_outer_knuckle" link2="xarm_gripper_right_finger" reason="Adjacent"/>
   <disable_collisions link1="xarm_gripper_left_finger" link2="xarm_gripper_right_finger" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="rg6_L_inner_knuckle" reason="Never"/>
+  <disable_collisions link1="base_link" link2="rg6_R_inner_knuckle" reason="Never"/>
   <disable_collisions link1="rg6_R_inner_knuckle" link2="xarm_gripper_base_link" reason="Never"/>
   <disable_collisions link1="rg6_R_inner_knuckle" link2="xarm_gripper_left_outer_knuckle" reason="Never"/>
 </robot>
