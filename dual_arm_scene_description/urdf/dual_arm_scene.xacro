@@ -1,0 +1,849 @@
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="dual_arm_scene">
+  <xacro:arg name="prefix" default=""/>
+  <xacro:property name="base_color" value="0.6 0.6 0.6 1.0"/>
+  <xacro:property name="arm_color" value="0.2 0.2 0.2 1.0"/>
+  <xacro:property name="tool_color" value="0.1 0.35 0.85 1.0"/>
+  <xacro:macro name="dual_arm_scene" params="prefix">
+    <link name="${prefix}base_link">
+      <visual name="base_link_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/base_link.stl"/>
+        </geometry>
+        <material name="${prefix}base_link-material">
+          <color rgba="${base_color}"/>
+        </material>
+      </visual>
+      <collision name="base_link_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/base_link.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="549.24217"/>
+        <inertia ixx="733.29925" iyy="218.6186" izz="856.04667" ixy="10.147329" ixz="-0.50042511" iyz="-1.0615484"/>
+        <origin xyz="1.1342409 -0.022106511 0.66159052" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf850_mount">
+      <visual name="uf850_mount_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_mount.stl"/>
+        </geometry>
+        <material name="${prefix}uf850_mount-material">
+          <color rgba="${base_color}"/>
+        </material>
+      </visual>
+      <collision name="uf850_mount_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_mount.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.91397158"/>
+        <inertia ixx="0.0064874" iyy="0.0032770648" izz="0.0097492319" ixy="0" ixz="0" iyz="0"/>
+        <origin xyz="0.08 -0.115 -0.005" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf_linear_slide">
+      <visual name="uf_linear_slide_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf_linear_slide.stl"/>
+        </geometry>
+        <material name="${prefix}uf_linear_slide-material">
+          <color rgba="${base_color}"/>
+        </material>
+      </visual>
+      <collision name="uf_linear_slide_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf_linear_slide.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="13.780609"/>
+        <inertia ixx="1.4800795" iyy="0.047827573" izz="1.5098231" ixy="-0.011257312" ixz="0.0017214077" iyz="0.010344226"/>
+        <origin xyz="0.11762264 0.41988986 0.057871539" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf850_base_link">
+      <visual name="uf850_base_link_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_base_link.stl"/>
+        </geometry>
+        <material name="${prefix}uf850_base_link-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="uf850_base_link_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_base_link.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="6.1347631"/>
+        <inertia ixx="0.025885384" iyy="0.026065474" izz="0.013220454" ixy="-8.6579761e-06" ixz="0.00018118802" iyz="3.5894686e-06"/>
+        <origin xyz="-0.00053628339 -1.3586888e-05 -0.085936381" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}robot_base">
+      <visual name="robot_base_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/robot_base.stl"/>
+        </geometry>
+        <material name="${prefix}robot_base-material">
+          <color rgba="${base_color}"/>
+        </material>
+      </visual>
+      <collision name="robot_base_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/robot_base.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="3.0226509"/>
+        <inertia ixx="0.008081761" iyy="0.013190464" izz="0.0076576256" ixy="0.00014252542" ixz="-8.059066e-05" iyz="-0.00016414733"/>
+        <origin xyz="0.042237311 0.016079055 -0.080030822" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf850_link1">
+      <visual name="uf850_link1_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link1.stl"/>
+        </geometry>
+        <material name="${prefix}uf850_link1-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="uf850_link1_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link1.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="6.9729982"/>
+        <inertia ixx="0.043536443" iyy="0.039070397" izz="0.016947432" ixy="2.0332184e-07" ixz="-1.851567e-06" iyz="-0.0087134974"/>
+        <origin xyz="-1.8025511e-07 -0.034154821 -0.12261622" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}xarm5_base_link">
+      <visual name="xarm5_base_link_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_base_link.stl"/>
+        </geometry>
+        <material name="${prefix}xarm5_base_link-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="xarm5_base_link_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_base_link.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="3.1583482"/>
+        <inertia ixx="0.0085658784" iyy="0.0088387465" izz="0.0040557663" ixy="-2.024796e-05" ixz="0.00021895582" iyz="1.3252924e-05"/>
+        <origin xyz="-0.0014979471 -9.0589713e-05 -0.073474016" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf850_link2">
+      <visual name="uf850_link2_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link2.stl"/>
+        </geometry>
+        <material name="${prefix}uf850_link2-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="uf850_link2_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link2.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="10.601221"/>
+        <inertia ixx="0.2482622" iyy="0.020311329" izz="0.24261629" ixy="-7.1542664e-05" ixz="1.0682502e-05" iyz="0.011299878"/>
+        <origin xyz="7.3435267e-05 -0.2030649 -0.016982096" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}xarm5_link1">
+      <visual name="xarm5_link1_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link1.stl"/>
+        </geometry>
+        <material name="${prefix}xarm5_link1-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="xarm5_link1_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link1.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="3.5791665"/>
+        <inertia ixx="0.010550565" iyy="0.0087399248" izz="0.0059189553" ixy="8.177212e-06" ixz="2.0212036e-05" iyz="-0.0011146261"/>
+        <origin xyz="0.00021235348 -0.0073942765 -0.085087873" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf850_link3">
+      <visual name="uf850_link3_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link3.stl"/>
+        </geometry>
+        <material name="${prefix}uf850_link3-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="uf850_link3_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link3.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="5.23551"/>
+        <inertia ixx="0.021597943" iyy="0.031115493" izz="0.037495841" ixy="0.013073745" ixz="-0.010248815" iyz="0.0062938513"/>
+        <origin xyz="0.086353664 -0.048344011 0.00055238284" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}xarm5_link2">
+      <visual name="xarm5_link2_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link2.stl"/>
+        </geometry>
+        <material name="${prefix}xarm5_link2-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="xarm5_link2_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link2.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="7.2722633"/>
+        <inertia ixx="0.082610262" iyy="0.023710208" izz="0.073292367" ixy="-0.011770775" ixz="-0.0021405121" iyz="-0.020572966"/>
+        <origin xyz="0.013521662 0.16507498 0.048718175" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf850_link4">
+      <visual name="uf850_link4_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link4.stl"/>
+        </geometry>
+        <material name="${prefix}uf850_link4-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="uf850_link4_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link4.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="4.0108671"/>
+        <inertia ixx="0.035970331" iyy="0.030476726" izz="0.0091258856" ixy="1.6955558e-07" ixz="-4.6731111e-07" iyz="0.011440433"/>
+        <origin xyz="-1.1537079e-06 0.031961306 -0.12982161" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}xarm5_link3">
+      <visual name="xarm5_link3_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link3.stl"/>
+        </geometry>
+        <material name="${prefix}xarm5_link3-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="xarm5_link3_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link3.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="5.6490394"/>
+        <inertia ixx="0.080376695" iyy="0.020081396" izz="0.070824751" ixy="0.0070825826" ixz="-0.0037563174" iyz="0.024429402"/>
+        <origin xyz="0.068753242 -0.15300411 0.0563031" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf850_link5">
+      <visual name="uf850_link5_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link5.stl"/>
+        </geometry>
+        <material name="${prefix}uf850_link5-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="uf850_link5_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link5.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="2.1315343"/>
+        <inertia ixx="0.0039613529" iyy="0.0021080459" izz="0.0037634343" ixy="9.2075896e-09" ixz="3.2462041e-09" iyz="-3.9430409e-05"/>
+        <origin xyz="-7.1926445e-08 -0.0050560953 -0.046841769" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}xarm5_link4">
+      <visual name="xarm5_link4_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link4.stl"/>
+        </geometry>
+        <material name="${prefix}xarm5_link4-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="xarm5_link4_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link4.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="1.9522702"/>
+        <inertia ixx="0.002272531" iyy="0.003927311" izz="0.0045049523" ixy="0.00058789752" ixz="-0.00074644602" iyz="0.00019643157"/>
+        <origin xyz="0.048945115 -0.01137903 -0.013354913" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}uf850_link6">
+      <visual name="uf850_link6_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link6.stl"/>
+        </geometry>
+        <material name="${prefix}uf850_link6-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="uf850_link6_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/uf850_link6.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.38311395"/>
+        <inertia ixx="0.00018268682" iyy="0.00018916833" izz="0.00032456541" ixy="7.4864006e-07" ixz="2.2296854e-08" iyz="-8.0720786e-08"/>
+        <origin xyz="-4.7049978e-05 -0.000639241 -0.013226374" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}xarm5_link5">
+      <visual name="xarm5_link5_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link5.stl"/>
+        </geometry>
+        <material name="${prefix}xarm5_link5-material">
+          <color rgba="${arm_color}"/>
+        </material>
+      </visual>
+      <collision name="xarm5_link5_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_link5.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.31347631"/>
+        <inertia ixx="0.00014060656" iyy="0.00013209912" izz="0.00023390056" ixy="2.5537431e-13" ixz="6.0283601e-14" iyz="-1.2386858e-06"/>
+        <origin xyz="-2.5931612e-09 0.00045209427 -0.013211346" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_base_link">
+      <visual name="rg6_base_link_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_base_link.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_base_link-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_base_link_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_base_link.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.29794959"/>
+        <inertia ixx="0.00030155921" iyy="0.00017224758" izz="0.00029329168" ixy="-9.1330905e-07" ixz="-1.292902e-06" iyz="-7.6520006e-06"/>
+        <origin xyz="0.00046280724 0.0020030391 -0.022256357" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}FT300">
+      <visual name="FT300_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/FT300.stl"/>
+        </geometry>
+        <material name="${prefix}FT300-material">
+          <color rgba="0 0 0 1"/>
+        </material>
+      </visual>
+      <collision name="FT300_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/FT300.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.24063702"/>
+        <inertia ixx="0.00011912576" iyy="0.0001205787" izz="0.00020482965" ixy="3.7501218e-09" ixz="4.5388661e-07" iyz="8.8806781e-08"/>
+        <origin xyz="-0.0001205708 -0.00012895792 -0.019639653" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_Back_body">
+      <visual name="rg6_Back_body_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_Back_body.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_Back_body-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_Back_body_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_Back_body.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.38230136"/>
+        <inertia ixx="0.00065958426" iyy="0.00013502186" izz="0.00055934564" ixy="4.4536041e-06" ixz="3.2349428e-08" iyz="-1.6181368e-07"/>
+        <origin xyz="-0.010986152 0.041520154 -0.030010315" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}xarm5_camera_stand">
+      <visual name="xarm5_camera_stand_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_camera_stand.stl"/>
+        </geometry>
+        <material name="${prefix}xarm5_camera_stand-material">
+          <color rgba="1 1 1 1"/>
+        </material>
+      </visual>
+      <collision name="xarm5_camera_stand_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/xarm5_camera_stand.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.1104411"/>
+        <inertia ixx="4.2570553e-05" iyy="7.0343976e-05" izz="0.00010474192" ixy="5.2146776e-11" ixz="1.3989008e-06" iyz="-7.3688256e-14"/>
+        <origin xyz="0.0091160266 -2.0240707e-08 -0.013795876" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_R_outer_knuckle">
+      <visual name="rg6_R_outer_knuckle_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_R_outer_knuckle.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_R_outer_knuckle-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_R_outer_knuckle_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_R_outer_knuckle.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.083221188"/>
+        <inertia ixx="3.7810855e-05" iyy="2.6099927e-05" izz="5.4951758e-05" ixy="2.2538678e-05" ixz="-6.3336901e-12" iyz="4.7821319e-11"/>
+        <origin xyz="-0.010492693 0.012793145 -0.011700071" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_R_inner_knuckle">
+      <visual name="rg6_R_inner_knuckle_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_R_inner_knuckle.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_R_inner_knuckle-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_R_inner_knuckle_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_R_inner_knuckle.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.019635968"/>
+        <inertia ixx="1.2106238e-05" iyy="7.3603352e-06" izz="1.6470644e-05" ixy="7.6980405e-06" ixz="1.6913473e-09" iyz="6.2397089e-10"/>
+        <origin xyz="-0.020590853 0.028991487 -0.012504883" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_L_outer_knuckle">
+      <visual name="rg6_L_outer_knuckle_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_L_outer_knuckle.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_L_outer_knuckle-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_L_outer_knuckle_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_L_outer_knuckle.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.083221256"/>
+        <inertia ixx="3.7810884e-05" iyy="2.6099944e-05" izz="5.4951797e-05" ixy="-2.2538697e-05" ixz="7.8131974e-12" iyz="4.875507e-11"/>
+        <origin xyz="0.010492702 0.012793158 -0.011700069" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_L_inner_knuckle">
+      <visual name="rg6_L_inner_knuckle_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_L_inner_knuckle.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_L_inner_knuckle-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_L_inner_knuckle_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_L_inner_knuckle.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.019635982"/>
+        <inertia ixx="1.2106246e-05" iyy="7.3603367e-06" izz="1.6470652e-05" ixy="-7.6980429e-06" ixz="-1.6917857e-09" iyz="6.2282266e-10"/>
+        <origin xyz="0.02059085 0.028991474 -0.012504888" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_Front_body">
+      <visual name="rg6_Front_body_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_Front_body.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_Front_body-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_Front_body_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_Front_body.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.36432444"/>
+        <inertia ixx="0.00046824133" iyy="0.00012962675" izz="0.0005726482" ixy="5.3248347e-07" ixz="-1.0602202e-07" iyz="2.0286257e-05"/>
+        <origin xyz="1.6009407e-05 -0.060387084 0.012229456" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}screwdriver_base_link">
+      <visual name="screwdriver_base_link_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/screwdriver_base_link.stl"/>
+        </geometry>
+        <material name="${prefix}screwdriver_base_link-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="screwdriver_base_link_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/screwdriver_base_link.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.24840634"/>
+        <inertia ixx="0.00061812846" iyy="0.00061265239" izz="0.0001146735" ixy="-3.2263112e-08" ixz="-2.3561274e-05" iyz="-7.9652415e-08"/>
+        <origin xyz="-0.0026276097 -4.1511275e-06 -0.061725726" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_tcp"/>
+    <link name="${prefix}screwdriver_tcp"/>
+    <link name="${prefix}rg6_R_finger">
+      <visual name="rg6_R_finger_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_R_finger.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_R_finger-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_R_finger_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_R_finger.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.044254862"/>
+        <inertia ixx="1.7085241e-05" iyy="3.7916114e-06" izz="1.7746903e-05" ixy="-4.5294223e-06" ixz="-3.1387148e-09" iyz="-3.3651828e-08"/>
+        <origin xyz="0.014353439 0.034394264 -0.0073473275" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <link name="${prefix}rg6_L_finger">
+      <visual name="rg6_L_finger_visual">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_L_finger.stl"/>
+        </geometry>
+        <material name="${prefix}rg6_L_finger-material">
+          <color rgba="${tool_color}"/>
+        </material>
+      </visual>
+      <collision name="rg6_L_finger_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://dual_arm_scene_description/meshes/rg6_L_finger.stl"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.044254855"/>
+        <inertia ixx="1.7085238e-05" iyy="3.791611e-06" izz="1.77469e-05" ixy="4.5294216e-06" ixz="3.1388101e-09" iyz="-3.3651754e-08"/>
+        <origin xyz="-0.014353439 0.034394266 -0.007347327" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <joint name="${prefix}uf850_mount_scene_joint" type="fixed">
+      <origin xyz="0.381 -0.4075 0.8377" rpy="3.1415927 0 0"/>
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}uf850_mount"/>
+    </joint>
+    <joint name="${prefix}uf_slide_scene_joint" type="fixed">
+      <origin xyz="0.334 0.34385 0.8377" rpy="0 0 0"/>
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}uf_linear_slide"/>
+    </joint>
+    <joint name="${prefix}uf850_mount_joint" type="fixed">
+      <origin xyz="0.08 -0.115 -0.01" rpy="0 0 0"/>
+      <parent link="${prefix}uf850_mount"/>
+      <child link="${prefix}uf850_base_link"/>
+    </joint>
+    <joint name="${prefix}uf_slide_joint" type="prismatic">
+      <origin xyz="0.08550038 -0.01575 0.0805" rpy="1.5707963 0 0"/>
+      <parent link="${prefix}uf_linear_slide"/>
+      <child link="${prefix}robot_base"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1" velocity="1" lower="0.05356" upper="0.64644"/>
+    </joint>
+    <joint name="${prefix}uf850_joint1" type="revolute">
+      <origin xyz="0 0 -0.18525" rpy="0 0 0"/>
+      <parent link="${prefix}uf850_base_link"/>
+      <child link="${prefix}uf850_link1"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="200.0" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}xarm5_scene_joint" type="fixed">
+      <origin xyz="0.043 0.0565 -0.07545" rpy="1.5707963 0 0"/>
+      <parent link="${prefix}robot_base"/>
+      <child link="${prefix}xarm5_base_link"/>
+    </joint>
+    <joint name="${prefix}uf850_joint2" type="revolute">
+      <origin xyz="0 0.015 -0.1785" rpy="1.5707963 0 0"/>
+      <parent link="${prefix}uf850_link1"/>
+      <child link="${prefix}uf850_link2"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="200.0" velocity="1" lower="-2.3038346" upper="2.3038346"/>
+    </joint>
+    <joint name="${prefix}xarm5_joint1" type="revolute">
+      <origin xyz="0 0 -0.1548" rpy="0 0 0"/>
+      <parent link="${prefix}xarm5_base_link"/>
+      <child link="${prefix}xarm5_link1"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="50" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}uf850_joint3" type="revolute">
+      <origin xyz="1.219e-05 -0.38999826 0.045" rpy="3.1415927 0 0"/>
+      <parent link="${prefix}uf850_link2"/>
+      <child link="${prefix}uf850_link3"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="90.0" velocity="1" lower="-4.2236968" upper="0.061086524"/>
+    </joint>
+    <joint name="${prefix}xarm5_joint2" type="revolute">
+      <origin xyz="0.00034962 -0.07529504 -0.112" rpy="-1.5707963 0 0"/>
+      <parent link="${prefix}xarm5_link1"/>
+      <child link="${prefix}xarm5_link2"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="50" velocity="1" lower="-2.0594885" upper="2.0943951"/>
+    </joint>
+    <joint name="${prefix}uf850_joint4" type="revolute">
+      <origin xyz="0.14998963 -0.15949114 0.03" rpy="-1.5707963 0 0"/>
+      <parent link="${prefix}uf850_link3"/>
+      <child link="${prefix}uf850_link4"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="68.0" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}xarm5_joint3" type="revolute">
+      <origin xyz="0.05330865 0.28454968 0.00830262" rpy="0 0 0"/>
+      <parent link="${prefix}xarm5_link2"/>
+      <child link="${prefix}xarm5_link3"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="30" velocity="1" lower="-3.9269908" upper="0.19198622"/>
+    </joint>
+    <joint name="${prefix}uf850_joint5" type="revolute">
+      <origin xyz="-4e-08 0.05100032 -0.266" rpy="-1.5707963 0 0"/>
+      <parent link="${prefix}uf850_link4"/>
+      <child link="${prefix}uf850_link5"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="19.0" velocity="1" lower="-2.1542083" upper="2.1542083"/>
+    </joint>
+    <joint name="${prefix}xarm5_joint4" type="revolute">
+      <origin xyz="0.07784991 -0.34207971 0.07224863" rpy="0 0 0"/>
+      <parent link="${prefix}xarm5_link3"/>
+      <child link="${prefix}xarm5_link4"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="20" velocity="1" lower="-1.6929694" upper="3.1415927"/>
+    </joint>
+    <joint name="${prefix}uf850_joint6" type="revolute">
+      <origin xyz="0 0.0594 -0.0505" rpy="1.5707963 0 0"/>
+      <parent link="${prefix}uf850_link5"/>
+      <child link="${prefix}uf850_link6"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="19.0" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}xarm5_joint5" type="revolute">
+      <origin xyz="0.07600955 -0.06877066 -0.00433893" rpy="-1.5707963 0 0"/>
+      <parent link="${prefix}xarm5_link4"/>
+      <child link="${prefix}xarm5_link5"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="20" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}rg6_uf850_joint" type="fixed">
+      <origin xyz="0 0 -0.03" rpy="0 0 0"/>
+      <parent link="${prefix}uf850_link6"/>
+      <child link="${prefix}rg6_base_link"/>
+    </joint>
+    <joint name="${prefix}xarm5_ft300_joint" type="fixed">
+      <origin xyz="0 0 -0.028" rpy="0 0 0"/>
+      <parent link="${prefix}xarm5_link5"/>
+      <child link="${prefix}FT300"/>
+    </joint>
+    <joint name="${prefix}rg6_base_link_joint" type="fixed">
+      <origin xyz="0 0.03005 -0.0526" rpy="-1.5707963 0 0"/>
+      <parent link="${prefix}rg6_base_link"/>
+      <child link="${prefix}rg6_Back_body"/>
+    </joint>
+    <joint name="${prefix}xarm5_ft300_camera_stand_joint" type="fixed">
+      <origin xyz="0 0 -0.0283" rpy="0 0 0"/>
+      <parent link="${prefix}FT300"/>
+      <child link="${prefix}xarm5_camera_stand"/>
+    </joint>
+    <joint name="${prefix}rg6_right_drive_joint" type="revolute">
+      <origin xyz="-0.0117 0.085 -0.0538" rpy="0 -1.5707963 0"/>
+      <parent link="${prefix}rg6_Back_body"/>
+      <child link="${prefix}rg6_R_outer_knuckle"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1000" velocity="1" lower="-0.625" upper="0.625"/>
+    </joint>
+    <joint name="${prefix}rg6_right_inner_joint" type="revolute">
+      <origin xyz="-0.0126 0.1081 -0.0405" rpy="0 -1.5707963 0"/>
+      <parent link="${prefix}rg6_Back_body"/>
+      <child link="${prefix}rg6_R_inner_knuckle"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1000" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}rg6_left_drive_joint" type="revolute">
+      <origin xyz="-0.0117 0.085 -0.0062" rpy="0 -1.5707963 0"/>
+      <parent link="${prefix}rg6_Back_body"/>
+      <child link="${prefix}rg6_L_outer_knuckle"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1000" velocity="1" lower="-0.625" upper="0.625"/>
+    </joint>
+    <joint name="${prefix}rg6_left_inner_joint" type="revolute">
+      <origin xyz="-0.0126 0.1081 -0.0195" rpy="0 -1.5707963 0"/>
+      <parent link="${prefix}rg6_Back_body"/>
+      <child link="${prefix}rg6_L_inner_knuckle"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1000" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}rg6_body_joint" type="fixed">
+      <origin xyz="-0.0005 -0.022 -0.03" rpy="3.1415927 -1.5707963 0"/>
+      <parent link="${prefix}rg6_Back_body"/>
+      <child link="${prefix}rg6_Front_body"/>
+    </joint>
+    <joint name="${prefix}xarm5_camera_stand_screwdriver_joint" type="fixed">
+      <origin xyz="0 0 -0.024" rpy="0 0 0"/>
+      <parent link="${prefix}xarm5_camera_stand"/>
+      <child link="${prefix}screwdriver_base_link"/>
+    </joint>
+    <joint name="${prefix}rg6_tcp_joint" type="fixed">
+      <origin xyz="0 0 -0.28" rpy="0 0 0"/>
+      <parent link="${prefix}rg6_base_link"/>
+      <child link="${prefix}rg6_tcp"/>
+    </joint>
+    <joint name="${prefix}screwdriver_tcp_joint" type="fixed">
+      <origin xyz="0 0 -0.2" rpy="0 0 0"/>
+      <parent link="${prefix}screwdriver_base_link"/>
+      <child link="${prefix}screwdriver_tcp"/>
+    </joint>
+    <joint name="${prefix}rg6_right_finger_joint" type="revolute">
+      <origin xyz="-0.04743406 0.06442057 -0.00432" rpy="0 0 0"/>
+      <parent link="${prefix}rg6_R_outer_knuckle"/>
+      <child link="${prefix}rg6_R_finger"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1000" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}rg6_left_finger_joint" type="revolute">
+      <origin xyz="0.04743406 0.06442057 -0.00432" rpy="0 0 0"/>
+      <parent link="${prefix}rg6_L_outer_knuckle"/>
+      <child link="${prefix}rg6_L_finger"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1000" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}rg6_right_ignore_joint" type="revolute">
+      <origin xyz="0.0133 0.0231 0.00522" rpy="0 0 0"/>
+      <parent link="${prefix}rg6_R_finger"/>
+      <child link="${prefix}rg6_R_inner_knuckle"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1000" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+    <joint name="${prefix}rg6_left_ignore_joint" type="revolute">
+      <origin xyz="-0.0133 0.0231 0.00522" rpy="0 0 0"/>
+      <parent link="${prefix}rg6_L_finger"/>
+      <child link="${prefix}rg6_L_inner_knuckle"/>
+      <axis xyz="0 0 -1"/>
+      <limit effort="1000" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+    </joint>
+  </xacro:macro>
+  <xacro:dual_arm_scene prefix="$(arg prefix)"/>
+</robot>

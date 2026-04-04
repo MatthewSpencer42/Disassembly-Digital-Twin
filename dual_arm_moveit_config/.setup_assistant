@@ -1,0 +1,11 @@
+moveit_setup_assistant_config:
+  URDF:
+    package: dual_arm_moveit_config
+    relative_path: config/dual_arm_world.urdf.xacro
+    xacro_args: ""
+  SRDF:
+    relative_path: config/dual_arm_world.srdf
+  CONFIG:
+    author_name: Codex
+    author_email: user@todo.todo
+    generated_timestamp: 1774608000
