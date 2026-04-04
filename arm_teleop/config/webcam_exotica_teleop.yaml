@@ -1,0 +1,31 @@
+webcam_hand_tracker:
+  ros__parameters:
+    camera_index: 0
+    show_visualization: true
+    mirror_view: true
+    max_num_hands: 2
+    min_detection_confidence: 0.6
+    min_tracking_confidence: 0.5
+    publish_rate_hz: 30.0
+    frame_id: webcam_hand_tracking
+    pinch_on_threshold: 0.055
+    pinch_off_threshold: 0.075
+
+exotica_arm_teleop:
+  ros__parameters:
+    control_rate_hz: 15.0
+    tracking_timeout_sec: 0.35
+    translation_scale: 1.0
+    translation_scale_xyz: [1.4, 1.4, 2.6]
+    position_filter_alpha: 0.25
+    orientation_filter_alpha: 0.2
+    joint_filter_alpha: 0.35
+    max_target_step_m: 0.03
+    workspace_min: [-0.70, -0.85, 0.00]
+    workspace_max: [0.90, 0.85, 1.20]
+    camera_to_base_rotation:
+      [0.0, 0.0, 1.0,
+       -1.0, 0.0, 0.0,
+       0.0, 1.0, 0.0]
+    uf850.track_orientation: true
+    xarm5.track_orientation: false

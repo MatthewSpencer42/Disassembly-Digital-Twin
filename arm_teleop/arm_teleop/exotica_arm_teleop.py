@@ -1,0 +1,414 @@
+from __future__ import annotations
+
+import math
+import time
+
+import rclpy
+from geometry_msgs.msg import PoseStamped
+from rclpy.node import Node
+from std_msgs.msg import Bool
+from std_srvs.srv import Trigger
+
+from arm_teleop.hand_math import (
+    clamp,
+    mat_vec_mul,
+    quat_conjugate,
+    quat_multiply,
+    quaternion_slerp,
+    vec_add,
+    vec_scale,
+    vec_sub,
+)
+from dual_arm_moveit_config.motion_backend import MotionBackend
+from dual_arm_moveit_config.exotica_planner import ExoticaSingleArmPosePlanner
+
+
+class ExoticaArmTeleop(Node):
+    def __init__(self):
+        super().__init__("exotica_arm_teleop")
+
+        self.declare_parameter("control_rate_hz", 15.0)
+        self.declare_parameter("hardware_type", "fake")
+        self.declare_parameter("tracking_timeout_sec", 0.35)
+        self.declare_parameter("translation_scale", 1.0)
+        self.declare_parameter("translation_scale_xyz", [1.4, 1.4, 1.8])
+        self.declare_parameter("position_filter_alpha", 0.25)
+        self.declare_parameter("orientation_filter_alpha", 0.2)
+        self.declare_parameter("joint_filter_alpha", 0.35)
+        self.declare_parameter("max_target_step_m", 0.03)
+        self.declare_parameter("planner_retry_sec", 2.0)
+        self.declare_parameter("planner_init_delay_sec", 8.0)
+        self.declare_parameter("workspace_min", [-0.70, -0.85, 0.00])
+        self.declare_parameter("workspace_max", [0.90, 0.85, 1.20])
+        self.declare_parameter("uf850.min_tcp_z", 0.92962)
+        self.declare_parameter("xarm5.min_tcp_z", 0.91775)
+        self.declare_parameter("camera_to_base_rotation", [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+        self.declare_parameter("uf850.track_orientation", True)
+        self.declare_parameter("xarm5.track_orientation", False)
+
+        self._hardware_type = str(self.get_parameter("hardware_type").value)
+        self._rate_hz = max(float(self.get_parameter("control_rate_hz").value), 1.0)
+        self._tracking_timeout = float(self.get_parameter("tracking_timeout_sec").value)
+        self._translation_scale = float(self.get_parameter("translation_scale").value)
+        self._translation_scale_xyz = [float(v) for v in self.get_parameter("translation_scale_xyz").value]
+        self._position_alpha = clamp(float(self.get_parameter("position_filter_alpha").value), 0.01, 1.0)
+        self._orientation_alpha = clamp(float(self.get_parameter("orientation_filter_alpha").value), 0.01, 1.0)
+        self._joint_alpha = clamp(float(self.get_parameter("joint_filter_alpha").value), 0.01, 1.0)
+        self._max_target_step = max(float(self.get_parameter("max_target_step_m").value), 0.002)
+        self._planner_retry_sec = max(float(self.get_parameter("planner_retry_sec").value), 0.5)
+        self._planner_init_delay_sec = max(float(self.get_parameter("planner_init_delay_sec").value), 0.0)
+        self._workspace_min = [float(v) for v in self.get_parameter("workspace_min").value]
+        self._workspace_max = [float(v) for v in self.get_parameter("workspace_max").value]
+        self._node_started_at = time.monotonic()
+
+        rotation_raw = [float(v) for v in self.get_parameter("camera_to_base_rotation").value]
+        self._camera_to_base = [
+            rotation_raw[0:3],
+            rotation_raw[3:6],
+            rotation_raw[6:9],
+        ]
+
+        self._hand_state = {
+            "right": {"msg": None, "stamp": 0.0},
+            "left": {"msg": None, "stamp": 0.0},
+        }
+        self._pinch_state = {"right": False, "left": False}
+        self._status_pub = {
+            "right": self.create_publisher(Bool, "/teleop_status/right_arm_enabled", 10),
+            "left": self.create_publisher(Bool, "/teleop_status/left_arm_enabled", 10),
+        }
+
+        self._arms = {
+            "right": {
+                "label": "right/uf850",
+                "planner_group": "uf850_arm",
+                "backend": MotionBackend(self, "uf850_arm"),
+                "min_tcp_z": float(self.get_parameter("uf850.min_tcp_z").value),
+                "track_orientation": bool(self.get_parameter("uf850.track_orientation").value),
+                "origin_hand_pos": None,
+                "origin_hand_quat": None,
+                "origin_robot_pos": None,
+                "origin_robot_quat": None,
+                "target_pose": None,
+                "seed_joints": None,
+                "last_command_time": 0.0,
+                "last_planner_retry_time": 0.0,
+                "last_planner_error_time": 0.0,
+                "enabled": False,
+                "calibrated": False,
+            },
+            "left": {
+                "label": "left/xarm5",
+                "planner_group": "xarm5_arm_no_slide",
+                "backend": MotionBackend(self, "xarm5_arm"),
+                "min_tcp_z": float(self.get_parameter("xarm5.min_tcp_z").value),
+                "track_orientation": False,
+                "origin_hand_pos": None,
+                "origin_hand_quat": None,
+                "origin_robot_pos": None,
+                "origin_robot_quat": None,
+                "target_pose": None,
+                "seed_joints": None,
+                "last_command_time": 0.0,
+                "last_planner_retry_time": 0.0,
+                "last_planner_error_time": 0.0,
+                "enabled": False,
+                "calibrated": False,
+            },
+        }
+
+        self.create_subscription(PoseStamped, "/teleop_hand_tracking/right/wrist", self._right_cb, 10)
+        self.create_subscription(PoseStamped, "/teleop_hand_tracking/left/wrist", self._left_cb, 10)
+        self.create_subscription(Bool, "/teleop_hand_tracking/right/pinch", self._right_pinch_cb, 10)
+        self.create_subscription(Bool, "/teleop_hand_tracking/left/pinch", self._left_pinch_cb, 10)
+        self.create_service(Trigger, "~/recalibrate", self._handle_recalibrate)
+
+        self._last_status_log = 0.0
+        self.timer = self.create_timer(1.0 / self._rate_hz, self._tick)
+        self.get_logger().info(
+            "EXOTica arm teleop node started. Right hand toggles uf850, left hand toggles xarm5. "
+            "xarm5 orientation tracking is locked off."
+        )
+        self._publish_arm_enabled_status()
+
+    def _right_cb(self, msg: PoseStamped):
+        self._store_hand_state("right", msg)
+
+    def _left_cb(self, msg: PoseStamped):
+        self._store_hand_state("left", msg)
+
+    def _right_pinch_cb(self, msg: Bool):
+        self._handle_pinch("right", bool(msg.data))
+
+    def _left_pinch_cb(self, msg: Bool):
+        self._handle_pinch("left", bool(msg.data))
+
+    def _store_hand_state(self, hand: str, msg: PoseStamped):
+        self._hand_state[hand]["msg"] = msg
+        self._hand_state[hand]["stamp"] = time.monotonic()
+
+    def _handle_pinch(self, hand: str, current: bool):
+        previous = self._pinch_state[hand]
+        self._pinch_state[hand] = current
+        if current and not previous:
+            arm = self._arms[hand]
+            arm["enabled"] = not arm["enabled"]
+            arm["calibrated"] = False
+            arm["target_pose"] = None
+            state = "ENABLED" if arm["enabled"] else "DISABLED"
+            self.get_logger().info(f"[{arm['label']}] Teleoperation {state} via {hand} pinch toggle.")
+            self._publish_arm_enabled_status()
+
+    def _publish_arm_enabled_status(self):
+        for hand_name, arm in self._arms.items():
+            msg = Bool()
+            msg.data = bool(arm["enabled"])
+            self._status_pub[hand_name].publish(msg)
+
+    def _handle_recalibrate(self, _request, response):
+        for arm in self._arms.values():
+            arm["calibrated"] = False
+            arm["origin_hand_pos"] = None
+            arm["origin_hand_quat"] = None
+            arm["origin_robot_pos"] = None
+            arm["origin_robot_quat"] = None
+            arm["target_pose"] = None
+            arm["seed_joints"] = None
+        response.success = True
+        response.message = "Teleoperation calibration cleared. Hold both hands in the new neutral pose."
+        self.get_logger().info(response.message)
+        return response
+
+    def _hand_pose(self, hand: str):
+        entry = self._hand_state[hand]
+        if entry["msg"] is None:
+            return None
+        if time.monotonic() - entry["stamp"] > self._tracking_timeout:
+            return None
+        msg = entry["msg"]
+        pos = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
+        quat = [
+            msg.pose.orientation.x,
+            msg.pose.orientation.y,
+            msg.pose.orientation.z,
+            msg.pose.orientation.w,
+        ]
+        return pos, quat
+
+    def _lookup_robot_pose(self, backend: MotionBackend):
+        try:
+            transform = backend.tf_buffer.lookup_transform("base_link", backend.default_ik_link, rclpy.time.Time())
+        except Exception:
+            return None
+        pos = [
+            float(transform.transform.translation.x),
+            float(transform.transform.translation.y),
+            float(transform.transform.translation.z),
+        ]
+        quat = [
+            float(transform.transform.rotation.x),
+            float(transform.transform.rotation.y),
+            float(transform.transform.rotation.z),
+            float(transform.transform.rotation.w),
+        ]
+        return pos, quat
+
+    def _recover_planner_if_needed(self, arm: dict) -> bool:
+        backend = arm["backend"]
+        planner = backend._single_arm_exotica_planner
+        if planner is not None and planner.available:
+            return True
+
+        now = time.monotonic()
+        if now - self._node_started_at < self._planner_init_delay_sec:
+            return False
+        if now - arm["last_planner_retry_time"] < self._planner_retry_sec:
+            return False
+        arm["last_planner_retry_time"] = now
+
+        self.get_logger().info(
+            f"[{arm['label']}] Initializing local EXOTica planner for {arm['planner_group']}."
+        )
+        backend._single_arm_exotica_planner = ExoticaSingleArmPosePlanner(
+            self,
+            arm["planner_group"],
+            hardware_type=self._hardware_type,
+        )
+        return bool(
+            backend._single_arm_exotica_planner is not None
+            and backend._single_arm_exotica_planner.available
+        )
+
+    def _calibrate_arm(self, hand_name: str, arm: dict) -> bool:
+        hand_pose = self._hand_pose(hand_name)
+        if hand_pose is None:
+            return False
+        if not arm["backend"].state_received.wait(timeout=0.01):
+            return False
+        robot_pose = self._lookup_robot_pose(arm["backend"])
+        if robot_pose is None:
+            return False
+        if not self._recover_planner_if_needed(arm):
+            planner = arm["backend"]._single_arm_exotica_planner
+            now = time.monotonic()
+            if now - arm["last_planner_error_time"] > 2.0:
+                self.get_logger().info(
+                    f"[{arm['label']}] Waiting for EXOTica planner availability: "
+                    f"{getattr(planner, 'last_error', 'not initialized')}"
+                )
+                arm["last_planner_error_time"] = now
+            return False
+        arm["origin_hand_pos"], arm["origin_hand_quat"] = hand_pose
+        arm["origin_robot_pos"], arm["origin_robot_quat"] = robot_pose
+        arm["target_pose"] = robot_pose
+        planner = arm["backend"]._single_arm_exotica_planner
+        arm["seed_joints"] = {
+            name: float(arm["backend"].current_joint_positions.get(name, 0.0))
+            for name in planner.controlled_joint_names
+        }
+        arm["calibrated"] = True
+        self.get_logger().info(f"[{arm['label']}] Teleoperation calibrated from current hand and TCP pose.")
+        return True
+
+    def _clamp_position(self, arm: dict, position):
+        min_z = max(
+            float(self._workspace_min[2]),
+            float(arm.get("min_tcp_z", arm["backend"].min_tcp_z or self._workspace_min[2])),
+        )
+        return [
+            clamp(position[0], self._workspace_min[0], self._workspace_max[0]),
+            clamp(position[1], self._workspace_min[1], self._workspace_max[1]),
+            clamp(position[2], min_z, self._workspace_max[2]),
+        ]
+
+    def _target_from_hand(self, hand_name: str, arm: dict):
+        hand_pose = self._hand_pose(hand_name)
+        if hand_pose is None:
+            return None
+        current_hand_pos, current_hand_quat = hand_pose
+        hand_delta = vec_sub(current_hand_pos, arm["origin_hand_pos"])
+        scaled_hand_delta = [
+            hand_delta[0] * self._translation_scale * self._translation_scale_xyz[0],
+            hand_delta[1] * self._translation_scale * self._translation_scale_xyz[1],
+            hand_delta[2] * self._translation_scale * self._translation_scale_xyz[2],
+        ]
+        base_delta = mat_vec_mul(self._camera_to_base, scaled_hand_delta)
+        unclamped_position = vec_add(arm["origin_robot_pos"], base_delta)
+        if arm["target_pose"] is not None:
+            previous_position = arm["target_pose"][0]
+            step = vec_sub(unclamped_position, previous_position)
+            step_mag = math.sqrt(sum(component * component for component in step))
+            if step_mag > self._max_target_step:
+                unclamped_position = vec_add(
+                    previous_position,
+                    vec_scale(step, self._max_target_step / step_mag),
+                )
+        target_position = self._clamp_position(arm, unclamped_position)
+
+        if arm["track_orientation"]:
+            hand_delta_quat = quat_multiply(current_hand_quat, quat_conjugate(arm["origin_hand_quat"]))
+            target_quat = quat_multiply(hand_delta_quat, arm["origin_robot_quat"])
+        else:
+            target_quat = arm["origin_robot_quat"]
+
+        if arm["target_pose"] is not None:
+            smoothed_pos = vec_add(
+                vec_scale(arm["target_pose"][0], 1.0 - self._position_alpha),
+                vec_scale(target_position, self._position_alpha),
+            )
+            smoothed_quat = quaternion_slerp(arm["target_pose"][1], target_quat, self._orientation_alpha)
+            return smoothed_pos, smoothed_quat
+        return target_position, target_quat
+
+    def _solve_and_publish(self, arm: dict):
+        backend = arm["backend"]
+        self._recover_planner_if_needed(arm)
+        planner = backend._single_arm_exotica_planner
+        if planner is None or not planner.available:
+            return
+        target_pose = arm["target_pose"]
+        if target_pose is None:
+            return
+        if not backend.state_received.wait(timeout=0.0):
+            return
+
+        pos, quat = target_pose
+        roll, pitch, yaw = backend._quaternion_to_rpy(quat[0], quat[1], quat[2], quat[3])
+        if arm["seed_joints"] is None:
+            arm["seed_joints"] = {
+                name: float(backend.current_joint_positions.get(name, 0.0))
+                for name in planner.controlled_joint_names
+            }
+        result = planner.solve_pose_goal_joint_positions(
+            arm["seed_joints"],
+            [pos[0], pos[1], pos[2], roll, pitch, yaw],
+            max_retries=3,
+        )
+        if result is None:
+            now = time.monotonic()
+            if now - arm["last_command_time"] > 1.0:
+                self.get_logger().warning(
+                    f"[{arm['label']}] EXOTica IK failed: {planner.last_error}"
+                )
+                arm["last_command_time"] = now
+            return
+
+        filtered = {}
+        for name in planner.controlled_joint_names:
+            previous = float(arm["seed_joints"].get(name, backend.current_joint_positions.get(name, 0.0)))
+            solved = float(result[name])
+            filtered[name] = previous + self._joint_alpha * (solved - previous)
+
+        backend._publish_direct_joint_command(filtered)
+        arm["seed_joints"] = dict(filtered)
+        arm["last_command_time"] = time.monotonic()
+
+    def _tick(self):
+        enabled_arms = [arm for arm in self._arms.values() if arm["enabled"]]
+        if not enabled_arms:
+            now = time.monotonic()
+            if now - self._last_status_log > 1.5:
+                self.get_logger().info("Teleoperation disabled. Pinch right hand for uf850 or left hand for xarm5.")
+                self._last_status_log = now
+            return
+
+        active_hands = 0
+        for hand_name, arm in self._arms.items():
+            if not arm["enabled"]:
+                continue
+            if not arm["calibrated"]:
+                if not self._calibrate_arm(hand_name, arm):
+                    now = time.monotonic()
+                    if now - self._last_status_log > 1.5:
+                        self.get_logger().info(
+                            f"[{arm['label']}] Waiting for tracked hand, joint states, and TCP transform before calibration."
+                        )
+                        self._last_status_log = now
+                    continue
+            target_pose = self._target_from_hand(hand_name, arm)
+            if target_pose is None:
+                continue
+            arm["target_pose"] = target_pose
+            self._solve_and_publish(arm)
+            active_hands += 1
+
+        if active_hands == 0:
+            now = time.monotonic()
+            if now - self._last_status_log > 1.5:
+                self.get_logger().warning("No enabled arm currently has a tracked hand. Holding last commanded joint targets.")
+                self._last_status_log = now
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = None
+    try:
+        node = ExoticaArmTeleop()
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if node is not None:
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()

@@ -539,6 +539,10 @@ That means the EXOTica planner is not using a separate hand-maintained robot mod
   - real hardware drives the main planning state
   - Isaac mirrors the real robot through the relay path
 - `isaac` alone is the only mode that should use the filtered joint-state path by default.
+- TCP floor limits are now enforced for downward motion to avoid table collisions:
+  - `rg6_tcp`: `z >= 0.92962`
+  - `screwdriver_tcp`: `z >= 0.91775`
+- The webcam EXOTica teleop launch now waits for `/exotica/ready` before starting `exotica_arm_teleop`.
 
 </details>
 
