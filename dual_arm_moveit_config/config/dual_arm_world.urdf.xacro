@@ -825,7 +825,7 @@
     <child link="rg6_tcp"/>
   </joint>
   <joint name="screwdriver_tcp_joint" type="fixed">
-    <origin rpy="0 0 0" xyz="0 0 -0.24"/>
+    <origin rpy="0 0 0" xyz="0 0 -0.178"/>
     <parent link="screwdriver_base_link"/>
     <child link="screwdriver_tcp"/>
   </joint>

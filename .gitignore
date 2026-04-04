@@ -3,6 +3,7 @@ AGENTS.md
 CLAUDE.md
 .mcp.json
 mcp*.json
+.codex
 
 # Large Data Directories
 vision_training/realsense_data/
