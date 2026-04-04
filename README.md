@@ -98,6 +98,165 @@ python3 -m compileall dual_arm_moveit_config disassembly_skill
 
 </details>
 
+## Fresh Setup
+
+<details open>
+<summary><strong>Clone-to-working checklist</strong></summary>
+
+This workspace assumes:
+
+- Ubuntu 22.04
+- ROS 2 Humble already installed and sourced from `/opt/ros/humble`
+
+Recommended bootstrap sequence for a fresh clone:
+
+```bash
+cd /home/adip/workspace
+git clone https://github.com/adipdas11/agentic_disassembly.git disassembly_ws
+cd disassembly_ws
+rosdep update
+rosdep install --from-paths src --ignore-src -r -y
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+Notes:
+
+- `rosdep install` is the first pass. It covers standard ROS package dependencies declared in `package.xml`.
+- This repository also contains in-tree source packages such as `exotica/`, `bio_ik/`, `camera_calibaration/easy_handeye2/`, `camera_calibaration/aruco_ros/`, and `rq_fts_ros2_driver/`.
+- The workspace is large. If you only need one subsystem, selective builds are usually faster.
+
+### Core ROS/MoveIt runtime
+
+The main manipulation stack depends on:
+
+- MoveIt 2 and OMPL:
+  - `moveit_configs_utils`
+  - `moveit_msgs`
+  - `moveit_planners_ompl`
+  - `moveit_ros_move_group`
+  - `moveit_ros_visualization`
+  - `moveit_servo`
+  - `moveit_simple_controller_manager`
+- ros2_control pieces:
+  - `controller_manager`
+  - `controller_manager_msgs`
+  - `joint_state_broadcaster`
+  - `joint_trajectory_controller`
+  - `topic_based_ros2_control`
+- RViz and robot description tools:
+  - `rviz2`
+  - `robot_state_publisher`
+  - `joint_state_publisher_gui`
+  - `xacro`
+
+If `rosdep` misses any of those on a clean Humble machine, install the missing Humble debs before building.
+
+### Vision and camera prerequisites
+
+The workspace uses two different camera paths:
+
+- Intel RealSense on the vision side:
+  - `vision_agent/launch/system_startup.launch.py`
+  - `vision_agent/launch/visualize_workspace.launch.py`
+  - both expect the ROS package `realsense2_camera`
+- USB tool camera on the tool side:
+  - `tool_camera_pkg`
+  - expects the ROS package `usb_cam`
+
+If you want the RealSense-based vision launches to work, make sure the machine has:
+
+- Intel librealsense installed
+- the ROS `realsense2_camera` package available in the environment
+
+If you want the tool camera launch to work, make sure `usb_cam` is installed.
+
+### Force sensor and calibration prerequisites
+
+The skill runtime also expects:
+
+- Robotiq FT driver:
+  - `rq_fts_ros2_driver/robotiq_ft_sensor_hardware`
+- hand-eye calibration:
+  - `camera_calibaration/easy_handeye2`
+- ArUco marker tracking:
+  - `camera_calibaration/aruco_ros`
+- image viewer for debugging:
+  - `rqt_image_view`
+
+### Python-only extras not covered cleanly by `package.xml`
+
+Some runtime packages import Python libraries that are not reliably installed through ROS metadata alone.
+
+Install these into the Python environment used by ROS:
+
+```bash
+python3 -m pip install --upgrade pip
+python3 -m pip install mediapipe opencv-python numpy scipy pyserial
+```
+
+Why these matter:
+
+- `arm_teleop/webcam_hand_tracker.py` imports `mediapipe`
+- `arm_teleop` and `vision_agent` use `opencv-python`
+- `vision_agent` uses `numpy` and `scipy`
+- `tool_controller` uses `pyserial`
+
+### Vision training virtual environment
+
+`vision_training/` is a separate Python training environment from the ROS runtime.
+
+It already contains:
+
+- [pyproject.toml](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_training/pyproject.toml)
+- [uv.lock](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_training/uv.lock)
+
+Recommended setup:
+
+```bash
+cd /home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_training
+python3 -m pip install --user uv
+uv sync
+source .venv/bin/activate
+```
+
+That environment is intended for:
+
+- RF-DETR training
+- YOLO training
+- dataset tooling
+- notebook-based experimentation
+
+Major training dependencies declared there include:
+
+- `rfdetr`
+- `roboflow`
+- `ultralytics`
+- `transformers`
+- `opencv-python`
+- `matplotlib`
+- `pandas`
+- `numpy`
+- `scipy`
+
+### Recommended first validation after setup
+
+After the workspace builds, these are good smoke tests:
+
+```bash
+cd /home/adip/workspace/disassembly_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+python3 -m compileall src/agentic_disassembly
+ros2 launch dual_arm_scene_description display_mimic.launch.py
+ros2 launch dual_arm_moveit_config exotica.launch.py hardware_type:=fake
+ros2 launch nr_dual_arm_moveit_config exotica.launch.py hardware_type:=fake
+```
+
+</details>
+
 ## Launch Files
 
 ### Recommended entrypoints
