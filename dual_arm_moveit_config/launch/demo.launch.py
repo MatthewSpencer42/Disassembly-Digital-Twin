@@ -90,12 +90,17 @@ def launch_setup(context, *_args, **_kwargs):
             {
                 "default_planning_pipeline": "ompl",
                 "use_sim_time": use_sim_time_val == "true",
-                # Reduce planning-scene publish rate to prevent interactive-marker
-                # blinking caused by rapid scene updates flooding RViz.
+                # publish_state_updates=False: joint-state changes (100 Hz from
+                # joint_state_broadcaster) must NOT retrigger /monitored_planning_scene
+                # republication.  Each republication causes RViz to re-render all
+                # interactive markers → blinking / drag instability.  RViz already
+                # shows the live robot state via its own /joint_states subscription
+                # (RobotModel display), so disabling this loses nothing visually.
+                # Only geometry changes (collision objects) will trigger republication.
                 "publish_planning_scene_hz": 2.0,
                 "publish_geometry_updates": True,
-                "publish_state_updates": True,
-                "publish_transforms_updates": True,
+                "publish_state_updates": False,
+                "publish_transforms_updates": False,
             },
         ],
     )

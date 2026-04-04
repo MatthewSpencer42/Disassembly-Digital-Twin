@@ -1,9 +1,14 @@
 # Local instruction / tool files
 AGENTS.md
 CLAUDE.md
+GEMINI.md
 .mcp.json
 mcp*.json
 .codex
+.cursorrules    
+.opencode.json
+.windsurfrules
+.code-review-graph
 
 # Large Data Directories
 vision_training/realsense_data/
