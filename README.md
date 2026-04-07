@@ -2,6 +2,65 @@
 
 Top-level guide for the reduced ROS 2 workspace in `/home/adip/workspace/disassembly_ws/src/agentic_disassembly`.
 
+## New System Quick Start
+
+For a fresh machine, use this order:
+
+1. Install Docker and `docker-compose`.
+2. Clone the `teleoperation` branch onto the machine.
+
+HTTPS:
+
+```bash
+git clone --branch teleoperation https://github.com/adipdas11/agentic_disassembly.git
+```
+
+SSH:
+
+```bash
+git clone --branch teleoperation git@github.com:adipdas11/agentic_disassembly.git
+```
+
+3. Change into the cloned repository:
+
+```bash
+cd agentic_disassembly
+```
+
+4. Build the teleop image once:
+
+```bash
+cd /home/adip/workspace/disassembly_ws/src/agentic_disassembly
+./setup_teleop_docker.sh
+```
+
+5. Start the prepared teleop container:
+
+```bash
+cd /home/adip/workspace/disassembly_ws/src/agentic_disassembly
+./run_teleop_docker.sh
+```
+
+6. Inside the container, launch teleoperation:
+
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=true \
+  enable_uf850:=false \
+  enable_xarm5:=true \
+  xarm5_hand:=right \
+  camera_index:=12
+```
+
+Notes:
+
+- `./setup_teleop_docker.sh` is the first-time Docker image build step
+- after that, `./run_teleop_docker.sh` is the normal entrypoint
+- `./run_teleop_docker.sh` rebuilds the main ROS packages inside the container each time
+- if the host camera index differs, check it with `v4l2-ctl --list-devices`
+- if the integrated webcam is missing, check it on the host first before troubleshooting Docker
+
 ## Remaining packages
 
 - `nr_dual_arm_description`
@@ -97,7 +156,7 @@ Or with Compose:
 
 ```bash
 cd /home/adip/workspace/disassembly_ws/src/agentic_disassembly
-docker compose build teleop
+./setup_teleop_docker.sh
 ```
 
 Start an interactive shell in the container with X11 access already handled:
@@ -143,6 +202,7 @@ Notes for Docker teleop:
 - The workspace is copied into the image and built during `docker build`.
 - `./run_teleop_docker.sh` also rebuilds the main teleop packages inside the container each time, so source edits are picked up automatically.
 - If you change Docker dependencies or the Docker config itself, rebuild the image with `docker-compose build teleop`.
+- Camera numbering inside Docker may differ from the host; verify with `v4l2-ctl --list-devices` and prefer checking host camera availability first.
 
 ## Notes
 
