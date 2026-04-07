@@ -1,2 +1,0 @@
-"""Device configuration builder package."""
-
