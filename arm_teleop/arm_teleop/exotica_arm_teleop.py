@@ -51,13 +51,15 @@ class ExoticaArmTeleop(Node):
         self.declare_parameter("uf850.hand", "right")
         self.declare_parameter("xarm5.hand", "left")
         self.declare_parameter("workspace_min", [-0.70, -0.85, 0.00])
-        self.declare_parameter("workspace_max", [0.90, 0.85, 1.20])
+        self.declare_parameter("workspace_max", [1.25, 0.85, 1.30])
         self.declare_parameter("uf850.min_tcp_x", 0.647599)
         self.declare_parameter("uf850.max_tcp_x", 1.24581)
         self.declare_parameter("uf850.min_tcp_z", 0.92962)
-        self.declare_parameter("xarm5.min_tcp_x", 0.659775)
-        self.declare_parameter("xarm5.max_tcp_x", 1.11148)
-        self.declare_parameter("xarm5.min_tcp_z", 0.91775)
+        self.declare_parameter("uf850.max_tcp_z", 1.30)
+        self.declare_parameter("xarm5.min_tcp_x", 0.637258)
+        self.declare_parameter("xarm5.max_tcp_x", 1.16441)
+        self.declare_parameter("xarm5.min_tcp_z", 0.92706)
+        self.declare_parameter("xarm5.max_tcp_z", 1.28452)
         self.declare_parameter("camera_to_base_rotation", [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
         self.declare_parameter("uf850.track_orientation", True)
         self.declare_parameter("xarm5.track_orientation", False)
@@ -117,6 +119,7 @@ class ExoticaArmTeleop(Node):
             "min_tcp_x": float(self.get_parameter("uf850.min_tcp_x").value),
             "max_tcp_x": float(self.get_parameter("uf850.max_tcp_x").value),
             "min_tcp_z": float(self.get_parameter("uf850.min_tcp_z").value),
+            "max_tcp_z": float(self.get_parameter("uf850.max_tcp_z").value),
             "track_orientation": bool(self.get_parameter("uf850.track_orientation").value),
             "origin_hand_pos": None,
             "origin_hand_quat": None,
@@ -144,6 +147,7 @@ class ExoticaArmTeleop(Node):
             "min_tcp_x": float(self.get_parameter("xarm5.min_tcp_x").value),
             "max_tcp_x": float(self.get_parameter("xarm5.max_tcp_x").value),
             "min_tcp_z": float(self.get_parameter("xarm5.min_tcp_z").value),
+            "max_tcp_z": float(self.get_parameter("xarm5.max_tcp_z").value),
             "track_orientation": False,
             "origin_hand_pos": None,
             "origin_hand_quat": None,
@@ -441,11 +445,12 @@ class ExoticaArmTeleop(Node):
             float(self._workspace_min[2]),
             float(arm.get("min_tcp_z", arm["backend"].min_tcp_z or self._workspace_min[2])),
         )
+        max_z = min(float(self._workspace_max[2]), float(arm.get("max_tcp_z", self._workspace_max[2])))
         clamped_min_x = max(self._workspace_min[0], min_x)
         clamped_max_x = min(self._workspace_max[0], max_x)
         clamped_x = clamp(position[0], clamped_min_x, clamped_max_x)
         clamped_y = clamp(position[1], self._workspace_min[1], self._workspace_max[1])
-        clamped_z = clamp(position[2], min_z, self._workspace_max[2])
+        clamped_z = clamp(position[2], min_z, max_z)
 
         now = time.monotonic()
         if now - arm["last_limit_log_time"] > 1.0:
@@ -457,10 +462,16 @@ class ExoticaArmTeleop(Node):
                     f"clamped to x={limit_x:.5f}."
                 )
                 arm["last_limit_log_time"] = now
-            elif clamped_z != position[2]:
+            elif clamped_z != position[2] and position[2] < min_z:
                 self.get_logger().warning(
                     f"[{arm['label']}] TCP lower Z limit reached: requested z={position[2]:.5f}, "
                     f"clamped to z={min_z:.5f}."
+                )
+                arm["last_limit_log_time"] = now
+            elif clamped_z != position[2] and position[2] > max_z:
+                self.get_logger().warning(
+                    f"[{arm['label']}] TCP upper Z limit reached: requested z={position[2]:.5f}, "
+                    f"clamped to z={max_z:.5f}."
                 )
                 arm["last_limit_log_time"] = now
 

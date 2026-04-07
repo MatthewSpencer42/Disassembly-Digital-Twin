@@ -25,7 +25,7 @@ def write_hold_state(held):
         pass
 
 class ObjectFlipSkill(Node):
-    def __init__(self):
+    def __init__(self, device_cfg=None):
         super().__init__('object_flip_skill_node')
         
         self.uf850 = MotionBackend(self, "uf850_arm")
@@ -49,9 +49,21 @@ class ObjectFlipSkill(Node):
         self.hold_status_pub = self.create_publisher(Bool, '/object_hold_state/is_held', self.hold_qos)
         self.create_subscription(Bool, '/object_hold_state/is_held', self.hold_status_callback, self.hold_qos)
 
-        self.get_logger().info("🚀 Object Flip Skill: Compliant with Multi-Arm State Manager.")
+        if device_cfg is not None:
+            self._apply_flip_config(device_cfg)
 
-    def publish_state(self, s): 
+        self.get_logger().info("Object Flip Skill: Compliant with Multi-Arm State Manager.")
+
+    def _apply_flip_config(self, cfg):
+        flip_steps = [s for s in cfg.disassembly_sequence if s.action == 'flip']
+        if not flip_steps:
+            return
+        p = flip_steps[0].parameters
+        self.RETRACT_Z_HEIGHT = p.get('retract_height_m', self.RETRACT_Z_HEIGHT)
+        self.GRIPPER_CLOSE_FORCE_N = p.get('gripper_close_force_n', self.GRIPPER_CLOSE_FORCE_N)
+        self.TORQUE_THRESHOLD = p.get('torque_threshold_nm', self.TORQUE_THRESHOLD) if hasattr(self, 'TORQUE_THRESHOLD') else 3.0
+
+    def publish_state(self, s):
         self.state_update_pub.publish(String(data=s))
 
     def publish_hold_status(self, h):

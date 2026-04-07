@@ -8,7 +8,7 @@ import json, time, threading, copy, math
 from disassembly_skill.motion_backend import MotionBackend
 
 class UnscrewSkill(Node):
-    def __init__(self):
+    def __init__(self, device_cfg=None):
         super().__init__('unscrew_skill_node')
         
         # --- ⚙️ CONFIGURATION SECTION (CORE PARAMETERS) ---
@@ -46,6 +46,9 @@ class UnscrewSkill(Node):
             "CAMERA_FRAME": 'camera_color_optical_frame'
         }
         
+        if device_cfg is not None:
+            self._apply_unscrew_config(device_cfg)
+
         # --- Motion Backend ---
         self.moveit_backend = MotionBackend(self, "xarm5_arm_no_slide")
         
@@ -62,6 +65,19 @@ class UnscrewSkill(Node):
         self.cached_bin1_xyz = None  
         
         self.get_logger().info("🚀 Refactored Unscrew Skill Active (Compliance & Safety Updated).")
+
+    def _apply_unscrew_config(self, cfg):
+        unscrew_steps = [s for s in cfg.disassembly_sequence if s.action == 'unscrew']
+        if not unscrew_steps:
+            return
+        p = unscrew_steps[0].parameters
+        if 'force_threshold_n' in p:
+            self.CONFIG['FORCE_THRESHOLD'] = p['force_threshold_n']
+        if 'align_tolerance_px' in p:
+            self.CONFIG['ALIGN_TOLERANCE_PX'] = p['align_tolerance_px']
+        if 'spiral_timeout_s' in p:
+            self.CONFIG['SPIRAL_TIMEOUT'] = p['spiral_timeout_s']
+        self.get_logger().info("Unscrew config applied from device config.")
 
     # =========================================================================
     # CALLBACKS & HELPERS

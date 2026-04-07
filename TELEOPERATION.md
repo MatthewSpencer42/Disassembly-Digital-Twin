@@ -57,6 +57,8 @@ source install/setup.bash
 ros2 launch arm_teleop webcam_exotica_teleop.launch.py hardware_type:=real use_rviz:=true
 ```
 
+The webcam visualization window uses the live camera frame size reported by OpenCV, so the displayed window matches the active stream resolution.
+
 Bringup order:
 
 1. start `nr_dual_arm_moveit_config/exotica.launch.py`
@@ -247,9 +249,33 @@ From [webcam_exotica_teleop.launch.py](/home/adip/workspace/disassembly_ws/src/a
 | `enable_xarm5` | `true` | allow xArm5 teleop |
 | `uf850_hand` | `right` | assign UF850 to `right` or `left` |
 | `xarm5_hand` | `left` | assign xArm5 to `right` or `left` |
+| `camera_index` | `-1` | webcam device index, where `-1` means auto-detect a usable `/dev/video*` |
 | `config_file` | package yaml | teleop/tracker parameter file |
 
+Argument options:
+
+- `hardware_type`: `fake`, `real`, `isaac`, `twin`
+- `use_rviz`: `true`, `false`
+- `use_sim_time`: `true`, `false`
+- `enable_uf850`: `true`, `false`
+- `enable_xarm5`: `true`, `false`
+- `uf850_hand`: `right`, `left`
+- `xarm5_hand`: `right`, `left`
+- `camera_index`: `-1` or a concrete `/dev/video*` index such as `0`, `2`, `12`
+
 Examples:
+
+Standard real-hardware teleop:
+
+```bash
+cd /home/adip/workspace/disassembly_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=true
+```
 
 Only xArm5 teleop:
 
@@ -262,11 +288,24 @@ ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   xarm5_hand:=right
 ```
 
+Only xArm5 teleop with an explicit webcam:
+
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=true \
+  enable_uf850:=false \
+  enable_xarm5:=true \
+  xarm5_hand:=right \
+  camera_index:=12
+```
+
 Only UF850 teleop:
 
 ```bash
 ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   hardware_type:=real \
+  use_rviz:=true \
   enable_uf850:=true \
   enable_xarm5:=false
 ```
@@ -278,6 +317,22 @@ ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   hardware_type:=fake \
   uf850_hand:=left \
   xarm5_hand:=right
+```
+
+Headless run without RViz:
+
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=false
+```
+
+Isaac or twin bringup:
+
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=twin \
+  use_rviz:=true
 ```
 
 Assignment rules:
@@ -321,8 +376,21 @@ Workspace/safety parameters:
 
 - `workspace_min`
 - `workspace_max`
+- `uf850.min_tcp_x`
+- `uf850.max_tcp_x`
 - `uf850.min_tcp_z`
+- `uf850.max_tcp_z`
+- `xarm5.min_tcp_x`
+- `xarm5.max_tcp_x`
 - `xarm5.min_tcp_z`
+- `xarm5.max_tcp_z`
+- `camera_index`
+
+Clamp behavior:
+
+- the hand-derived Cartesian target is clamped before EXOTica IK is called
+- if a requested target exceeds a limit, teleop solves and moves to the nearest in-bounds pose
+- X forward/backward and Z upper/lower clamp hits are logged separately
 
 ## Why Each Topic Exists
 

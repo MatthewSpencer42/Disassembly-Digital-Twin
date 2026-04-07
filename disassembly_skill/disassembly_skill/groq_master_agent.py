@@ -28,6 +28,13 @@ from disassembly_skill.object_flip_skill import ObjectFlipSkill
 from disassembly_skill.object_flip_drop_skill import FlipDropSkill
 from disassembly_skill.object_pickup_skill import PickupSkill
 
+from pathlib import Path
+try:
+    from disassembly_skill.device_config import DeviceConfig
+    _DEVICE_CONFIG_AVAILABLE = True
+except ImportError:
+    _DEVICE_CONFIG_AVAILABLE = False
+
 # -----------------------------------------------------------------------------
 # Groq uses OpenAI-compatible API — same SDK, different base_url
 # -----------------------------------------------------------------------------
@@ -192,21 +199,81 @@ class GroqMasterAgentNode(Node):
     def __init__(self):
         super().__init__('groq_master_agent')
 
-        self.MISSION_PROMPT = (
-            "Your objective is to fully disassemble the assembly in the current scene. "
-            "First, analyze the vision data to deduce which object serves as the primary structural base, "
-            "and use the 'hold_object' tool to secure it. "
-            "Next, extract all removable sub-components or fasteners visible on the current side one by one. "
-            "VERIFICATION RULE: After attempting to remove a macro-component using "
-            "'pickup_object' or 'flip_drop', you must check the next vision frame. If that specific part is still "
-            "present, you MUST retry the action. (Note: You do not need to individually verify screws). "
-            "STATE RULE: The 'pickup_object' tool forces the robot to release its grip on the main chassis. "
-            "Therefore, immediately after a successful 'pickup_object' action, you MUST use the 'hold_object' "
-            "tool to re-secure the base before attempting to unscrew or remove anything else. "
-            "Remember that assemblies are 3D objects. Once the current visible side appears completely stripped, "
-            "flip the object to expose and analyze the opposite side. "
-            "Only output your Final Answer when you have verified that all sides of the primary base are completely empty."
-        )
+        # --- Device Config Loading ---
+        self.device_cfg = None
+        self._declare_parameter_safe('device_config_path', '')
+        cfg_path = self.get_parameter('device_config_path').get_parameter_value().string_value
+        if not cfg_path:
+            # Try default location
+            default_path = Path(__file__).parent.parent / 'config' / 'device_configs' / 'hdd_wd_blue.yaml'
+            if default_path.exists():
+                cfg_path = str(default_path)
+        if cfg_path and _DEVICE_CONFIG_AVAILABLE:
+            try:
+                self.device_cfg = DeviceConfig.load(cfg_path)
+                self.get_logger().info(
+                    f"Device config loaded: {self.device_cfg.device.device_class} / "
+                    f"{self.device_cfg.device.device_model} "
+                    f"({len(self.device_cfg.disassembly_sequence)} steps)"
+                )
+            except Exception as exc:
+                self.get_logger().warning(f"Could not load device config from '{cfg_path}': {exc}")
+
+        # Build device-aware mission prompt
+        if self.device_cfg is not None:
+            cfg = self.device_cfg
+            ctx = cfg.to_llm_context()
+            # Build sequence hint from config
+            seq_lines = []
+            for s in ctx['sequence_overview']:
+                reveals_str = f" -> reveals: {s['reveals']}" if s.get('reveals') else ""
+                seq_lines.append(f"  Step {s['step']}: {s['action']} -> {s['target']}{reveals_str}")
+            seq_hint = "\n".join(seq_lines)
+
+            # Build component list
+            removable = [c['label'] for c in ctx['components'] if c.get('removable')]
+            chassis = [c['label'] for c in ctx['components'] if not c.get('removable')]
+
+            self.MISSION_PROMPT = (
+                f"You are disassembling a {ctx['device_class']} ({ctx['device_model']}).\n"
+                f"Fixturing: {ctx['fixturing']}. Material: {ctx['materials']}.\n"
+                f"Fixed structural parts (DO NOT remove): {chassis}.\n"
+                f"Removable components: {removable}.\n"
+                f"Screw zones ({len(ctx['screw_zones'])} total): "
+                + ", ".join(
+                    f"{z['zone_name']}({z['screw_count']} screws)->{z['parent_component']}"
+                    for z in ctx['screw_zones']
+                ) + ".\n"
+                f"Reference disassembly sequence:\n{seq_hint}\n\n"
+                "RULES:\n"
+                "1. ALWAYS secure the device with hold_object before unscrewing or extracting parts.\n"
+                "2. Remove ALL screws in a zone before attempting to extract the parent component.\n"
+                "3. Respect zone dependencies — do not attempt to unscrew a zone whose parent component is still blocked.\n"
+                "4. After any pickup_object or flip action, call hold_object again to re-secure the chassis.\n"
+                "5. Verify each extraction by checking the next vision frame. Retry if the part is still present.\n"
+                "6. Use flip_object when the current side is fully stripped to access the opposite side.\n"
+                "7. Use flip_drop to dump loose unthreaded screws and non-delicate parts.\n"
+                "Only output Final Answer when all removable components have been extracted and verified."
+            )
+            if ctx.get('warnings'):
+                self.MISSION_PROMPT += f"\nCONFIG WARNINGS: {ctx['warnings']}"
+        else:
+            # Generic fallback (existing behavior)
+            self.MISSION_PROMPT = (
+                "Your objective is to fully disassemble the assembly in the current scene. "
+                "First, analyze the vision data to deduce which object serves as the primary structural base, "
+                "and use the 'hold_object' tool to secure it. "
+                "Next, extract all removable sub-components or fasteners visible on the current side one by one. "
+                "VERIFICATION RULE: After attempting to remove a macro-component using "
+                "'pickup_object' or 'flip_drop', you must check the next vision frame. If that specific part is still "
+                "present, you MUST retry the action. (Note: You do not need to individually verify screws). "
+                "STATE RULE: The 'pickup_object' tool forces the robot to release its grip on the main chassis. "
+                "Therefore, immediately after a successful 'pickup_object' action, you MUST use the 'hold_object' "
+                "tool to re-secure the base before attempting to unscrew or remove anything else. "
+                "Remember that assemblies are 3D objects. Once the current visible side appears completely stripped, "
+                "flip the object to expose and analyze the opposite side. "
+                "Only output your Final Answer when you have verified that all sides of the primary base are completely empty."
+            )
 
         # START GUI PROCESS
         self.gui_queue = mp.Queue()
@@ -239,11 +306,19 @@ class GroqMasterAgentNode(Node):
             base_url="https://api.groq.com/openai/v1"
         )
 
-        self.unscrew_skill = UnscrewSkill()
-        self.hold_skill = ObjectHoldSkill()
-        self.flip_skill = ObjectFlipSkill()
-        self.flip_drop_skill = FlipDropSkill()
-        self.pickup_skill = PickupSkill()
+        self.unscrew_skill = UnscrewSkill(device_cfg=self.device_cfg)
+        self.hold_skill = ObjectHoldSkill(device_cfg=self.device_cfg)
+        self.flip_skill = ObjectFlipSkill(device_cfg=self.device_cfg)
+        self.flip_drop_skill = FlipDropSkill(device_cfg=self.device_cfg)
+        self.pickup_skill = PickupSkill(device_cfg=self.device_cfg)
+
+        # Determine pickup target description from config
+        pickup_targets_desc = "delicate internal components (PCBs, boards)"
+        if self.device_cfg is not None:
+            pickup_steps = [s for s in self.device_cfg.disassembly_sequence if s.action == 'pickup']
+            if pickup_steps:
+                targets = list({s.target for s in pickup_steps})
+                pickup_targets_desc = f"components: {targets}"
 
         self.tools: Dict[str, Tool] = {
             "hold_object": Tool(
@@ -262,8 +337,10 @@ class GroqMasterAgentNode(Node):
             ),
             "pickup_object": Tool(
                 self.pickup_object,
-                "PRIORITY ACTION: Uses the precision gripper to safely extract delicate internal components, such as a PCB. "
-                "ALWAYS use this instead of flip_drop if the target is a PCB. "
+                "Uses the precision gripper to safely extract delicate internal components. "
+                "Use for extracting " + pickup_targets_desc + ". "
+                "MANDATORY RULE: Use this tool for extracting individual removable components that have been unscrewed. "
+                "For any other component (lids, frames, modules) use 'flip_drop' for removal instead. "
                 "CRITICAL WARNING: Using this tool causes the robot to release the main chassis. "
                 "You MUST call the 'hold_object' tool immediately after this action succeeds to re-secure the workspace. "
                 "Requires the ID and label of the target object.",
@@ -284,6 +361,12 @@ class GroqMasterAgentNode(Node):
     def _run_async_loop(self):
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
+
+    def _declare_parameter_safe(self, name, default):
+        try:
+            self.declare_parameter(name, default)
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # Tools implementations
@@ -322,6 +405,9 @@ class GroqMasterAgentNode(Node):
     async def pickup_object(self, pickup_id=None, pickup_label=None):
         if pickup_id is None or pickup_label is None:
             return "Action failed, missing pickup_id or pickup_label parameter"
+        # Apply per-component config if available
+        if self.device_cfg is not None:
+            self.pickup_skill._apply_pickup_config(self.device_cfg, target_label=pickup_label)
         self.pickup_skill.execute_pickup(target_id=pickup_id, target_label=pickup_label, interactive=False)
         return "Tool called successfully"
 

@@ -18,8 +18,9 @@ class WebcamHandTracker(Node):
     def __init__(self):
         super().__init__("webcam_hand_tracker")
 
-        self.declare_parameter("camera_index", 0)
+        self.declare_parameter("camera_index", -1)
         self.declare_parameter("show_visualization", True)
+        self.declare_parameter("visualization_scale", 1.6)
         self.declare_parameter("mirror_view", True)
         self.declare_parameter("max_num_hands", 2)
         self.declare_parameter("min_detection_confidence", 0.6)
@@ -53,6 +54,7 @@ class WebcamHandTracker(Node):
 
         self._frame_id = self.get_parameter("frame_id").value
         self._show_visualization = bool(self.get_parameter("show_visualization").value)
+        self._visualization_scale = max(float(self.get_parameter("visualization_scale").value), 0.5)
         self._mirror_view = bool(self.get_parameter("mirror_view").value)
         self._period = 1.0 / max(float(self.get_parameter("publish_rate_hz").value), 1.0)
         self._pinch_on_threshold = float(self.get_parameter("pinch_on_threshold").value)
@@ -73,6 +75,7 @@ class WebcamHandTracker(Node):
         self._pinky_pinch_state = {"left": False, "right": False}
         self._fist_state = {"left": False, "right": False}
         self._arm_enabled = {"right": False, "left": False}
+        self._window_initialized = False
 
         try:
             import cv2
@@ -103,10 +106,14 @@ class WebcamHandTracker(Node):
             ) from exc
         self.mp = mp
 
-        camera_index = int(self.get_parameter("camera_index").value)
-        self.cap = self.cv2.VideoCapture(camera_index)
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Unable to open webcam index {camera_index}.")
+        requested_camera_index = int(self.get_parameter("camera_index").value)
+        self.camera_index, self.cap = self._open_camera(requested_camera_index)
+        if self.cap is None:
+            available = ", ".join(self._available_video_devices()) or "none"
+            raise RuntimeError(
+                "Unable to open a usable webcam. "
+                f"requested_camera_index={requested_camera_index}, available_devices={available}"
+            )
 
         self.hands = self.mp.solutions.hands.Hands(
             static_image_mode=False,
@@ -119,7 +126,58 @@ class WebcamHandTracker(Node):
         self.hand_styles = self.mp.solutions.drawing_styles
 
         self.timer = self.create_timer(self._period, self._tick)
-        self.get_logger().info("Webcam hand tracker started. Topics: /teleop_hand_tracking/{left,right}/wrist")
+        self.get_logger().info(
+            f"Webcam hand tracker started on camera_index={self.camera_index}. "
+            "Topics: /teleop_hand_tracking/{left,right}/wrist"
+        )
+
+    def _available_video_devices(self) -> list[str]:
+        devices = sorted(Path("/dev").glob("video*"), key=lambda path: path.name)
+        return [str(path) for path in devices]
+
+    def _candidate_camera_indices(self, requested_index: int) -> list[int]:
+        candidates: list[int] = []
+        if requested_index >= 0:
+            candidates.append(requested_index)
+        for device in self._available_video_devices():
+            try:
+                index = int(Path(device).name.replace("video", ""))
+            except ValueError:
+                continue
+            if index not in candidates:
+                candidates.append(index)
+        return candidates
+
+    def _try_open_camera(self, camera_index: int):
+        cap = self.cv2.VideoCapture(camera_index)
+        if not cap.isOpened():
+            cap.release()
+            return None
+        ok, _frame = cap.read()
+        if not ok:
+            cap.release()
+            return None
+        return cap
+
+    def _open_camera(self, requested_index: int):
+        attempted: list[int] = []
+        for camera_index in self._candidate_camera_indices(requested_index):
+            attempted.append(camera_index)
+            cap = self._try_open_camera(camera_index)
+            if cap is not None:
+                if requested_index >= 0 and camera_index != requested_index:
+                    self.get_logger().warning(
+                        f"Requested camera_index={requested_index} was unavailable. "
+                        f"Falling back to camera_index={camera_index}."
+                    )
+                elif requested_index < 0:
+                    self.get_logger().info(f"Auto-selected camera_index={camera_index}.")
+                return camera_index, cap
+        self.get_logger().error(
+            f"Failed to open any usable camera. attempted_indices={attempted}, "
+            f"available_devices={self._available_video_devices()}"
+        )
+        return None, None
 
     def _normalize_hand_name(self, value: str, default: str) -> str:
         hand = value.strip().lower()
@@ -375,6 +433,13 @@ class WebcamHandTracker(Node):
         self.debug_pub.publish(debug_msg)
 
         if self._show_visualization:
+            if not self._window_initialized:
+                height, width = frame.shape[0], frame.shape[1]
+                window_width = max(int(width * self._visualization_scale), 640)
+                window_height = max(int(height * self._visualization_scale), 480)
+                self.cv2.namedWindow("Webcam Hand Tracking", self.cv2.WINDOW_NORMAL)
+                self.cv2.resizeWindow("Webcam Hand Tracking", window_width, window_height)
+                self._window_initialized = True
             status = f"L:{'yes' if 'left' in tracked else 'no'} R:{'yes' if 'right' in tracked else 'no'}"
             uf850_text, uf850_color = self._robot_status_text("uf850")
             xarm5_text, xarm5_color = self._robot_status_text("xarm5")

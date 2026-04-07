@@ -25,7 +25,7 @@ def write_hold_state(held):
         pass
 
 class PickupSkill(Node):
-    def __init__(self):
+    def __init__(self, device_cfg=None):
         super().__init__('pickup_skill_node')
         # Motion Backends
         self.uf850 = MotionBackend(self, "uf850_arm")
@@ -50,9 +50,14 @@ class PickupSkill(Node):
         self.GRIPPER_CLOSE_FORCE_N = 80.0      # Updated to 30N as requested
         self.GRIPPER_OPEN_FORCE_N = 40.0       # Increased for better release
         self.JOINT_GRIPPER = "rg6_right_drive_joint"
-        
+        self.APPROACH_X_OFFSET = -0.02
+        self.APPROACH_Y_OFFSET = 0.019
+
         self.UF_HOME_JOINTS = {'uf850_joint1': 0.0, 'uf850_joint2': 0.0, 'uf850_joint3': -1.57, 'uf850_joint4': 0.0, 'uf850_joint5': -1.57, 'uf850_joint6': 0.0}
         self.DROP_POSE = {'x': 0.92, 'y': -0.36, 'z': 1.25}
+
+        if device_cfg is not None:
+            self._apply_pickup_config(device_cfg)
 
         # Thread Safety & State
         self.data_lock = threading.Lock()
@@ -63,7 +68,34 @@ class PickupSkill(Node):
         self.create_subscription(Bool, '/object_hold_state/is_held', self.hold_status_callback, self.hold_qos)
         self.create_subscription(String, '/vision/agent_state', self.vision_callback, 10)
         
-    def hold_status_callback(self, msg): 
+    def _apply_pickup_config(self, cfg, target_label=None):
+        # Find most-specific matching pickup step
+        pickup_steps = [s for s in cfg.disassembly_sequence if s.action == 'pickup']
+        if not pickup_steps:
+            return
+        # Try to match by target label, fall back to first pickup step
+        matched = next(
+            (s for s in pickup_steps if target_label and target_label.lower() in s.target.lower()),
+            pickup_steps[0],
+        )
+        p = matched.parameters
+        self.GRIPPER_CLOSE_FORCE_N = p.get('gripper_close_force_n', self.GRIPPER_CLOSE_FORCE_N)
+        self.HOVER_HEIGHT = p.get('lift_height_mm', 50.0) / 1000.0
+        self.APPROACH_X_OFFSET = p.get('approach_x_offset_m', self.APPROACH_X_OFFSET)
+        self.APPROACH_Y_OFFSET = p.get('approach_y_offset_m', self.APPROACH_Y_OFFSET)
+        drop = {
+            'x': p.get('drop_x', self.DROP_POSE['x']),
+            'y': p.get('drop_y', self.DROP_POSE['y']),
+            'z': p.get('drop_z', self.DROP_POSE['z']),
+        }
+        self.DROP_POSE = drop
+        open_deg = p.get('gripper_open_deg', 33.0)
+        close_deg = p.get('gripper_close_deg', -35.0)
+        if close_deg < 0:  # pickup skill convention: negative = close
+            self.OPEN_DEG = abs(open_deg)
+            self.CLOSE_DEG = -abs(close_deg)
+
+    def hold_status_callback(self, msg):
         self.is_holding_object = msg.data
 
     def vision_callback(self, msg):
@@ -210,7 +242,7 @@ class PickupSkill(Node):
         world_p = self.uf850.get_transformed_pose(raw_p, 'camera_color_optical_frame', 'base_link')
         if not world_p: return False
 
-        tx, ty = world_p.pose.position.x - 0.02, world_p.pose.position.y + 0.019
+        tx, ty = world_p.pose.position.x + self.APPROACH_X_OFFSET, world_p.pose.position.y + self.APPROACH_Y_OFFSET
         final_z = world_p.pose.position.z + self.UF_TOOL_LENGTH
         hover_z = final_z + self.HOVER_HEIGHT
 

@@ -25,7 +25,7 @@ def write_hold_state(held):
         pass
 
 class FlipDropSkill(Node):
-    def __init__(self):
+    def __init__(self, device_cfg=None):
         super().__init__('flip_drop_skill_node')
         
         # Hardware Backends
@@ -54,8 +54,23 @@ class FlipDropSkill(Node):
         self.RETRACT_VELOCITY = 0.5            # Synced with Flip Skill
         self.GRIPPER_CLOSE_FORCE_N = 100.0     # Synced with Flip Skill
         self.GRIPPER_OPEN_FORCE_N = 40.0
-        
-        self.get_logger().info("🚀 Flip-Drop Skill: Modernized Production Version.")
+
+        if device_cfg is not None:
+            self._apply_flip_drop_config(device_cfg)
+
+        self.get_logger().info("Flip-Drop Skill: Modernized Production Version.")
+
+    def _apply_flip_drop_config(self, cfg):
+        fd_steps = [s for s in cfg.disassembly_sequence if s.action == 'flip_drop']
+        if not fd_steps:
+            return
+        p = fd_steps[0].parameters
+        self.RETRACT_Z_HEIGHT = p.get('retract_height_m', self.RETRACT_Z_HEIGHT)
+        self.GRIPPER_CLOSE_FORCE_N = p.get('gripper_close_force_n', self.GRIPPER_CLOSE_FORCE_N)
+        ix = p.get('intermediate_x', self.INTERMEDIATE_POSE['x'])
+        iy = p.get('intermediate_y', self.INTERMEDIATE_POSE['y'])
+        iz = p.get('intermediate_z', self.INTERMEDIATE_POSE['z'])
+        self.INTERMEDIATE_POSE = {'x': ix, 'y': iy, 'z': iz}
 
     def publish_state(self, s): self.state_update_pub.publish(String(data=s))
     def publish_hold_status(self, h):

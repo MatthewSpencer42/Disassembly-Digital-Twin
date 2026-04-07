@@ -1,0 +1,86 @@
+device:
+  device_class: storage_device
+  device_model: hdd_generic_3_5
+  dimensions_mm:
+    length: 147.0
+    width: 101.6
+    height: 26.1
+  material: mixed
+  fixturing: vice
+  notes: Reference HDD-style device extracted from the current hard-coded skill flow.
+components:
+  - label: hdd_chassis
+    type: chassis
+    removable: false
+    notes: Main base that must be stabilised before any screw removal.
+  - label: top_cover
+    type: cover
+    removable: true
+    notes: Released after the outer screw zone is cleared.
+  - label: internal_drive
+    type: drive
+    removable: true
+    notes: Picked after cover removal.
+screw_zones:
+  - zone_name: top_cover_screws
+    parent_component: top_cover
+    screw_count: 6
+    screw_type: torx_t8
+    depends_on_removal_of: []
+    notes: Outer fasteners visible on the first side.
+disassembly_sequence:
+  - name: stabilise_hdd
+    type: hold
+    component: hdd_chassis
+    params:
+      arm: uf850
+      grip_width_mm: 101.6
+      grip_force_n: 80.0
+      hover_offset_m: 0.05
+      torque_threshold_nm: 3.0
+      ft_sensor_required: false
+    notes: Mirrors the current object_hold_skill behavior.
+  - name: remove_top_cover_screws
+    type: unscrew
+    component: top_cover
+    zone_name: top_cover_screws
+    params:
+      arm: xarm5
+      hover_offset_m: 0.005
+      torque_threshold_nm: 5.0
+      ft_sensor_required: true
+    notes: Mirrors the current unscrew_skill behavior.
+  - name: extract_top_cover
+    type: pickup
+    component: top_cover
+    params:
+      arm: uf850
+      grip_width_mm: 100.0
+      grip_force_n: 80.0
+      hover_offset_m: 0.05
+      ft_sensor_required: false
+    notes: Pickup releases the active hold state by design.
+  - name: restabilise_hdd
+    type: hold
+    component: hdd_chassis
+    params:
+      arm: uf850
+      grip_width_mm: 101.6
+      grip_force_n: 80.0
+      hover_offset_m: 0.05
+      torque_threshold_nm: 3.0
+      ft_sensor_required: false
+    notes: Required before a flip or flip_drop.
+  - name: flip_hdd
+    type: flip
+    component: hdd_chassis
+    params:
+      arm: uf850
+      torque_threshold_nm: 3.0
+      ft_sensor_required: false
+    notes: Uses the current object_flip_skill pattern.
+metadata:
+  version: 1
+  author: adip
+  created_with: disassembly_skill.device_config_builder
+  notes: Example config for the new builder and middleware tests.

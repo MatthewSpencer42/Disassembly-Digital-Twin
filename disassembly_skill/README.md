@@ -92,3 +92,52 @@ Current behavior:
 ## Notes
 
 - `DISASSEMBLY_SKILLS_REPORT.md` in this package was originally written against the older `dev_ws` package. It should now be treated as historical context plus a migration note, not as the authoritative runtime description.
+
+## Device Config Builder
+
+The package now includes a standalone offline builder for device-specific disassembly YAML files, plus a typed loader middleware for the skill layer.
+
+Added pieces:
+
+- builder entry point:
+  - `ros2 run disassembly_skill device_config_builder`
+- builder source:
+  - [config_builder_app.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/config_builder/config_builder_app.py)
+- typed loader:
+  - [device_config.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py)
+- example config:
+  - [device_config_example_hdd.yaml](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/config/device_configs/device_config_example_hdd.yaml)
+
+The builder is intentionally offline. It does not subscribe to ROS topics or command hardware. Its role is:
+
+1. describe the device
+2. describe removable components and screw zones
+3. define a valid disassembly sequence
+4. export a YAML file that the skill layer can load later
+
+The loader API is:
+
+```python
+from disassembly_skill.device_config import DeviceConfig
+
+config = DeviceConfig.load("/path/to/device.yaml")
+print(config.warnings)
+print(config.to_llm_context())
+```
+
+Implemented validation rules include:
+
+- first step must be `hold`
+- `unscrew` requires an active hold
+- `pickup` releases the active hold
+- `flip` and `flip_drop` require an active hold
+- circular dependency rejection for screw-zone removal dependencies
+- grip width capped at `160 mm`
+- grip force capped at `120 N`
+- FT300-only steps must use `xarm5`
+
+Current scope:
+
+- the config system is implemented and tested inside `disassembly_skill`
+- existing skill nodes are still using their current hard-coded parameters at runtime
+- the new middleware is ready for the next refactor step where those nodes consume a selected device YAML instead of embedded constants

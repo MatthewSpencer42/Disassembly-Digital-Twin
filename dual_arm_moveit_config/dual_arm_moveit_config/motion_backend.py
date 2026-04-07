@@ -30,7 +30,7 @@ class MotionBackend:
     }
     _TCP_X_LIMITS = {
         "rg6_tcp": (0.647599, 1.24581),
-        "screwdriver_tcp": (0.659775, 1.11148),
+        "screwdriver_tcp": (0.637258, 1.16441),
     }
 
     def __init__(self, node: Node, group_name: str):

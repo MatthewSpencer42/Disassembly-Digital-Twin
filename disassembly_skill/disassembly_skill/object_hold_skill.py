@@ -18,7 +18,7 @@ def write_hold_state(held):
         pass
 
 class ObjectHoldSkill(Node):
-    def __init__(self):
+    def __init__(self, device_cfg=None):
         super().__init__('object_hold_skill_node')
 
         self.uf850 = MotionBackend(self, "uf850_arm")
@@ -54,9 +54,35 @@ class ObjectHoldSkill(Node):
         self.DESCENT_RATE_HZ = 30.0
         self.RETRACT_VELOCITY = 0.05
         self.POST_GRASP_RETRACT_SPEED = 0.1
+        self.STRATEGY = "fixture_press"
+        self.HOVER_X_OFFSET = 0.0
+        self.HOVER_Y_OFFSET = 0.0
+
+        if device_cfg is not None:
+            self._apply_hold_config(device_cfg)
 
         self.get_logger().info("Object Hold Skill: Top-Down Cartesian Tactile Mode Active.")
         self.publish_state("IDLE")
+
+    def _apply_hold_config(self, cfg):
+        hold_steps = [s for s in cfg.disassembly_sequence if s.action == 'hold']
+        if not hold_steps:
+            return
+        p = hold_steps[0].parameters
+        self.STRATEGY = p.get('strategy', self.STRATEGY)
+        self.TORQUE_THRESHOLD = p.get('torque_threshold_nm', self.TORQUE_THRESHOLD)
+        self.DESCENT_SPEED_MPS = p.get('descent_speed_mps', self.DESCENT_SPEED_MPS)
+        self.HOVER_Z_OFFSET = p.get('hover_z_offset', self.HOVER_Z_OFFSET)
+        self.HOVER_X_OFFSET = p.get('hover_x_offset_m', 0.0)
+        self.HOVER_Y_OFFSET = p.get('hover_y_offset_m', 0.0)
+        self.GRIPPER_CLOSE_FORCE_N = p.get('gripper_close_force_n', self.GRIPPER_CLOSE_FORCE_N)
+        # Hold skill sign convention: OPEN is negative, CLOSE is positive
+        # Config stores: gripper_open_deg=35.0 (positive = open), gripper_close_deg=-35.0
+        # Map to hold skill convention (negate both)
+        open_deg = p.get('gripper_open_deg', 35.0)
+        close_deg = p.get('gripper_close_deg', -35.0)
+        self.OPEN_DEG = -abs(open_deg)
+        self.CLOSE_DEG = abs(close_deg)
 
     def _log_pose_diagnostics(self, target_data, world_xyz, hover_xyz, quaternion_dict):
         raw_xyz = target_data.get("xyz", [None, None, None])
@@ -247,8 +273,8 @@ class ObjectHoldSkill(Node):
             qd = {'qx': 0.0, 'qy': 0.0, 'qz': 0.0, 'qw': 1.0}
 
         hz = wz + self.HOVER_Z_OFFSET
-        hover_x = wx
-        hover_y = wy
+        hover_x = wx + self.HOVER_X_OFFSET
+        hover_y = wy + self.HOVER_Y_OFFSET
 
         self._log_pose_diagnostics(
             target_data=target_data,
@@ -291,7 +317,17 @@ class ObjectHoldSkill(Node):
             return False
         self.wait_for_arm_settled()
 
-        print("Tactile descent complete. Gripper remains open as requested.")
+        if self.STRATEGY in ("top_down_clamp", "lateral_clamp"):
+            print(f"Closing gripper for {self.STRATEGY}...")
+            if not self.gripper.move_to_joint_positions(
+                {self.JOINT_GRIPPER: math.radians(self.CLOSE_DEG)},
+                gripper_force_n=self.GRIPPER_CLOSE_FORCE_N,
+            ):
+                return False
+            self.wait_for_gripper(self.CLOSE_DEG)
+        else:
+            print(f"Strategy '{self.STRATEGY}': arm pressure applied, gripper open.")
+
         self.publish_state("HOLDING")
         return True
 

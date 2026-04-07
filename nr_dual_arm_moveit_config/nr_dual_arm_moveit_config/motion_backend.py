@@ -26,11 +26,11 @@ from nr_dual_arm_moveit_config.exotica_planner import ExoticaDualArmPlanner, Exo
 class MotionBackend:
     _MIN_TCP_Z_LIMITS = {
         "rg6_tcp": 0.92962,
-        "xarm_gripper_tcp": 0.91775,
+        "xarm_gripper_tcp": 0.92706,
     }
     _TCP_X_LIMITS = {
         "rg6_tcp": (0.647599, 1.24581),
-        "xarm_gripper_tcp": (0.659775, 1.11148),
+        "xarm_gripper_tcp": (0.637258, 1.16441),
     }
 
     def __init__(self, node: Node, group_name: str, defer_exotica_init: bool = False):

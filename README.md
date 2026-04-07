@@ -256,7 +256,6 @@ ros2 launch nr_dual_arm_moveit_config exotica.launch.py hardware_type:=fake
 ```
 
 </details>
-
 ## Launch Files
 
 ### Recommended entrypoints
@@ -637,9 +636,31 @@ Current implementation summary:
 - launch-time hand assignment:
   - `uf850_hand:=right|left`
   - `xarm5_hand:=right|left`
+- camera selection:
+  - `camera_index:=-1|<video index>`
 - webcam UI behavior:
   - disabled robots show `OFF`
   - enabled robots show the resolved assigned hand and enable state
+  - the window uses the active camera frame resolution
+
+Common launch examples:
+
+```bash
+cd /home/adip/workspace/disassembly_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py hardware_type:=real use_rviz:=true
+```
+
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=true \
+  enable_uf850:=false \
+  enable_xarm5:=true \
+  xarm5_hand:=right \
+  camera_index:=12
+```
 
 The detailed document includes:
 

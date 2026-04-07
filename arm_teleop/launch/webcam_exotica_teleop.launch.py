@@ -22,6 +22,7 @@ def generate_launch_description():
     enable_xarm5 = LaunchConfiguration("enable_xarm5")
     uf850_hand = LaunchConfiguration("uf850_hand")
     xarm5_hand = LaunchConfiguration("xarm5_hand")
+    camera_index = LaunchConfiguration("camera_index")
 
     webcam_tracker = Node(
         package="arm_teleop",
@@ -31,6 +32,7 @@ def generate_launch_description():
         parameters=[
             config_file,
             {
+                "camera_index": camera_index,
                 "enable_uf850": enable_uf850,
                 "enable_xarm5": enable_xarm5,
                 "uf850.hand": uf850_hand,
@@ -80,6 +82,7 @@ def generate_launch_description():
             DeclareLaunchArgument("enable_xarm5", default_value="true"),
             DeclareLaunchArgument("uf850_hand", default_value="right"),
             DeclareLaunchArgument("xarm5_hand", default_value="left"),
+            DeclareLaunchArgument("camera_index", default_value="-1"),
             DeclareLaunchArgument(
                 "config_file",
                 default_value=str(package_share / "config" / "webcam_exotica_teleop.yaml"),
