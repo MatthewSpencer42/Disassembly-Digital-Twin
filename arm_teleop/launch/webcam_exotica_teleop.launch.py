@@ -77,7 +77,7 @@ def generate_launch_description():
             DeclareLaunchArgument("hardware_type", default_value="real"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
-            DeclareLaunchArgument("exotica_ready_timeout", default_value="90.0"),
+            DeclareLaunchArgument("exotica_ready_timeout", default_value="120.0"),
             DeclareLaunchArgument("enable_uf850", default_value="true"),
             DeclareLaunchArgument("enable_xarm5", default_value="true"),
             DeclareLaunchArgument("uf850_hand", default_value="right"),

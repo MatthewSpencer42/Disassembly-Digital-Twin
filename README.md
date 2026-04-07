@@ -82,6 +82,68 @@ Supported teleop launch arguments:
 - [nr_dual_arm_moveit_config/README.md](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/nr_dual_arm_moveit_config/README.md)
 - [nr_dual_arm_description](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/nr_dual_arm_description)
 
+## Docker
+
+This branch can be run in Docker for the teleoperation stack.
+
+Build the image:
+
+```bash
+cd /home/adip/workspace/disassembly_ws/src/agentic_disassembly
+docker build -t agentic-disassembly-teleop:humble .
+```
+
+Or with Compose:
+
+```bash
+cd /home/adip/workspace/disassembly_ws/src/agentic_disassembly
+docker compose build teleop
+```
+
+Start an interactive shell in the container with X11 access already handled:
+
+```bash
+cd /home/adip/workspace/disassembly_ws/src/agentic_disassembly
+./run_teleop_docker.sh
+```
+
+The script:
+
+- runs `xhost +local:root`
+- starts `docker-compose run --rm teleop`
+- drops you into `/ws`
+- rebuilds `nr_dual_arm_description`, `nr_dual_arm_moveit_config`, and `arm_teleop`
+- automatically sources `/opt/ros/humble/setup.bash` and `/ws/install/setup.bash`
+
+If you prefer the manual flow:
+
+```bash
+cd /home/adip/workspace/disassembly_ws/src/agentic_disassembly
+xhost +local:root
+docker-compose run --rm teleop
+```
+
+Launch webcam teleop from inside the container:
+
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=true \
+  enable_uf850:=false \
+  enable_xarm5:=true \
+  xarm5_hand:=right \
+  camera_index:=12
+```
+
+Notes for Docker teleop:
+
+- `docker-compose.yml` uses `network_mode: host` so the container can reach the robot controllers on the same LAN.
+- It uses `privileged: true` so webcam devices under `/dev/video*` are visible without per-device remapping.
+- The X11 socket is mounted so RViz and the webcam tracking window can open on the host display.
+- The workspace is copied into the image and built during `docker build`.
+- `./run_teleop_docker.sh` also rebuilds the main teleop packages inside the container each time, so source edits are picked up automatically.
+- If you change Docker dependencies or the Docker config itself, rebuild the image with `docker-compose build teleop`.
+
 ## Notes
 
 - `arm_teleop` depends on `nr_dual_arm_moveit_config`.

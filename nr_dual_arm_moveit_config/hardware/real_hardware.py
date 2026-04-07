@@ -136,6 +136,11 @@ def throttle(logger_state: dict, key: str, interval_s: float) -> bool:
     return False
 
 
+def _modbus_kwargs() -> dict:
+    """pymodbus 3.x uses device_id for target unit selection."""
+    return {"device_id": RG6_SLAVE_ID}
+
+
 class RGBridge:
     # Poll interval for the background Modbus read thread.
     # 20 Hz is sufficient for gripper state feedback and keeps the
@@ -224,7 +229,7 @@ class RGBridge:
         try:
             raw_force = int(round(self.target_force_n * 10.0))
             raw_width = int(round(self.pending_width_mm * 10.0))
-            response = self.client.write_registers(0, [raw_force, raw_width, 16], unit=RG6_SLAVE_ID)
+            response = self.client.write_registers(0, [raw_force, raw_width, 16], **_modbus_kwargs())
             if getattr(response, "isError", lambda: False)():
                 if throttle(self._log_state, "write_err", 1.0):
                     self.logger.warning(f"RG6: Modbus write returned error response: {response}")
@@ -241,10 +246,10 @@ class RGBridge:
             return
 
         try:
-            offset = self.client.read_holding_registers(258, 1, unit=RG6_SLAVE_ID)
-            width = self.client.read_holding_registers(267, 1, unit=RG6_SLAVE_ID)
-            status = self.client.read_holding_registers(268, 1, unit=RG6_SLAVE_ID)
-            width_with_offset = self.client.read_holding_registers(275, 1, unit=RG6_SLAVE_ID)
+            offset = self.client.read_holding_registers(258, count=1, **_modbus_kwargs())
+            width = self.client.read_holding_registers(267, count=1, **_modbus_kwargs())
+            status = self.client.read_holding_registers(268, count=1, **_modbus_kwargs())
+            width_with_offset = self.client.read_holding_registers(275, count=1, **_modbus_kwargs())
             if not getattr(offset, "isError", lambda: False)():
                 self.fingertip_offset_mm = float(signed_16bit(offset.registers[0])) / 10.0
             if not getattr(width, "isError", lambda: False)():

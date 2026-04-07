@@ -12,7 +12,7 @@ from std_msgs.msg import Bool
 class ExoticaReadyWaiter(Node):
     def __init__(self):
         super().__init__("wait_for_exotica_ready")
-        self.declare_parameter("timeout_sec", 90.0)
+        self.declare_parameter("timeout_sec", 120.0)
         self._timeout_sec = max(float(self.get_parameter("timeout_sec").value), 1.0)
         self._ready = threading.Event()
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
