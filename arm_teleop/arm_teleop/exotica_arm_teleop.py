@@ -29,6 +29,27 @@ from nr_dual_arm_moveit_config.exotica_planner import (
 )
 
 
+_UF850_HOME_JOINTS = {
+    "uf850_joint1": 0.0,
+    "uf850_joint2": 0.0,
+    "uf850_joint3": -math.pi / 2,
+    "uf850_joint4": 0.0,
+    "uf850_joint5": -math.pi / 2,
+    "uf850_joint6": 0.0,
+}
+_XARM5_HOME_JOINTS = {
+    "xarm5_joint1": 0.0,
+    "xarm5_joint2": 0.0,
+    "xarm5_joint3": -math.pi / 2,
+    "xarm5_joint4": math.pi / 2,
+    "xarm5_joint5": 0.0,
+}
+_ARM_HOME_JOINTS = {
+    "uf850": _UF850_HOME_JOINTS,
+    "xarm5": _XARM5_HOME_JOINTS,
+}
+
+
 class ExoticaArmTeleop(Node):
     def __init__(self):
         super().__init__("exotica_arm_teleop")
@@ -149,7 +170,7 @@ class ExoticaArmTeleop(Node):
             "robot_name": "xarm5",
             "label": f"{xarm5_hand}/xarm5",
             "planner_group": "xarm5_arm_no_slide",
-            "backend": MotionBackend(self, "xarm5_arm", defer_exotica_init=True),
+            "backend": MotionBackend(self, "xarm5_arm_no_slide", defer_exotica_init=True),
             "min_tcp_x": float(self.get_parameter("xarm5.min_tcp_x").value),
             "max_tcp_x": float(self.get_parameter("xarm5.max_tcp_x").value),
             "min_tcp_z": float(self.get_parameter("xarm5.min_tcp_z").value),
@@ -229,6 +250,12 @@ class ExoticaArmTeleop(Node):
             Trigger,
             "~/recalibrate",
             self._handle_recalibrate,
+            callback_group=self._cb_group,
+        )
+        self.create_service(
+            Trigger,
+            "~/go_home",
+            self._handle_go_home,
             callback_group=self._cb_group,
         )
 
@@ -325,6 +352,14 @@ class ExoticaArmTeleop(Node):
             msg.data = bool(arm["enabled"] and arm["teleop_allowed"])
             self._status_pub[hand_name].publish(msg)
 
+    def _reset_input_state(self):
+        for hand_name in self._hand_state:
+            self._fist_state[hand_name] = False
+            self._pinky_pinch_state[hand_name] = False
+            self._hand_state[hand_name]["msg"] = None
+            self._hand_state[hand_name]["stamp"] = 0.0
+            self._hand_state[hand_name]["stable_since"] = 0.0
+
     def _command_gripper(self, arm: dict, closed: bool) -> bool:
         target = arm["gripper_closed_position"] if closed else arm["gripper_open_position"]
         backend = arm["gripper_backend"]
@@ -347,8 +382,47 @@ class ExoticaArmTeleop(Node):
             arm["target_pose"] = None
             arm["seed_joints"] = None
             arm["_last_filtered_joints"] = None
+        self._reset_input_state()
         response.success = True
         response.message = "Teleoperation calibration cleared. Hold both hands in the new neutral pose."
+        self.get_logger().info(response.message)
+        return response
+
+    def _handle_go_home(self, _request, response):
+        """Disable teleop, move arms to home pose in background, clear calibration."""
+        arms_to_home = []
+        for arm in self._arms.values():
+            if arm is None:
+                continue
+            arm["enabled"] = False
+            arm["calibrated"] = False
+            arm["origin_hand_pos"] = None
+            arm["origin_hand_quat"] = None
+            arm["origin_robot_pos"] = None
+            arm["origin_robot_quat"] = None
+            arm["target_pose"] = None
+            arm["seed_joints"] = None
+            arm["_last_filtered_joints"] = None
+            if arm["teleop_allowed"]:
+                arms_to_home.append(arm)
+        self._reset_input_state()
+        self._publish_arm_enabled_status()
+
+        def _do_home():
+            for arm in arms_to_home:
+                home_joints = _ARM_HOME_JOINTS.get(arm["robot_name"])
+                if home_joints is None:
+                    continue
+                self.get_logger().info(f"[{arm['label']}] Moving to home pose...")
+                ok = arm["backend"].move_to_joint_positions(home_joints, velocity=0.3)
+                if ok:
+                    self.get_logger().info(f"[{arm['label']}] Home pose reached.")
+                else:
+                    self.get_logger().warning(f"[{arm['label']}] Failed to reach home pose.")
+
+        threading.Thread(target=_do_home, daemon=True).start()
+        response.success = True
+        response.message = "Arms disabled, moving to home. Teleop will recalibrate on next hand detection."
         self.get_logger().info(response.message)
         return response
 
@@ -555,6 +629,8 @@ class ExoticaArmTeleop(Node):
 
     def _solve_and_publish(self, arm: dict):
         backend = arm["backend"]
+        if not arm["enabled"] or not arm["teleop_allowed"] or not arm["calibrated"]:
+            return
         self._recover_planner_if_needed(arm)
         planner = backend._single_arm_exotica_planner
         if planner is None or not planner.available:
@@ -578,19 +654,23 @@ class ExoticaArmTeleop(Node):
             return
 
         try:
+            if not arm["enabled"] or not arm["teleop_allowed"] or not arm["calibrated"]:
+                return
             pos, quat = target_pose
             roll, pitch, yaw = backend._quaternion_to_rpy(quat[0], quat[1], quat[2], quat[3])
-            if arm["seed_joints"] is None:
-                arm["seed_joints"] = {
+            seed_joints = arm["seed_joints"]
+            if seed_joints is None:
+                seed_joints = {
                     name: float(backend.current_joint_positions.get(name, 0.0))
                     for name in planner.controlled_joint_names
                 }
+                arm["seed_joints"] = dict(seed_joints)
             # Merge full joint state (for non-controlled joints like linear_slide_joint)
             # with our smoothed seed values for the controlled joints.  The planner uses
             # this to update the EXOTica scene's passive joints so FK reflects the real
             # slide position instead of always assuming 0.
             full_positions = dict(backend.current_joint_positions)
-            full_positions.update(arm["seed_joints"])
+            full_positions.update(seed_joints)
             result = planner.solve_pose_goal_joint_positions(
                 full_positions,
                 [pos[0], pos[1], pos[2], roll, pitch, yaw],
@@ -605,16 +685,23 @@ class ExoticaArmTeleop(Node):
                     arm["last_command_time"] = now
                 return
 
+            if not arm["enabled"] or not arm["teleop_allowed"] or not arm["calibrated"]:
+                return
+            seed_joints = arm["seed_joints"]
+            if seed_joints is None:
+                return
             filtered = {}
             max_step_from_velocity = self._max_joint_velocity / self._rate_hz
             max_joint_step = min(self._max_joint_step, max_step_from_velocity)
             for name in planner.controlled_joint_names:
-                previous = float(arm["seed_joints"].get(name, backend.current_joint_positions.get(name, 0.0)))
+                previous = float(seed_joints.get(name, backend.current_joint_positions.get(name, 0.0)))
                 solved = float(result[name])
                 target_val = previous + self._joint_alpha * (solved - previous)
                 delta = clamp(target_val - previous, -max_joint_step, max_joint_step)
                 filtered[name] = previous + delta
 
+            if not arm["enabled"] or not arm["teleop_allowed"] or not arm["calibrated"]:
+                return
             backend._publish_direct_joint_command(filtered)
             arm["seed_joints"] = dict(filtered)
             arm["_last_filtered_joints"] = dict(filtered)

@@ -1,8 +1,24 @@
+"""
+Teleop launch that expects hand-tracking data from a Meta Quest (or any external
+source publishing on the standard /teleop_hand_tracking/{left,right}/* topics).
+Identical to webcam_exotica_teleop.launch.py except the webcam_hand_tracker node
+is omitted — the hand data is assumed to arrive from an external publisher.
+
+Usage:
+  ros2 launch arm_teleop quest_exotica_teleop.launch.py \
+    hardware_type:=real \
+    use_rviz:=true \
+    enable_uf850:=false \
+    enable_xarm5:=true \
+    xarm5_hand:=right
+"""
+
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -22,23 +38,11 @@ def generate_launch_description():
     enable_xarm5 = LaunchConfiguration("enable_xarm5")
     uf850_hand = LaunchConfiguration("uf850_hand")
     xarm5_hand = LaunchConfiguration("xarm5_hand")
-    camera_index = LaunchConfiguration("camera_index")
+    enable_cameras = LaunchConfiguration("enable_cameras")
 
-    webcam_tracker = Node(
-        package="arm_teleop",
-        executable="webcam_hand_tracker",
-        name="webcam_hand_tracker",
-        output="screen",
-        parameters=[
-            config_file,
-            {
-                "camera_index": camera_index,
-                "enable_uf850": enable_uf850,
-                "enable_xarm5": enable_xarm5,
-                "uf850.hand": uf850_hand,
-                "xarm5.hand": xarm5_hand,
-            },
-        ],
+    realsense_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(package_share / "launch" / "realsense.launch.py")),
+        condition=IfCondition(enable_cameras),
     )
 
     wait_for_exotica = Node(
@@ -89,10 +93,10 @@ def generate_launch_description():
             DeclareLaunchArgument("enable_xarm5", default_value="true"),
             DeclareLaunchArgument("uf850_hand", default_value="right"),
             DeclareLaunchArgument("xarm5_hand", default_value="left"),
-            DeclareLaunchArgument("camera_index", default_value="-1"),
+            DeclareLaunchArgument("enable_cameras", default_value="false"),
             DeclareLaunchArgument(
                 "config_file",
-                default_value=str(package_share / "config" / "webcam_exotica_teleop.yaml"),
+                default_value=str(package_share / "config" / "quest_exotica_teleop.yaml"),
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(str(dual_arm_launch_dir / "exotica.launch.py")),
@@ -105,7 +109,15 @@ def generate_launch_description():
                     "cleanup_existing": "true",
                 }.items(),
             ),
-            webcam_tracker,
+            realsense_launch,
+            # No webcam_hand_tracker — hand data comes from Meta Quest via ROS-TCP-Endpoint
+            # Expected topics (same as webcam tracker publishes):
+            #   /teleop_hand_tracking/right/wrist  (geometry_msgs/PoseStamped)
+            #   /teleop_hand_tracking/left/wrist   (geometry_msgs/PoseStamped)
+            #   /teleop_hand_tracking/right/fist   (std_msgs/Bool)
+            #   /teleop_hand_tracking/left/fist    (std_msgs/Bool)
+            #   /teleop_hand_tracking/right/pinky_pinch  (std_msgs/Bool)
+            #   /teleop_hand_tracking/left/pinky_pinch   (std_msgs/Bool)
             wait_for_exotica,
             RegisterEventHandler(
                 OnProcessExit(

@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-controller-manager-msgs \
     ros-humble-geometric-shapes \
     ros-humble-joint-state-publisher-gui \
+    ros-humble-image-transport \
     ros-humble-joy \
     ros-humble-moveit \
     ros-humble-moveit-kinematics \
@@ -34,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-moveit-simple-controller-manager \
     ros-humble-ros2-control \
     ros-humble-ros2-controllers \
+    ros-humble-realsense2-camera \
     ros-humble-tf2-ros \
     ros-humble-topic-based-ros2-control \
     ros-humble-xacro \
