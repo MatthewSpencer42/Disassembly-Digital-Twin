@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.XR;
 using UnityEngine.XR.Hands;
 using UnityEngine.XR.Management;
 using Unity.Robotics.ROSTCPConnector;
@@ -26,14 +25,13 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
     [SerializeField] private string gripperCommandTopic = "/teleop_hand_tracking/right/pinky_pinch";
     [SerializeField] private string teleopStateTopic = "/teleop_hand_tracking/right/fist";
     [SerializeField] private string robotStateTopic = "/teleop_status/right_arm_enabled";
-    
 
     [Header("Hand Selection")]
     [SerializeField] private Handedness handedness = Handedness.Right;
 
-    [Header("Controller Settings")]
+    [Header("Gesture Settings")]
+    [SerializeField] private float pinchThreshold = 0.02f;  // Distance in meters
     [SerializeField] private float publishRate = 90.0f;     // Hz (matches Open-Teach)
-    [SerializeField] private float triggerThreshold = 0.5f;  // Trigger press threshold (0-1)
 
     [Header("UI Display")]
     [SerializeField] private TextMeshProUGUI teleopStateText;
@@ -61,20 +59,16 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
     // State
     private bool isTeleoperating = false;
     private bool gripperOpen = true;
-    private bool wasLeftIndexPressed = false;
-    private bool wasRightIndexPressed = false;
-
-    // Controller devices
-    private InputDevice leftController;
-    private InputDevice rightController;
-    private bool controllersFound = false;
+    private bool wasIndexPinching = false;
+    private bool wasMiddlePinching = false;
+    private bool wasPinkyPinching = false;
 
     // Timing
     private float lastPublishTime = 0f;
     private float lastLogTime = 0f;
 
     // Robot state feedback
-    private string currentRobotState = "Disconnected";
+    private string currentRobotState = "Disabled";
 
     // Joint mapping from OpenXR to our array format (matching OVRSkeleton order)
     // OpenXR XRHandJointID: Wrist=0, Palm=1, ThumbMetacarpal=2, ThumbProximal=3, etc.
@@ -158,12 +152,6 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
             return;
         }
 
-        // Try to find controllers if not found
-        if (!controllersFound)
-        {
-            FindControllers();
-        }
-
         // Rate limiting
         if (Time.time - lastPublishTime < (1.0f / publishRate))
             return;
@@ -174,8 +162,8 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
         if (!hand.isTracked)
             return;
 
-        // Process controller inputs
-        ProcessControllerInput();
+        // Process gestures
+        ProcessGestures(hand);
 
         // Publish hand data only when teleoperating
         if (isTeleoperating)
@@ -190,96 +178,62 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
         lastPublishTime = Time.time;
     }
 
-    void FindControllers()
+    void ProcessGestures(XRHand hand)
     {
-        var leftDevices = new List<InputDevice>();
-        InputDevices.GetDevicesAtXRNode(XRNode.LeftHand, leftDevices);
-        if (leftDevices.Count > 0)
-            leftController = leftDevices[0];
-
-        var rightDevices = new List<InputDevice>();
-        InputDevices.GetDevicesAtXRNode(XRNode.RightHand, rightDevices);
-        if (rightDevices.Count > 0)
-            rightController = rightDevices[0];
-
-        controllersFound = leftController.isValid && rightController.isValid;
-        if (controllersFound)
-            Debug.Log("[OpenXRGestureDetectorROS] Controllers found");
-    }
-
-    void ProcessControllerInput()
-    {
-        // Handle manual teleop override
+        // Handle manual teleop override (bypasses pinch gestures for teleop)
         if (useTeleopOverride)
         {
             if (isTeleoperating != teleopOverrideValue)
             {
                 isTeleoperating = teleopOverrideValue;
-                PublishTeleopState();
+                PublishTeleopPulse();
                 Debug.Log($"[OpenXRGestureDetectorROS] Teleop Override: {(isTeleoperating ? "STARTED" : "PAUSED")}");
             }
             return;
         }
 
-        if (!controllersFound)
+        // Get fingertip and thumb tip positions
+        if (!hand.GetJoint(XRHandJointID.ThumbTip).TryGetPose(out Pose thumbTip))
             return;
 
-        // Dead man's switch: left hand grip trigger must be held
-        bool deadManActive = false;
-        if (leftController.TryGetFeatureValue(CommonUsages.gripButton, out bool gripPressed))
+        // Index pinch - Toggle teleoperation
+        if (hand.GetJoint(XRHandJointID.IndexTip).TryGetPose(out Pose indexTip))
         {
-            deadManActive = gripPressed;
-        }
-        else if (leftController.TryGetFeatureValue(CommonUsages.grip, out float gripValue))
-        {
-            deadManActive = gripValue > triggerThreshold;
-        }
-
-        // If dead man's switch is released, pause teleop
-        if (!deadManActive && isTeleoperating)
-        {
-            isTeleoperating = false;
-            PublishTeleopState();
-            Debug.Log("[OpenXRGestureDetectorROS] Teleop PAUSED (dead man's switch released)");
+            bool isIndexPinching = Vector3.Distance(thumbTip.position, indexTip.position) < pinchThreshold;
+            if (isIndexPinching && !wasIndexPinching)
+            {
+                isTeleoperating = !isTeleoperating;
+                PublishTeleopPulse();
+                Debug.Log($"[OpenXRGestureDetectorROS] Teleop: {(isTeleoperating ? "STARTED" : "PAUSED")}");
+            }
+            wasIndexPinching = isIndexPinching;
         }
 
-        // Left index trigger (front trigger) - Toggle teleop on/off
-        bool leftIndexPressed = false;
-        if (leftController.TryGetFeatureValue(CommonUsages.triggerButton, out bool leftTriggerButton))
+        // Middle pinch - Pause
+        if (hand.GetJoint(XRHandJointID.MiddleTip).TryGetPose(out Pose middleTip))
         {
-            leftIndexPressed = leftTriggerButton;
-        }
-        else if (leftController.TryGetFeatureValue(CommonUsages.trigger, out float leftTriggerValue))
-        {
-            leftIndexPressed = leftTriggerValue > triggerThreshold;
-        }
-
-        if (leftIndexPressed && !wasLeftIndexPressed && deadManActive)
-        {
-            isTeleoperating = !isTeleoperating;
-            PublishTeleopState();
-            Debug.Log($"[OpenXRGestureDetectorROS] Teleop: {(isTeleoperating ? "STARTED" : "PAUSED")}");
-        }
-        wasLeftIndexPressed = leftIndexPressed;
-
-        // Right index trigger (front trigger) - Toggle gripper
-        bool rightIndexPressed = false;
-        if (rightController.TryGetFeatureValue(CommonUsages.triggerButton, out bool rightTriggerButton))
-        {
-            rightIndexPressed = rightTriggerButton;
-        }
-        else if (rightController.TryGetFeatureValue(CommonUsages.trigger, out float rightTriggerValue))
-        {
-            rightIndexPressed = rightTriggerValue > triggerThreshold;
+            bool isMiddlePinching = Vector3.Distance(thumbTip.position, middleTip.position) < pinchThreshold;
+            if (isMiddlePinching && !wasMiddlePinching && isTeleoperating)
+            {
+                isTeleoperating = false;
+                PublishTeleopPulse();
+                Debug.Log("[OpenXRGestureDetectorROS] Teleop PAUSED (middle pinch)");
+            }
+            wasMiddlePinching = isMiddlePinching;
         }
 
-        if (rightIndexPressed && !wasRightIndexPressed)
+        // Pinky pinch - Toggle gripper
+        if (hand.GetJoint(XRHandJointID.LittleTip).TryGetPose(out Pose pinkyTip))
         {
-            gripperOpen = !gripperOpen;
-            PublishGripperPulse();
-            Debug.Log($"[OpenXRGestureDetectorROS] Gripper: {(gripperOpen ? "OPEN" : "CLOSED")}");
+            bool isPinkyPinching = Vector3.Distance(thumbTip.position, pinkyTip.position) < pinchThreshold;
+            if (isPinkyPinching && !wasPinkyPinching)
+            {
+                gripperOpen = !gripperOpen;
+                PublishGripperPulse();
+                Debug.Log($"[OpenXRGestureDetectorROS] Gripper: {(gripperOpen ? "OPEN" : "CLOSED")}");
+            }
+            wasPinkyPinching = isPinkyPinching;
         }
-        wasRightIndexPressed = rightIndexPressed;
     }
 
     void PublishHandKeypoints(XRHand hand)
@@ -316,7 +270,6 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
 
         keypointsMsg.data = data.ToArray();
 
-        // Set layout info
         keypointsMsg.layout = new MultiArrayLayoutMsg();
         keypointsMsg.layout.dim = new MultiArrayDimensionMsg[]
         {
@@ -330,7 +283,6 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
 
         ros.Publish(handKeypointsTopic, keypointsMsg);
 
-        // Debug logging
         if (enableLogging && Time.time - lastLogTime > logInterval)
         {
             if (hand.GetJoint(XRHandJointID.Wrist).TryGetPose(out Pose wristPose))
@@ -349,14 +301,12 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
 
         PoseStampedMsg poseMsg = new PoseStampedMsg();
 
-        // Header
         poseMsg.header = new HeaderMsg
         {
             frame_id = "world",
             stamp = GetROSTimeStamp()
         };
 
-        // Position (Unity -> ROS coordinate conversion)
         poseMsg.pose.position = new PointMsg
         {
             x = wristPose.position.z,
@@ -364,7 +314,6 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
             z = wristPose.position.y
         };
 
-        // Orientation (Unity -> ROS coordinate conversion)
         poseMsg.pose.orientation = new QuaternionMsg
         {
             x = wristPose.rotation.z,
@@ -382,7 +331,7 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
         ros.Publish(gripperCommandTopic, new BoolMsg { data = false });
     }
 
-    void PublishTeleopState()
+    void PublishTeleopPulse()
     {
         ros.Publish(teleopStateTopic, new BoolMsg { data = true });
         ros.Publish(teleopStateTopic, new BoolMsg { data = false });
@@ -406,39 +355,27 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
 
     void OnDisable()
     {
-        // Stop teleoperation when disabled
         if (isTeleoperating)
         {
             isTeleoperating = false;
-            PublishTeleopState();
+            PublishTeleopPulse();
         }
     }
 
     void UpdateUI()
     {
-        // Update teleop state text
         if (teleopStateText != null)
         {
-            if (isTeleoperating)
-            {
-                teleopStateText.text = "TELEOP: ACTIVE";
-                teleopStateText.color = activeColor;
-            }
-            else
-            {
-                teleopStateText.text = "TELEOP: PAUSED";
-                teleopStateText.color = pausedColor;
-            }
+            teleopStateText.text = isTeleoperating ? "TELEOP: ACTIVE" : "TELEOP: PAUSED";
+            teleopStateText.color = isTeleoperating ? activeColor : pausedColor;
         }
 
-        // Update robot state text
         if (robotStateText != null)
         {
             robotStateText.text = $"Robot: {currentRobotState}";
             robotStateText.color = currentRobotState == "Enabled" ? activeColor : pausedColor;
         }
 
-        // Update gripper state text
         if (gripperStateText != null)
         {
             gripperStateText.text = $"Gripper: {(gripperOpen ? "OPEN" : "CLOSED")}";
