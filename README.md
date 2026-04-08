@@ -53,6 +53,12 @@ ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   camera_index:=12
 ```
 
+7. If Unity on Windows needs to connect to ROS 2 running on Ubuntu, start the ROS TCP endpoint inside the same container shell:
+
+```bash
+ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0
+```
+
 Notes:
 
 - `./setup_teleop_docker.sh` is the first-time Docker image build step
@@ -193,6 +199,14 @@ ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   xarm5_hand:=right \
   camera_index:=12
 ```
+
+For Unity running on Windows and ROS 2 running in Ubuntu, start the TCP endpoint in another shell inside the same container:
+
+```bash
+ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0
+```
+
+Then point Unity to the Ubuntu machine IP on port `10000`.
 
 Notes for Docker teleop:
 
