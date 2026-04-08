@@ -458,6 +458,16 @@ class ExoticaSingleArmPosePlanner:
     _setup_lock = threading.Lock()
     _setup_initialized = False
 
+    # Per-group passive-slide correction.
+    # The xarm5_arm_no_slide group uses base_link="xarm5_base_link" but EXOTica
+    # internally holds uf_slide_joint=0.  When the physical slide is at value S,
+    # the arm base shifts by S metres along the Y axis of base_link (derived from
+    # the URDF: slide axis [0,0,-1] in joint frame, rotated by R_x(90°) into
+    # parent frame gives [0,1,0]).  We therefore subtract S from the IK target's
+    # Y coordinate so EXOTica solves for the correct configuration.
+    # slide_joint : joint name to read from current_positions
+    # slide_axis  : index into the position part of target_pose_rpy (0=X,1=Y,2=Z)
+    # slide_sign  : +1 means subtract, -1 means add (positive slide → +Y shift)
     _ARM_CONFIG = {
         "uf850_arm": {
             "joint_names": [
@@ -471,6 +481,7 @@ class ExoticaSingleArmPosePlanner:
             "group_name": "uf850_arm",
             "task_name": "UF850_TCP",
             "link_name": "rg6_tcp",
+            "slide_joint": None,
         },
         "xarm5_arm_no_slide": {
             "joint_names": [
@@ -483,6 +494,8 @@ class ExoticaSingleArmPosePlanner:
             "group_name": "xarm5_arm_no_slide",
             "task_name": "XARM5_TCP",
             "link_name": "xarm_gripper_tcp",
+            "slide_joint": "uf_slide_joint",  # prismatic, moves arm in +Y of base_link
+            "slide_axis": 1,                  # index 1 = Y in [x, y, z, r, p, yaw]
         },
     }
 
@@ -814,7 +827,31 @@ class ExoticaSingleArmPosePlanner:
         import time as _time
         t0 = _time.time()
         base_start_state = self._state_vector_from_joint_map(current_positions)
-        target_np = self._np.asarray(target_pose_rpy, dtype=float)
+        target_np = self._np.asarray(target_pose_rpy, dtype=float).copy()
+
+        # Passive-slide target correction.
+        #
+        # EXOTica plans for xarm5_arm_no_slide with uf_slide_joint frozen at 0.
+        # When the physical slide is at value S, the xarm5 base shifts by +S in
+        # the Y axis of base_link (URDF derivation: slide axis [0,0,-1] in joint
+        # frame, R_x(90°) into parent frame = [0,1,0]).
+        #
+        # EXOTica's joint solution for target P (with slide=0 assumed) will place
+        # the real TCP at P + [0, S, 0] when executed on the robot (slide=S).
+        # So we pre-subtract S from the Y component: EXOTica solves for P-[0,S,0],
+        # and the real robot with slide=S places the TCP at P. Correct.
+        config = self._ARM_CONFIG.get(self.group_name, {})
+        slide_joint = config.get("slide_joint")
+        slide_axis = config.get("slide_axis")
+        if slide_joint is not None and slide_axis is not None:
+            slide_value = float(current_positions.get(slide_joint, 0.0))
+            if abs(slide_value) > 1e-4:
+                target_np[slide_axis] -= slide_value
+                self.node.get_logger().debug(
+                    f"[EXOTica/{self.group_name}] Slide correction: "
+                    f"{slide_joint}={slide_value:.4f} → target[{slide_axis}] "
+                    f"adjusted to {target_np[slide_axis]:.4f}"
+                )
 
         self._problem.set_goal(self.task_name, target_np)
 

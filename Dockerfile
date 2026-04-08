@@ -58,9 +58,9 @@ COPY . /ws/src/agentic_disassembly
 
 WORKDIR /ws
 RUN source /opt/ros/humble/setup.bash \
- && package_paths="$(colcon list --base-paths src --packages-up-to arm_teleop nr_dual_arm_moveit_config nr_dual_arm_description exotica_ik_solver exotica_collision_scene_fcl_latest exotica_core_task_maps --paths-only)" \
+ && package_paths="$(colcon list --base-paths src --packages-up-to arm_teleop nr_dual_arm_moveit_config nr_dual_arm_description ros_tcp_endpoint exotica_ik_solver exotica_collision_scene_fcl_latest exotica_core_task_maps --paths-only)" \
  && rosdep install --from-paths ${package_paths} --ignore-src -r -y --rosdistro humble --skip-keys "opencv-python python3-pyassimp ros-humble-ompl ompl pinocchio" \
- && colcon build --packages-up-to arm_teleop nr_dual_arm_moveit_config nr_dual_arm_description exotica_ik_solver exotica_collision_scene_fcl_latest exotica_core_task_maps
+ && colcon build --packages-up-to arm_teleop nr_dual_arm_moveit_config nr_dual_arm_description ros_tcp_endpoint exotica_ik_solver exotica_collision_scene_fcl_latest exotica_core_task_maps
 
 COPY docker/entrypoint.sh /ros_entrypoint_local.sh
 RUN chmod +x /ros_entrypoint_local.sh

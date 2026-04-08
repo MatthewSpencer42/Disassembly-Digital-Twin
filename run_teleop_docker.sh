@@ -18,7 +18,7 @@ xhost +local:root >/dev/null
 exec docker-compose run --rm teleop bash -lc '
   set -e
   cd /ws
-  colcon build --packages-select nr_dual_arm_description nr_dual_arm_moveit_config arm_teleop
+  colcon build --packages-select nr_dual_arm_description nr_dual_arm_moveit_config arm_teleop ros_tcp_endpoint
   source /ws/install/setup.bash
   exec bash
 '

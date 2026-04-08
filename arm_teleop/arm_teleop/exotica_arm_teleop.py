@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import time
 
 import rclpy
@@ -89,9 +90,12 @@ class ExoticaArmTeleop(Node):
         ]
 
         self._hand_state = {
-            "right": {"msg": None, "stamp": 0.0},
-            "left": {"msg": None, "stamp": 0.0},
+            "right": {"msg": None, "stamp": 0.0, "stable_since": 0.0},
+            "left": {"msg": None, "stamp": 0.0, "stable_since": 0.0},
         }
+        # Minimum seconds of continuous hand tracking required before calibration.
+        # Prevents calibrating on the first noisy frame when the hand enters view.
+        self._calibration_stability_sec = 0.5
         self._cb_group = ReentrantCallbackGroup()
         self._fist_state = {"right": False, "left": False}
         self._pinky_pinch_state = {"right": False, "left": False}
@@ -138,6 +142,8 @@ class ExoticaArmTeleop(Node):
             "gripper_open_position": -0.625,
             "gripper_closed_position": 0.625,
             "gripper_closed": False,
+            "_ik_lock": threading.Lock(),
+            "_last_filtered_joints": None,
         }
         xarm5_arm = {
             "robot_name": "xarm5",
@@ -167,6 +173,8 @@ class ExoticaArmTeleop(Node):
             "gripper_open_position": 0.0,
             "gripper_closed_position": 0.854,
             "gripper_closed": False,
+            "_ik_lock": threading.Lock(),
+            "_last_filtered_joints": None,
         }
         self._arms = {"right": None, "left": None}
         for hand_name, arm in sorted(
@@ -265,8 +273,14 @@ class ExoticaArmTeleop(Node):
         self._handle_pinky_pinch("left", bool(msg.data))
 
     def _store_hand_state(self, hand: str, msg: PoseStamped):
+        now = time.monotonic()
+        prev_stamp = self._hand_state[hand]["stamp"]
+        # If tracking was lost (gap > 2× timeout), restart the stability clock so
+        # we don't calibrate on the first noisy frame after hand re-detection.
+        if now - prev_stamp > 2.0 * self._tracking_timeout:
+            self._hand_state[hand]["stable_since"] = now
         self._hand_state[hand]["msg"] = msg
-        self._hand_state[hand]["stamp"] = time.monotonic()
+        self._hand_state[hand]["stamp"] = now
 
     def _handle_fist(self, hand: str, current: bool):
         previous = self._fist_state[hand]
@@ -281,6 +295,7 @@ class ExoticaArmTeleop(Node):
             arm["enabled"] = not arm["enabled"]
             arm["calibrated"] = False
             arm["target_pose"] = None
+            arm["_last_filtered_joints"] = None
             state = "ENABLED" if arm["enabled"] else "DISABLED"
             self.get_logger().info(f"[{arm['label']}] Teleoperation {state} via {hand} fist toggle.")
             self._publish_arm_enabled_status()
@@ -331,6 +346,7 @@ class ExoticaArmTeleop(Node):
             arm["origin_robot_quat"] = None
             arm["target_pose"] = None
             arm["seed_joints"] = None
+            arm["_last_filtered_joints"] = None
         response.success = True
         response.message = "Teleoperation calibration cleared. Hold both hands in the new neutral pose."
         self.get_logger().info(response.message)
@@ -411,6 +427,21 @@ class ExoticaArmTeleop(Node):
         hand_pose = self._hand_pose(hand_name)
         if hand_pose is None:
             return False
+
+        # Wait until tracking has been stable long enough to avoid calibrating on
+        # the first noisy frame when the hand enters the camera view.
+        stable_since = self._hand_state[hand_name]["stable_since"]
+        tracking_age = time.monotonic() - stable_since
+        if tracking_age < self._calibration_stability_sec:
+            now = time.monotonic()
+            if now - self._last_status_log > 1.5:
+                remaining = self._calibration_stability_sec - tracking_age
+                self.get_logger().info(
+                    f"[{arm['label']}] Hand detected — waiting {remaining:.1f}s for stable tracking before calibration."
+                )
+                self._last_status_log = now
+            return False
+
         if not arm["backend"].state_received.wait(timeout=0.01):
             return False
         robot_pose = self._lookup_robot_pose(arm["backend"])
@@ -435,7 +466,13 @@ class ExoticaArmTeleop(Node):
             for name in planner.controlled_joint_names
         }
         arm["calibrated"] = True
-        self.get_logger().info(f"[{arm['label']}] Teleoperation calibrated from current hand and TCP pose.")
+        hp = arm["origin_hand_pos"]
+        rp = arm["origin_robot_pos"]
+        self.get_logger().info(
+            f"[{arm['label']}] Calibrated. "
+            f"Hand origin: ({hp[0]:.3f}, {hp[1]:.3f}, {hp[2]:.3f})  "
+            f"TCP origin:  ({rp[0]:.3f}, {rp[1]:.3f}, {rp[2]:.3f})"
+        )
         return True
 
     def _clamp_position(self, arm: dict, position):
@@ -449,7 +486,7 @@ class ExoticaArmTeleop(Node):
         clamped_min_x = max(self._workspace_min[0], min_x)
         clamped_max_x = min(self._workspace_max[0], max_x)
         clamped_x = clamp(position[0], clamped_min_x, clamped_max_x)
-        clamped_y = clamp(position[1], self._workspace_min[1], self._workspace_max[1])
+        clamped_y = position[1]  # Y (left/right) is unrestricted — let IK/joint limits handle it
         clamped_z = clamp(position[2], min_z, max_z)
 
         now = time.monotonic()
@@ -528,40 +565,62 @@ class ExoticaArmTeleop(Node):
         if not backend.state_received.wait(timeout=0.0):
             return
 
-        pos, quat = target_pose
-        roll, pitch, yaw = backend._quaternion_to_rpy(quat[0], quat[1], quat[2], quat[3])
-        if arm["seed_joints"] is None:
-            arm["seed_joints"] = {
-                name: float(backend.current_joint_positions.get(name, 0.0))
-                for name in planner.controlled_joint_names
-            }
-        result = planner.solve_pose_goal_joint_positions(
-            arm["seed_joints"],
-            [pos[0], pos[1], pos[2], roll, pitch, yaw],
-            max_retries=3,
-        )
-        if result is None:
-            now = time.monotonic()
-            if now - arm["last_command_time"] > 1.0:
-                self.get_logger().warning(
-                    f"[{arm['label']}] EXOTica IK failed: {planner.last_error}"
-                )
-                arm["last_command_time"] = now
+        # Non-blocking trylock: if IK is already running in another thread, re-apply
+        # the last good joint command and return immediately.  Without this, every tick
+        # (15 Hz) would block a thread for ~1.5 s on the IK call.  With 4 executor
+        # threads all stalled on IK, fist/gesture callbacks have no thread to run on
+        # and the node appears frozen.
+        lock = arm["_ik_lock"]
+        if not lock.acquire(blocking=False):
+            last = arm["_last_filtered_joints"]
+            if last is not None:
+                backend._publish_direct_joint_command(last)
             return
 
-        filtered = {}
-        max_step_from_velocity = self._max_joint_velocity / self._rate_hz
-        max_joint_step = min(self._max_joint_step, max_step_from_velocity)
-        for name in planner.controlled_joint_names:
-            previous = float(arm["seed_joints"].get(name, backend.current_joint_positions.get(name, 0.0)))
-            solved = float(result[name])
-            target = previous + self._joint_alpha * (solved - previous)
-            delta = clamp(target - previous, -max_joint_step, max_joint_step)
-            filtered[name] = previous + delta
+        try:
+            pos, quat = target_pose
+            roll, pitch, yaw = backend._quaternion_to_rpy(quat[0], quat[1], quat[2], quat[3])
+            if arm["seed_joints"] is None:
+                arm["seed_joints"] = {
+                    name: float(backend.current_joint_positions.get(name, 0.0))
+                    for name in planner.controlled_joint_names
+                }
+            # Merge full joint state (for non-controlled joints like linear_slide_joint)
+            # with our smoothed seed values for the controlled joints.  The planner uses
+            # this to update the EXOTica scene's passive joints so FK reflects the real
+            # slide position instead of always assuming 0.
+            full_positions = dict(backend.current_joint_positions)
+            full_positions.update(arm["seed_joints"])
+            result = planner.solve_pose_goal_joint_positions(
+                full_positions,
+                [pos[0], pos[1], pos[2], roll, pitch, yaw],
+                max_retries=3,
+            )
+            if result is None:
+                now = time.monotonic()
+                if now - arm["last_command_time"] > 1.0:
+                    self.get_logger().warning(
+                        f"[{arm['label']}] EXOTica IK failed: {planner.last_error}"
+                    )
+                    arm["last_command_time"] = now
+                return
 
-        backend._publish_direct_joint_command(filtered)
-        arm["seed_joints"] = dict(filtered)
-        arm["last_command_time"] = time.monotonic()
+            filtered = {}
+            max_step_from_velocity = self._max_joint_velocity / self._rate_hz
+            max_joint_step = min(self._max_joint_step, max_step_from_velocity)
+            for name in planner.controlled_joint_names:
+                previous = float(arm["seed_joints"].get(name, backend.current_joint_positions.get(name, 0.0)))
+                solved = float(result[name])
+                target_val = previous + self._joint_alpha * (solved - previous)
+                delta = clamp(target_val - previous, -max_joint_step, max_joint_step)
+                filtered[name] = previous + delta
+
+            backend._publish_direct_joint_command(filtered)
+            arm["seed_joints"] = dict(filtered)
+            arm["_last_filtered_joints"] = dict(filtered)
+            arm["last_command_time"] = time.monotonic()
+        finally:
+            lock.release()
 
     def _tick(self):
         enabled_arms = [
@@ -615,7 +674,7 @@ def main(args=None):
     executor = None
     try:
         node = ExoticaArmTeleop()
-        executor = MultiThreadedExecutor(num_threads=4)
+        executor = MultiThreadedExecutor(num_threads=8)
         executor.add_node(node)
         executor.spin()
     except KeyboardInterrupt:
