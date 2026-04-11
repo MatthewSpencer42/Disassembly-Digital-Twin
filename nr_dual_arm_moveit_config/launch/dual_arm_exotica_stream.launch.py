@@ -14,12 +14,14 @@ def generate_launch_description():
     enable_servo = LaunchConfiguration("enable_servo")
     enable_joystick = LaunchConfiguration("enable_joystick")
     cleanup_existing = LaunchConfiguration("cleanup_existing")
+    use_sim_time = LaunchConfiguration("use_sim_time")
     publish_demo_targets = LaunchConfiguration("publish_demo_targets")
 
     return LaunchDescription(
         [
             DeclareLaunchArgument("hardware_type", default_value="real"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
+            DeclareLaunchArgument("use_sim_time", default_value="auto"),
             DeclareLaunchArgument("enable_servo", default_value="false"),
             DeclareLaunchArgument("enable_joystick", default_value="false"),
             DeclareLaunchArgument("cleanup_existing", default_value="true"),
@@ -34,6 +36,7 @@ def generate_launch_description():
                 launch_arguments={
                     "hardware_type": hardware_type,
                     "use_rviz": use_rviz,
+                    "use_sim_time": use_sim_time,
                     "enable_servo": enable_servo,
                     "enable_joystick": enable_joystick,
                     "cleanup_existing": cleanup_existing,
@@ -47,6 +50,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "hardware_type": hardware_type,
+                        "use_sim_time": use_sim_time,
                         "rate_hz": LaunchConfiguration("rate_hz"),
                         "target_timeout_sec": LaunchConfiguration("target_timeout_sec"),
                         "target_filter_alpha": LaunchConfiguration("target_filter_alpha"),

@@ -36,11 +36,18 @@ def launch_setup(context, *_args, **_kwargs):
     enable_joystick = LaunchConfiguration("enable_joystick").perform(context).lower() in {"true", "1", "yes"}
     use_rviz = LaunchConfiguration("use_rviz")
     cleanup_existing = LaunchConfiguration("cleanup_existing")
-    use_sim_time_arg = LaunchConfiguration("use_sim_time").perform(context).lower() in {"true", "1", "yes"}
+    use_sim_time_str = LaunchConfiguration("use_sim_time").perform(context)
+    if use_sim_time_str in ("", "auto"):
+        use_sim_time_arg = (hardware_type == "isaac")
+    else:
+        use_sim_time_arg = use_sim_time_str.lower() in {"true", "1", "yes"}
     use_sim_time_val = "true" if use_sim_time_arg else "false"
     use_sim_time = use_sim_time_arg
 
     joint_commands_topic, joint_states_topic = joint_topics_for_hardware(hardware_type)
+    xacro_joint_commands_topic = (
+        "/isaac_joint_commands_urdf" if hardware_type == "isaac" else joint_commands_topic
+    )
     xacro_hardware_type = normalize_xacro_hardware_type(hardware_type)
     filter_joint_states = use_filtered_joint_states(hardware_type)
 
@@ -50,7 +57,7 @@ def launch_setup(context, *_args, **_kwargs):
             file_path="config/nr_dual_arm.urdf.xacro",
             mappings={
                 "hardware_type": xacro_hardware_type,
-                "joint_commands_topic": joint_commands_topic,
+                "joint_commands_topic": xacro_joint_commands_topic,
                 "joint_states_topic": joint_states_topic,
             },
         )
@@ -77,6 +84,7 @@ def launch_setup(context, *_args, **_kwargs):
         package="robot_state_publisher",
         executable="robot_state_publisher",
         parameters=[moveit_config.robot_description, {"use_sim_time": use_sim_time_val == "true"}],
+        remappings=[("joint_states", "filtered_joint_states")] if filter_joint_states else [],
         output="screen",
     )
 
@@ -101,9 +109,9 @@ def launch_setup(context, *_args, **_kwargs):
     )
 
     # In Isaac mode only: remap /joint_states → /filtered_joint_states inside
-    # rviz2 so that stale xamr5_* joint names from Isaac Sim never reach
-    # MoveIt's RobotState and cause a terminate(). The filter also applies the
-    # uf_slide_joint coordinate offset (Isaac 0-based → URDF 0.054-based).
+    # rviz2 so that RViz/MoveIt consume simulator state directly from
+    # /isaac_joint_states after name filtering and uf_slide_joint offset
+    # correction (Isaac 0-based → URDF 0.054-based).
     # twin mode does NOT remap — the real robot already publishes clean
     # URDF-coordinate joint states with no unknown joints.  Remapping twin
     # to filtered_joint_states would inject the wrong +0.054 offset and corrupt
@@ -126,7 +134,26 @@ def launch_setup(context, *_args, **_kwargs):
         executable="joint_state_filter.py",
         name="joint_state_filter",
         output="screen",
-        parameters=[{"use_sim_time": use_sim_time_val == "true"}],
+        parameters=[
+            {
+                "use_sim_time": use_sim_time_val == "true",
+                "input_topic": joint_states_topic,
+            }
+        ],
+    )
+
+    isaac_command_relay_node = Node(
+        package="nr_dual_arm_moveit_config",
+        executable="isaac_command_relay.py",
+        name="isaac_command_relay",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": use_sim_time_val == "true",
+                "input_topic": xacro_joint_commands_topic,
+                "output_topic": joint_commands_topic,
+            }
+        ],
     )
 
     # Digital-twin relay: mirrors /robot_joint_states → /isaac_joint_commands
@@ -270,8 +297,10 @@ def launch_setup(context, *_args, **_kwargs):
     if hardware_type == "isaac":
         # Filter strips unknown joint names (e.g. stale xamr5_* from Isaac Sim)
         # and applies uf_slide_joint coordinate offset (Isaac→URDF).
-        # RViz is remapped to subscribe to /filtered_joint_states.
-        actions.append(TimerAction(period=2.0, actions=[joint_state_filter_node]))
+        # RViz and robot_state_publisher subscribe to /filtered_joint_states.
+        # Commands are relayed back into Isaac coordinates before reaching
+        # /isaac_joint_commands so the simulator remains the source of truth.
+        actions.append(TimerAction(period=2.0, actions=[joint_state_filter_node, isaac_command_relay_node]))
 
     if hardware_type == "twin":
         # Digital twin: relay real robot states to Isaac Sim so it mirrors
@@ -330,7 +359,7 @@ def generate_launch_description():
     ld.add_action(DeclareBooleanLaunchArg("enable_servo", default_value=False))
     ld.add_action(DeclareBooleanLaunchArg("enable_joystick", default_value=False))
     ld.add_action(DeclareBooleanLaunchArg("cleanup_existing", default_value=True))
-    ld.add_action(DeclareLaunchArgument("use_sim_time", default_value="false"))
+    ld.add_action(DeclareLaunchArgument("use_sim_time", default_value="auto"))
     ld.add_action(DeclareLaunchArgument("hardware_type", default_value="fake"))
     ld.add_action(OpaqueFunction(function=launch_setup))
     return ld

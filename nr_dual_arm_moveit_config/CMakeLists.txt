@@ -18,6 +18,7 @@ install(
     hardware/real_hardware.py
     hardware/teleop_bridge.py
     hardware/joint_state_filter.py
+    hardware/isaac_command_relay.py
     hardware/isaac_state_relay.py
     nr_dual_arm_moveit_config/exotica_ik_server_node.py
   DESTINATION lib/${PROJECT_NAME}

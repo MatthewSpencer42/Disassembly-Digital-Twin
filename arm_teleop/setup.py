@@ -56,6 +56,7 @@ setup(
             "webcam_hand_tracker = arm_teleop.webcam_hand_tracker:main",
             "exotica_arm_teleop = arm_teleop.exotica_arm_teleop:main",
             "wait_for_exotica_ready = arm_teleop.wait_for_exotica_ready:main",
+            "teleop_control_panel = arm_teleop.teleop_control_panel:main",
         ],
     },
     cmdclass={"develop": DevelopCommand},

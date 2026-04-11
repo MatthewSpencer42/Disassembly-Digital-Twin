@@ -1,0 +1,11 @@
+build/
+install/
+log/
+.git/
+.code-review-graph/
+__pycache__/
+*.pyc
+*.pyo
+*.swp
+.DS_Store
+

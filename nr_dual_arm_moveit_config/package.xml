@@ -16,6 +16,9 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>nr_dual_arm_description</exec_depend>
   <exec_depend>exotica_core</exec_depend>
+  <exec_depend>exotica_collision_scene_fcl_latest</exec_depend>
+  <exec_depend>exotica_core_task_maps</exec_depend>
+  <exec_depend>exotica_ik_solver</exec_depend>
   <exec_depend>exotica_ompl_solver</exec_depend>
   <exec_depend>exotica_python</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
@@ -37,7 +40,6 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>tool_controller</exec_depend>
   <exec_depend>topic_based_ros2_control</exec_depend>
   <exec_depend>trajectory_msgs</exec_depend>
   <exec_depend>xacro</exec_depend>
