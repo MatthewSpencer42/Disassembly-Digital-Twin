@@ -9,8 +9,8 @@ from geometry_msgs.msg import PoseStamped
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg import Bool
-from std_srvs.srv import Trigger
+from std_msgs.msg import Bool, Float32
+from std_srvs.srv import SetBool, Trigger
 
 from arm_teleop.hand_math import (
     clamp,
@@ -85,6 +85,16 @@ class ExoticaArmTeleop(Node):
         self.declare_parameter("camera_to_base_rotation", [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
         self.declare_parameter("uf850.track_orientation", True)
         self.declare_parameter("xarm5.track_orientation", False)
+        self.declare_parameter("gripper_command_alpha", 0.45)
+        self.declare_parameter("gripper_command_deadband", 0.005)
+        self.declare_parameter("gripper_max_step", 0.06)
+        self.declare_parameter("gripper_aperture_alpha", 0.12)
+        self.declare_parameter("gripper_aperture_hysteresis", 0.06)
+        # Remap aperture so physical finger-touch (aperture_min) = fully closed
+        # and fully spread (aperture_max) = fully open.  Tune these to match your
+        # hand tracking's actual output range.
+        self.declare_parameter("gripper_aperture_min", 0.10)
+        self.declare_parameter("gripper_aperture_max", 0.90)
 
         self._hardware_type = str(self.get_parameter("hardware_type").value)
         self._rate_hz = max(float(self.get_parameter("control_rate_hz").value), 1.0)
@@ -102,6 +112,13 @@ class ExoticaArmTeleop(Node):
         self._workspace_min = [float(v) for v in self.get_parameter("workspace_min").value]
         self._workspace_max = [float(v) for v in self.get_parameter("workspace_max").value]
         self._node_started_at = time.monotonic()
+        self._gripper_alpha = clamp(float(self.get_parameter("gripper_command_alpha").value), 0.01, 1.0)
+        self._gripper_deadband = max(0.0, float(self.get_parameter("gripper_command_deadband").value))
+        self._gripper_max_step = max(float(self.get_parameter("gripper_max_step").value), 0.001)
+        self._gripper_aperture_alpha = clamp(float(self.get_parameter("gripper_aperture_alpha").value), 0.01, 1.0)
+        self._gripper_aperture_hysteresis = max(0.0, float(self.get_parameter("gripper_aperture_hysteresis").value))
+        self._gripper_aperture_min = float(self.get_parameter("gripper_aperture_min").value)
+        self._gripper_aperture_max = float(self.get_parameter("gripper_aperture_max").value)
 
         rotation_raw = [float(v) for v in self.get_parameter("camera_to_base_rotation").value]
         self._camera_to_base = [
@@ -114,6 +131,13 @@ class ExoticaArmTeleop(Node):
             "right": {"msg": None, "stamp": 0.0, "stable_since": 0.0},
             "left": {"msg": None, "stamp": 0.0, "stable_since": 0.0},
         }
+        self._gripper_aperture_state = {
+            "right": {"value": 0.0, "stamp": 0.0},
+            "left": {"value": 0.0, "stamp": 0.0},
+        }
+        # Per-hand low-pass filter state and hysteresis tracking.
+        self._gripper_aperture_filter: dict[str, float | None] = {"right": None, "left": None}
+        self._gripper_last_committed_aperture: dict[str, float | None] = {"right": None, "left": None}
         # Minimum seconds of continuous hand tracking required before calibration.
         # Prevents calibrating on the first noisy frame when the hand enters view.
         self._calibration_stability_sec = 0.5
@@ -163,6 +187,8 @@ class ExoticaArmTeleop(Node):
             "gripper_open_position": -0.625,
             "gripper_closed_position": 0.625,
             "gripper_closed": False,
+            "gripper_follow_hand": False,
+            "last_gripper_command": None,
             "_ik_lock": threading.Lock(),
             "_last_filtered_joints": None,
         }
@@ -194,6 +220,8 @@ class ExoticaArmTeleop(Node):
             "gripper_open_position": 0.0,
             "gripper_closed_position": 0.854,
             "gripper_closed": False,
+            "gripper_follow_hand": True,
+            "last_gripper_command": None,
             "_ik_lock": threading.Lock(),
             "_last_filtered_joints": None,
         }
@@ -246,6 +274,20 @@ class ExoticaArmTeleop(Node):
             10,
             callback_group=self._cb_group,
         )
+        self.create_subscription(
+            Float32,
+            "/teleop_hand_tracking/right/gripper_aperture",
+            self._right_gripper_aperture_cb,
+            10,
+            callback_group=self._cb_group,
+        )
+        self.create_subscription(
+            Float32,
+            "/teleop_hand_tracking/left/gripper_aperture",
+            self._left_gripper_aperture_cb,
+            10,
+            callback_group=self._cb_group,
+        )
         self.create_service(
             Trigger,
             "~/recalibrate",
@@ -258,6 +300,24 @@ class ExoticaArmTeleop(Node):
             self._handle_go_home,
             callback_group=self._cb_group,
         )
+        self.create_service(
+            SetBool,
+            "~/set_right_arm_enabled",
+            self._handle_set_right_arm_enabled,
+            callback_group=self._cb_group,
+        )
+        self.create_service(
+            SetBool,
+            "~/set_left_arm_enabled",
+            self._handle_set_left_arm_enabled,
+            callback_group=self._cb_group,
+        )
+        self.create_service(
+            SetBool,
+            "~/set_all_arms_enabled",
+            self._handle_set_all_arms_enabled,
+            callback_group=self._cb_group,
+        )
 
         self._last_status_log = 0.0
         self.timer = self.create_timer(
@@ -267,7 +327,8 @@ class ExoticaArmTeleop(Node):
         )
         self.get_logger().info(
             f"EXOTica arm teleop node started. uf850 is on {uf850_hand}, xarm5 is on {xarm5_hand}. "
-            "Fist toggles arm teleop, and pinky pinch toggles gripper open/close. "
+            "Arm teleop is controlled from the UI/services. xarm5 gripper follows hand aperture when available; "
+            "pinky pinch remains a fallback toggle. "
             "xarm5 orientation tracking is locked off."
         )
         self._publish_arm_enabled_status()
@@ -288,16 +349,22 @@ class ExoticaArmTeleop(Node):
         self._store_hand_state("left", msg)
 
     def _right_fist_cb(self, msg: Bool):
-        self._handle_fist("right", bool(msg.data))
+        self._fist_state["right"] = bool(msg.data)
 
     def _left_fist_cb(self, msg: Bool):
-        self._handle_fist("left", bool(msg.data))
+        self._fist_state["left"] = bool(msg.data)
 
     def _right_pinky_pinch_cb(self, msg: Bool):
         self._handle_pinky_pinch("right", bool(msg.data))
 
     def _left_pinky_pinch_cb(self, msg: Bool):
         self._handle_pinky_pinch("left", bool(msg.data))
+
+    def _right_gripper_aperture_cb(self, msg: Float32):
+        self._store_gripper_aperture("right", float(msg.data))
+
+    def _left_gripper_aperture_cb(self, msg: Float32):
+        self._store_gripper_aperture("left", float(msg.data))
 
     def _store_hand_state(self, hand: str, msg: PoseStamped):
         now = time.monotonic()
@@ -309,23 +376,58 @@ class ExoticaArmTeleop(Node):
         self._hand_state[hand]["msg"] = msg
         self._hand_state[hand]["stamp"] = now
 
-    def _handle_fist(self, hand: str, current: bool):
-        previous = self._fist_state[hand]
-        self._fist_state[hand] = current
-        if current and not previous:
-            arm = self._arms[hand]
+    def _store_gripper_aperture(self, hand: str, value: float):
+        raw = clamp(float(value), 0.0, 1.0)
+        # Low-pass filter the raw measurement to reduce sensor noise.
+        prev = self._gripper_aperture_filter[hand]
+        filtered = raw if prev is None else prev + self._gripper_aperture_alpha * (raw - prev)
+        self._gripper_aperture_filter[hand] = filtered
+        # Remap so that physical finger-touch (aperture_min) → 0.0 and fully spread
+        # (aperture_max) → 1.0.  This ensures the gripper can reach fully closed even
+        # when the tracker's minimum output is non-zero.
+        span = self._gripper_aperture_max - self._gripper_aperture_min
+        if span > 1e-6:
+            remapped = clamp((filtered - self._gripper_aperture_min) / span, 0.0, 1.0)
+        else:
+            remapped = filtered
+        self._gripper_aperture_state[hand]["value"] = remapped
+        self._gripper_aperture_state[hand]["stamp"] = time.monotonic()
+
+    def _set_arm_enabled(self, hand: str, enabled: bool) -> tuple[bool, str]:
+        arm = self._arms.get(hand)
+        if arm is None:
+            return False, f"No arm is assigned to the {hand} hand."
+        if not arm["teleop_allowed"]:
+            return False, f"[{arm['label']}] Teleoperation is disabled by launch configuration."
+        if arm["enabled"] == enabled:
+            state = "enabled" if enabled else "disabled"
+            return True, f"[{arm['label']}] Teleoperation already {state}."
+        arm["enabled"] = enabled
+        arm["calibrated"] = False
+        arm["target_pose"] = None
+        arm["_last_filtered_joints"] = None
+        arm["last_gripper_command"] = None
+        self._gripper_aperture_filter[hand] = None
+        self._gripper_last_committed_aperture[hand] = None
+        state = "ENABLED" if enabled else "DISABLED"
+        self.get_logger().info(f"[{arm['label']}] Teleoperation {state} via UI/service command.")
+        self._publish_arm_enabled_status()
+        return True, f"[{arm['label']}] Teleoperation {state}."
+
+    def _set_all_arms_enabled(self, enabled: bool) -> tuple[bool, str]:
+        messages = []
+        changed = False
+        for hand in ("right", "left"):
+            arm = self._arms.get(hand)
             if arm is None:
-                return
-            if not arm["teleop_allowed"]:
-                self.get_logger().info(f"[{arm['label']}] Teleoperation is disabled by launch configuration.")
-                return
-            arm["enabled"] = not arm["enabled"]
-            arm["calibrated"] = False
-            arm["target_pose"] = None
-            arm["_last_filtered_joints"] = None
-            state = "ENABLED" if arm["enabled"] else "DISABLED"
-            self.get_logger().info(f"[{arm['label']}] Teleoperation {state} via {hand} fist toggle.")
-            self._publish_arm_enabled_status()
+                continue
+            ok, msg = self._set_arm_enabled(hand, enabled)
+            if ok:
+                changed = True
+            messages.append(msg)
+        if not messages:
+            return False, "No teleop arms are configured."
+        return changed or enabled is False, " ".join(messages)
 
     def _handle_pinky_pinch(self, hand: str, current: bool):
         previous = self._pinky_pinch_state[hand]
@@ -335,6 +437,8 @@ class ExoticaArmTeleop(Node):
             if arm is None:
                 return
             if not arm["teleop_allowed"]:
+                return
+            if arm.get("gripper_follow_hand", False):
                 return
             arm["gripper_closed"] = not arm["gripper_closed"]
             closed = arm["gripper_closed"]
@@ -352,6 +456,18 @@ class ExoticaArmTeleop(Node):
             msg.data = bool(arm["enabled"] and arm["teleop_allowed"])
             self._status_pub[hand_name].publish(msg)
 
+    def _handle_set_right_arm_enabled(self, request, response):
+        response.success, response.message = self._set_arm_enabled("right", bool(request.data))
+        return response
+
+    def _handle_set_left_arm_enabled(self, request, response):
+        response.success, response.message = self._set_arm_enabled("left", bool(request.data))
+        return response
+
+    def _handle_set_all_arms_enabled(self, request, response):
+        response.success, response.message = self._set_all_arms_enabled(bool(request.data))
+        return response
+
     def _reset_input_state(self):
         for hand_name in self._hand_state:
             self._fist_state[hand_name] = False
@@ -359,6 +475,10 @@ class ExoticaArmTeleop(Node):
             self._hand_state[hand_name]["msg"] = None
             self._hand_state[hand_name]["stamp"] = 0.0
             self._hand_state[hand_name]["stable_since"] = 0.0
+            self._gripper_aperture_state[hand_name]["value"] = 0.0
+            self._gripper_aperture_state[hand_name]["stamp"] = 0.0
+            self._gripper_aperture_filter[hand_name] = None
+            self._gripper_last_committed_aperture[hand_name] = None
 
     def _command_gripper(self, arm: dict, closed: bool) -> bool:
         target = arm["gripper_closed_position"] if closed else arm["gripper_open_position"]
@@ -369,6 +489,38 @@ class ExoticaArmTeleop(Node):
             {arm["gripper_joint_name"]: float(target)},
             velocity=0.5,
         )
+
+    def _current_gripper_aperture(self, hand: str):
+        entry = self._gripper_aperture_state[hand]
+        if time.monotonic() - entry["stamp"] > self._tracking_timeout:
+            return None
+        return float(entry["value"])
+
+    def _update_gripper_follow(self, hand_name: str, arm: dict):
+        if not arm.get("gripper_follow_hand", False):
+            return
+        aperture = self._current_gripper_aperture(hand_name)
+        if aperture is None:
+            return
+
+        # Hysteresis gate: only send a command when the (already low-pass filtered)
+        # aperture moves more than gripper_aperture_hysteresis from the last sent value.
+        # The strong alpha=0.12 filter absorbs sensor noise; the hysteresis keeps the
+        # gripper still when the hand is steady despite residual filter wobble.
+        last_committed = self._gripper_last_committed_aperture[hand_name]
+        if last_committed is not None and abs(aperture - last_committed) < self._gripper_aperture_hysteresis:
+            return
+
+        self._gripper_last_committed_aperture[hand_name] = aperture
+
+        target = clamp(
+            arm["gripper_closed_position"]
+            + aperture * (arm["gripper_open_position"] - arm["gripper_closed_position"]),
+            min(arm["gripper_open_position"], arm["gripper_closed_position"]),
+            max(arm["gripper_open_position"], arm["gripper_closed_position"]),
+        )
+        arm["gripper_backend"]._publish_direct_joint_command({arm["gripper_joint_name"]: float(target)})
+        arm["last_gripper_command"] = float(target)
 
     def _handle_recalibrate(self, _request, response):
         for arm in self._arms.values():
@@ -382,6 +534,7 @@ class ExoticaArmTeleop(Node):
             arm["target_pose"] = None
             arm["seed_joints"] = None
             arm["_last_filtered_joints"] = None
+            arm["last_gripper_command"] = None
         self._reset_input_state()
         response.success = True
         response.message = "Teleoperation calibration cleared. Hold both hands in the new neutral pose."
@@ -403,6 +556,7 @@ class ExoticaArmTeleop(Node):
             arm["target_pose"] = None
             arm["seed_joints"] = None
             arm["_last_filtered_joints"] = None
+            arm["last_gripper_command"] = None
             if arm["teleop_allowed"]:
                 arms_to_home.append(arm)
         self._reset_input_state()
@@ -507,13 +661,6 @@ class ExoticaArmTeleop(Node):
         stable_since = self._hand_state[hand_name]["stable_since"]
         tracking_age = time.monotonic() - stable_since
         if tracking_age < self._calibration_stability_sec:
-            now = time.monotonic()
-            if now - self._last_status_log > 1.5:
-                remaining = self._calibration_stability_sec - tracking_age
-                self.get_logger().info(
-                    f"[{arm['label']}] Hand detected — waiting {remaining:.1f}s for stable tracking before calibration."
-                )
-                self._last_status_log = now
             return False
 
         if not arm["backend"].state_received.wait(timeout=0.01):
@@ -716,12 +863,6 @@ class ExoticaArmTeleop(Node):
             if arm is not None and arm["enabled"] and arm["teleop_allowed"]
         ]
         if not enabled_arms:
-            now = time.monotonic()
-            if now - self._last_status_log > 1.5:
-                self.get_logger().info(
-                    "Teleoperation disabled. Fist toggles an arm, pinky pinch toggles gripper."
-                )
-                self._last_status_log = now
             return
 
         active_hands = 0
@@ -732,27 +873,17 @@ class ExoticaArmTeleop(Node):
                 continue
             if not arm["calibrated"]:
                 if not self._calibrate_arm(hand_name, arm):
-                    now = time.monotonic()
-                    if now - self._last_status_log > 1.5:
-                        self.get_logger().info(
-                            f"[{arm['label']}] Waiting for tracked hand, joint states, and TCP transform before calibration."
-                        )
-                        self._last_status_log = now
                     continue
             target_pose = self._target_from_hand(hand_name, arm)
             if target_pose is None:
                 continue
             arm["target_pose"] = target_pose
             self._solve_and_publish(arm)
+            self._update_gripper_follow(hand_name, arm)
             active_hands += 1
 
         if active_hands == 0:
-            now = time.monotonic()
-            if now - self._last_status_log > 1.5:
-                self.get_logger().warning(
-                    "No enabled arm currently has a tracked hand. Holding last commanded joint targets."
-                )
-                self._last_status_log = now
+            return
 
 
 def main(args=None):

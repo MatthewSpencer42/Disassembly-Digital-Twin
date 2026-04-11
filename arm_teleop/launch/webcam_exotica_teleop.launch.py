@@ -2,8 +2,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
-from launch.event_handlers import OnProcessExit
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -74,17 +73,12 @@ def generate_launch_description():
         output="screen",
     )
 
-    def _start_teleop_after_ready(event, _context):
-        if getattr(event, "returncode", 1) == 0:
-            return [teleop_node, control_panel_node]
-        return []
-
     return LaunchDescription(
         [
             DeclareLaunchArgument("hardware_type", default_value="real"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
-            DeclareLaunchArgument("use_sim_time", default_value="false"),
-            DeclareLaunchArgument("exotica_ready_timeout", default_value="120.0"),
+            DeclareLaunchArgument("use_sim_time", default_value="auto"),
+            DeclareLaunchArgument("exotica_ready_timeout", default_value="240.0"),
             DeclareLaunchArgument("enable_uf850", default_value="true"),
             DeclareLaunchArgument("enable_xarm5", default_value="true"),
             DeclareLaunchArgument("uf850_hand", default_value="right"),
@@ -107,11 +101,7 @@ def generate_launch_description():
             ),
             webcam_tracker,
             wait_for_exotica,
-            RegisterEventHandler(
-                OnProcessExit(
-                    target_action=wait_for_exotica,
-                    on_exit=_start_teleop_after_ready,
-                )
-            ),
+            teleop_node,
+            control_panel_node,
         ]
     )

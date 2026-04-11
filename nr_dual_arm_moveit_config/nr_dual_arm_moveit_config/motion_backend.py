@@ -112,9 +112,16 @@ class MotionBackend:
         self.current_joint_velocities = {}
         self.current_joint_efforts = {}
         self.state_received = threading.Event()
+        self._state_topic = "/joint_states"
+        try:
+            hardware_type = str(self.node.get_parameter("hardware_type").value)
+            if hardware_type == "isaac":
+                self._state_topic = "/filtered_joint_states"
+        except Exception:
+            pass
         self.node.create_subscription(
             JointState,
-            "/joint_states",
+            self._state_topic,
             self._joint_state_callback,
             10,
             callback_group=self._service_cb_group,
@@ -941,7 +948,7 @@ class MotionBackend:
         if not self.state_received.wait(timeout=2.0):
             self.node.get_logger().error(
                 f"[{self.backend_kind}] move_linear_z_with_effort_stop_exotica: "
-                "timed out waiting for /joint_states"
+                f"timed out waiting for {self._state_topic}"
             )
             return False
 

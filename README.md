@@ -96,27 +96,155 @@ colcon build --packages-select nr_dual_arm_description nr_dual_arm_moveit_config
 source install/setup.bash
 ```
 
-## Main runtime entrypoints
+## Launch Reference
 
-NR MoveIt/EXOTica:
+### `nr_dual_arm_moveit_config demo.launch.py`
 
-```bash
-ros2 launch nr_dual_arm_moveit_config exotica.launch.py hardware_type:=real
-```
+Full dual-arm bringup with `ros2_control`, MoveIt, optional RViz, optional Servo, and hardware-mode-specific helpers.
 
-NR demo bringup:
+Example:
 
 ```bash
 ros2 launch nr_dual_arm_moveit_config demo.launch.py hardware_type:=real
 ```
 
-Webcam teleoperation:
+Arguments:
+
+- `hardware_type`
+  - default: `fake`
+  - options: `fake`, `real`, `isaac`, `twin`
+- `use_rviz`
+  - default: `true`
+  - options: `true`, `false`
+- `enable_servo`
+  - default: `false`
+  - options: `true`, `false`
+- `enable_joystick`
+  - default: `false`
+  - options: `true`, `false`
+- `cleanup_existing`
+  - default: `true`
+  - options: `true`, `false`
+- `use_sim_time`
+  - default: `false`
+  - options: `true`, `false`
+
+Notes:
+
+- `hardware_type:=isaac` uses `/isaac_joint_commands` and `/isaac_joint_states`
+- `hardware_type:=twin` uses the real robot state path for MoveIt and mirrors real robot motion back into Isaac
+- Isaac mode enables the joint-state filter automatically
+
+Examples:
 
 ```bash
-ros2 launch arm_teleop webcam_exotica_teleop.launch.py hardware_type:=real use_rviz:=true
+ros2 launch nr_dual_arm_moveit_config demo.launch.py \
+  hardware_type:=isaac \
+  use_rviz:=true \
+  enable_servo:=false
 ```
 
-Example xArm-only teleop:
+```bash
+ros2 launch nr_dual_arm_moveit_config demo.launch.py \
+  hardware_type:=twin \
+  use_rviz:=true \
+  cleanup_existing:=true
+```
+
+### `nr_dual_arm_moveit_config exotica.launch.py`
+
+Wraps `demo.launch.py` and starts the EXOTica IK server after MoveIt is up.
+
+Example:
+
+```bash
+ros2 launch nr_dual_arm_moveit_config exotica.launch.py hardware_type:=real
+```
+
+Arguments:
+
+- `hardware_type`
+  - default: `fake`
+  - options: `fake`, `real`, `isaac`, `twin`
+- `use_sim_time`
+  - default: `auto`
+  - options: `auto`, `true`, `false`
+  - `auto` means `true` for `isaac`, `false` otherwise
+- `use_rviz`
+  - default: `true`
+  - options: `true`, `false`
+- `enable_servo`
+  - default: `false`
+  - options: `true`, `false`
+- `enable_joystick`
+  - default: `false`
+  - options: `true`, `false`
+- `cleanup_existing`
+  - default: `true`
+  - options: `true`, `false`
+
+Examples:
+
+```bash
+ros2 launch nr_dual_arm_moveit_config exotica.launch.py \
+  hardware_type:=isaac \
+  use_rviz:=true \
+  use_sim_time:=auto
+```
+
+```bash
+ros2 launch nr_dual_arm_moveit_config exotica.launch.py \
+  hardware_type:=real \
+  use_rviz:=false \
+  cleanup_existing:=true
+```
+
+### `arm_teleop webcam_exotica_teleop.launch.py`
+
+Starts the dual-arm EXOTica stack, the webcam hand tracker, the teleop node, and the Tk control panel.
+
+Example:
+
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=true
+```
+
+Arguments:
+
+- `hardware_type`
+  - default: `real`
+  - options: `fake`, `real`, `isaac`, `twin`
+- `use_rviz`
+  - default: `true`
+  - options: `true`, `false`
+- `use_sim_time`
+  - default: `false`
+  - options: `true`, `false`
+- `exotica_ready_timeout`
+  - default: `120.0`
+  - value: positive seconds
+- `enable_uf850`
+  - default: `true`
+  - options: `true`, `false`
+- `enable_xarm5`
+  - default: `true`
+  - options: `true`, `false`
+- `uf850_hand`
+  - default: `right`
+  - options: `right`, `left`
+- `xarm5_hand`
+  - default: `left`
+  - options: `right`, `left`
+- `camera_index`
+  - default: `-1`
+  - options: `-1` for auto-detect, or any non-negative `/dev/video*` index
+- `config_file`
+  - default: `arm_teleop/config/webcam_exotica_teleop.yaml`
+  - value: path to a ROS parameter YAML file
+
+Examples:
 
 ```bash
 ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
@@ -128,18 +256,84 @@ ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
   camera_index:=12
 ```
 
-Supported teleop launch arguments:
+```bash
+ros2 launch arm_teleop webcam_exotica_teleop.launch.py \
+  hardware_type:=isaac \
+  use_rviz:=true \
+  enable_uf850:=true \
+  enable_xarm5:=true \
+  camera_index:=-1
+```
 
-- `hardware_type:=fake|real|isaac|twin`
-- `use_rviz:=true|false`
-- `use_sim_time:=true|false`
-- `enable_uf850:=true|false`
-- `enable_xarm5:=true|false`
-- `uf850_hand:=right|left`
-- `xarm5_hand:=right|left`
-- `camera_index:=-1|<video index>`
+### `arm_teleop quest_exotica_teleop.launch.py`
 
-`camera_index:=-1` means auto-detect the first usable `/dev/video*` device.
+Starts the dual-arm EXOTica stack, waits for the EXOTica server, then starts teleop and the Tk control panel. Hand-tracking topics are expected from an external source such as Meta Quest over ROS TCP.
+
+Example:
+
+```bash
+ros2 launch arm_teleop quest_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=true \
+  enable_uf850:=false \
+  enable_xarm5:=true \
+  xarm5_hand:=right
+```
+
+Arguments:
+
+- `hardware_type`
+  - default: `real`
+  - options: `fake`, `real`, `isaac`, `twin`
+- `use_rviz`
+  - default: `true`
+  - options: `true`, `false`
+- `use_sim_time`
+  - default: `false`
+  - options: `true`, `false`
+- `exotica_ready_timeout`
+  - default: `120.0`
+  - value: positive seconds
+- `enable_uf850`
+  - default: `true`
+  - options: `true`, `false`
+- `enable_xarm5`
+  - default: `true`
+  - options: `true`, `false`
+- `uf850_hand`
+  - default: `right`
+  - options: `right`, `left`
+- `xarm5_hand`
+  - default: `left`
+  - options: `right`, `left`
+- `enable_cameras`
+  - default: `false`
+  - options: `true`, `false`
+  - when `true`, includes `arm_teleop/realsense.launch.py`
+- `config_file`
+  - default: `arm_teleop/config/quest_exotica_teleop.yaml`
+  - value: path to a ROS parameter YAML file
+
+Examples:
+
+```bash
+ros2 launch arm_teleop quest_exotica_teleop.launch.py \
+  hardware_type:=real \
+  use_rviz:=true \
+  enable_uf850:=false \
+  enable_xarm5:=true \
+  xarm5_hand:=right \
+  enable_cameras:=true
+```
+
+```bash
+ros2 launch arm_teleop quest_exotica_teleop.launch.py \
+  hardware_type:=isaac \
+  use_rviz:=true \
+  enable_uf850:=true \
+  enable_xarm5:=true \
+  enable_cameras:=false
+```
 
 ## Documentation
 

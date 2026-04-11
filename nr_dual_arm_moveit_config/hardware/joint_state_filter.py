@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Joint state filter for Isaac mode.
 
-Subscribes to /joint_states, strips any joint names not in the robot model,
-applies a coordinate offset for uf_slide_joint (Isaac uses 0-based coords;
-URDF uses 0.054-based coords), and republishes to /filtered_joint_states.
-RViz and move_group are remapped to subscribe to /filtered_joint_states so
-that stale xamr5_* or other unknown joint names published by Isaac Sim never
-reach MoveIt's RobotState and cause the 'Variable not known to model'
-exception / terminate().
+Subscribes to the raw Isaac state topic, strips any joint names not in the
+robot model, applies a coordinate offset for uf_slide_joint (Isaac uses
+0-based coords; URDF uses 0.054-based coords), and republishes to
+/filtered_joint_states. RViz and move_group are remapped to subscribe to
+/filtered_joint_states so Isaac remains the source of truth for visualization
+and planning state while still using URDF-compatible joint names/coordinates.
 
 Offset convention:
   rviz_val = isaac_val + SLIDE_OFFSET
@@ -35,18 +34,45 @@ VALID_JOINTS: frozenset = frozenset([
     'rg6_right_finger_joint', 'rg6_right_ignore_joint',
     'rg6_left_drive_joint', 'rg6_left_inner_joint',
     'rg6_left_finger_joint', 'rg6_left_ignore_joint',
+    'xarm_gripper_right_drive_joint', 'xarm_gripper_right_inner_joint',
+    'xarm_gripper_right_finger_joint', 'xarm_gripper_right_ignore_joint',
+    'xarm_gripper_left_drive_joint', 'xarm_gripper_left_inner_joint',
+    'xarm_gripper_left_finger_joint', 'xarm_gripper_left_ignore_joint',
 ])
 
 
 class JointStateFilter(Node):
     def __init__(self) -> None:
         super().__init__('joint_state_filter')
+        self.declare_parameter('input_topic', '/isaac_joint_states')
+        self.declare_parameter('fallback_topic', '/joint_states')
+        self.declare_parameter('primary_timeout_sec', 0.5)
+        input_topic = str(self.get_parameter('input_topic').value)
+        fallback_topic = str(self.get_parameter('fallback_topic').value)
+        self._primary_timeout_sec = max(
+            float(self.get_parameter('primary_timeout_sec').value), 0.0
+        )
+        self._last_primary_time = 0.0
         self._pub = self.create_publisher(JointState, 'filtered_joint_states', 10)
-        self._sub = self.create_subscription(
-            JointState, 'joint_states', self._cb, 10)
-        self.get_logger().info('Joint state filter active — stripping unknown joints.')
+        self._primary_sub = self.create_subscription(
+            JointState, input_topic, self._primary_cb, 10)
+        self._fallback_sub = self.create_subscription(
+            JointState, fallback_topic, self._fallback_cb, 10)
+        self.get_logger().info(
+            f"Joint state filter active: primary={input_topic}, fallback={fallback_topic}."
+        )
 
-    def _cb(self, msg: JointState) -> None:
+    def _primary_cb(self, msg: JointState) -> None:
+        self._last_primary_time = self.get_clock().now().nanoseconds / 1e9
+        self._publish_filtered(msg)
+
+    def _fallback_cb(self, msg: JointState) -> None:
+        now = self.get_clock().now().nanoseconds / 1e9
+        if now - self._last_primary_time <= self._primary_timeout_sec:
+            return
+        self._publish_filtered(msg)
+
+    def _publish_filtered(self, msg: JointState) -> None:
         indices = [i for i, n in enumerate(msg.name) if n in VALID_JOINTS]
         if not indices:
             return
