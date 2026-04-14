@@ -30,7 +30,8 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
     [SerializeField] private Handedness handedness = Handedness.Right;
 
     [Header("Gesture Settings")]
-    [SerializeField] private float pinchThreshold = 0.02f;  // Distance in meters
+    [SerializeField] private float pinchThreshold = 0.02f;  // Distance in meters (index/middle pinch)
+    [SerializeField] private float grabThreshold = 0.08f;   // Fingertip-to-palm distance for fist/grab
     [SerializeField] private float publishRate = 90.0f;     // Hz (matches Open-Teach)
 
     [Header("UI Display")]
@@ -51,7 +52,6 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
 
     // ROS Connection
     private ROSConnection ros;
-    private static bool publishersRegistered = false;
 
     // OpenXR Hand Subsystem
     private XRHandSubsystem xrHandSubsystem;
@@ -61,7 +61,7 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
     private bool gripperOpen = true;
     private bool wasIndexPinching = false;
     private bool wasMiddlePinching = false;
-    private bool wasPinkyPinching = false;
+    private bool wasGrabbing = false;
 
     // Timing
     private float lastPublishTime = 0f;
@@ -106,16 +106,11 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
         ROSConnection.GetOrCreateInstance().ConnectOnStart = true;
         ros = ROSConnection.GetOrCreateInstance();
 
-        // Register publishers (only once to avoid warnings)
-        if (!publishersRegistered)
-        {
-            ros.RegisterPublisher<Float32MultiArrayMsg>(handKeypointsTopic);
-            ros.RegisterPublisher<PoseStampedMsg>(handPoseTopic);
-            ros.RegisterPublisher<BoolMsg>(gripperCommandTopic);
-            ros.RegisterPublisher<BoolMsg>(teleopStateTopic);
-            ros.Subscribe<BoolMsg>(robotStateTopic, OnRobotStateReceived);
-            publishersRegistered = true;
-        }
+        ros.RegisterPublisher<Float32MultiArrayMsg>(handKeypointsTopic);
+        ros.RegisterPublisher<PoseStampedMsg>(handPoseTopic);
+        ros.RegisterPublisher<BoolMsg>(gripperCommandTopic);
+        ros.RegisterPublisher<BoolMsg>(teleopStateTopic);
+        ros.Subscribe<BoolMsg>(robotStateTopic, OnRobotStateReceived);
 
         // Initialize OpenXR Hand Subsystem
         InitializeHandSubsystem();
@@ -222,17 +217,24 @@ public class OpenXRGestureDetectorROS : MonoBehaviour
             wasMiddlePinching = isMiddlePinching;
         }
 
-        // Pinky pinch - Toggle gripper
-        if (hand.GetJoint(XRHandJointID.LittleTip).TryGetPose(out Pose pinkyTip))
+        // Grab (fist) - Toggle gripper when all fingertips curl toward palm
+        if (hand.GetJoint(XRHandJointID.Palm).TryGetPose(out Pose palm) &&
+            hand.GetJoint(XRHandJointID.IndexTip).TryGetPose(out Pose idxTip) &&
+            hand.GetJoint(XRHandJointID.MiddleTip).TryGetPose(out Pose midTip) &&
+            hand.GetJoint(XRHandJointID.RingTip).TryGetPose(out Pose ringTip) &&
+            hand.GetJoint(XRHandJointID.LittleTip).TryGetPose(out Pose pinkyTip))
         {
-            bool isPinkyPinching = Vector3.Distance(thumbTip.position, pinkyTip.position) < pinchThreshold;
-            if (isPinkyPinching && !wasPinkyPinching)
+            bool isGrabbing = Vector3.Distance(palm.position, idxTip.position) < grabThreshold &&
+                              Vector3.Distance(palm.position, midTip.position) < grabThreshold &&
+                              Vector3.Distance(palm.position, ringTip.position) < grabThreshold &&
+                              Vector3.Distance(palm.position, pinkyTip.position) < grabThreshold;
+            if (isGrabbing && !wasGrabbing)
             {
                 gripperOpen = !gripperOpen;
                 PublishGripperPulse();
                 Debug.Log($"[OpenXRGestureDetectorROS] Gripper: {(gripperOpen ? "OPEN" : "CLOSED")}");
             }
-            wasPinkyPinching = isPinkyPinching;
+            wasGrabbing = isGrabbing;
         }
     }
 
