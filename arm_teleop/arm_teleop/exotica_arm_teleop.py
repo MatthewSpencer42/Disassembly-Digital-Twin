@@ -17,7 +17,9 @@ from arm_teleop.hand_math import (
     mat_vec_mul,
     quat_conjugate,
     quat_multiply,
+    quat_to_rpy,
     quaternion_slerp,
+    rpy_to_quat,
     vec_add,
     vec_scale,
     vec_sub,
@@ -85,6 +87,12 @@ class ExoticaArmTeleop(Node):
         self.declare_parameter("camera_to_base_rotation", [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
         self.declare_parameter("uf850.track_orientation", True)
         self.declare_parameter("xarm5.track_orientation", False)
+        # xArm5 is 5-DOF (joints: Z-Y-Y-X-Y).  Roll is kinematically coupled and cannot
+        # be commanded independently (no terminal wrist-roll joint).  Yaw and pitch can be
+        # enabled individually; each zeroes the other unused delta components before passing
+        # the reconstructed quaternion to EXOTica.
+        self.declare_parameter("xarm5.track_yaw", True)
+        self.declare_parameter("xarm5.track_pitch", False)
         self.declare_parameter("gripper_command_alpha", 0.45)
         self.declare_parameter("gripper_command_deadband", 0.005)
         self.declare_parameter("gripper_max_step", 0.06)
@@ -202,6 +210,8 @@ class ExoticaArmTeleop(Node):
             "min_tcp_z": float(self.get_parameter("xarm5.min_tcp_z").value),
             "max_tcp_z": float(self.get_parameter("xarm5.max_tcp_z").value),
             "track_orientation": False,
+            "track_yaw": bool(self.get_parameter("xarm5.track_yaw").value),
+            "track_pitch": bool(self.get_parameter("xarm5.track_pitch").value),
             "origin_hand_pos": None,
             "origin_hand_quat": None,
             "origin_robot_pos": None,
@@ -329,7 +339,9 @@ class ExoticaArmTeleop(Node):
             f"EXOTica arm teleop node started. uf850 is on {uf850_hand}, xarm5 is on {xarm5_hand}. "
             "Arm teleop is controlled from the UI/services. xarm5 gripper follows hand aperture when available; "
             "pinky pinch remains a fallback toggle. "
-            "xarm5 orientation tracking is locked off."
+            "xarm5 orientation: yaw=" + str(bool(self.get_parameter("xarm5.track_yaw").value))
+            + " pitch=" + str(bool(self.get_parameter("xarm5.track_pitch").value))
+            + " roll=False (5-DOF kinematic limit)."
         )
         self._publish_arm_enabled_status()
 
@@ -760,8 +772,20 @@ class ExoticaArmTeleop(Node):
         target_position = self._clamp_position(arm, unclamped_position)
 
         if arm["track_orientation"]:
+            # Full 6-DOF orientation tracking (UF850 / 6-DOF arms).
             hand_delta_quat = quat_multiply(current_hand_quat, quat_conjugate(arm["origin_hand_quat"]))
             target_quat = quat_multiply(hand_delta_quat, arm["origin_robot_quat"])
+        elif arm.get("track_yaw", False) or arm.get("track_pitch", False):
+            # Partial orientation tracking for 5-DOF arms (xArm5: joints Z-Y-Y-X-Y).
+            # Roll is kinematically coupled (no terminal wrist-roll joint) and is always
+            # kept at the calibration-moment value.  Yaw and pitch are independently
+            # selectable via the track_yaw / track_pitch parameters.
+            hand_delta_quat = quat_multiply(current_hand_quat, quat_conjugate(arm["origin_hand_quat"]))
+            _, delta_pitch, delta_yaw = quat_to_rpy(hand_delta_quat)
+            active_pitch = delta_pitch if arm.get("track_pitch", False) else 0.0
+            active_yaw   = delta_yaw   if arm.get("track_yaw",   False) else 0.0
+            partial_delta_quat = rpy_to_quat(0.0, active_pitch, active_yaw)
+            target_quat = quat_multiply(partial_delta_quat, arm["origin_robot_quat"])
         else:
             target_quat = arm["origin_robot_quat"]
 
