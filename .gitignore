@@ -75,3 +75,7 @@ log/
 # Directories
 **/vision_training/data_collection/data
 
+# SmolVLA local data
+lerobot_pick_place/rosbags_to_leorobot_data/pick_place_rosbags/
+lerobot_pick_place/lerobot_converted_dataset/pick_place_rosbags_lerobot/
+lerobot_pick_place/smolvla_training_output/
