@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+from collections import deque
 import os
+import statistics
 import tempfile
 import time
+import tkinter as tk
 import warnings
 from pathlib import Path
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from PIL import Image, ImageTk
 from rclpy.node import Node
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Float32, String
 
 from arm_teleop.hand_math import cross, matrix_to_quat, normalize
 
@@ -18,8 +22,12 @@ class WebcamHandTracker(Node):
     def __init__(self):
         super().__init__("webcam_hand_tracker")
 
-        self.declare_parameter("camera_index", 0)
+        self.declare_parameter("camera_index", -1)
+        self.declare_parameter("camera_width", 640)
+        self.declare_parameter("camera_height", 480)
+        self.declare_parameter("model_complexity", 0)
         self.declare_parameter("show_visualization", True)
+        self.declare_parameter("visualization_scale", 1.6)
         self.declare_parameter("mirror_view", True)
         self.declare_parameter("max_num_hands", 2)
         self.declare_parameter("min_detection_confidence", 0.6)
@@ -32,6 +40,12 @@ class WebcamHandTracker(Node):
         self.declare_parameter("pinky_pinch_off_threshold", 0.080)
         self.declare_parameter("fist_on_threshold", 0.085)
         self.declare_parameter("fist_off_threshold", 0.110)
+        self.declare_parameter("gripper_aperture_min_ratio", 0.55)
+        self.declare_parameter("gripper_aperture_max_ratio", 2.00)
+        self.declare_parameter("gripper_aperture_filter_alpha", 0.18)
+        self.declare_parameter("gripper_aperture_deadband", 0.02)
+        self.declare_parameter("gripper_aperture_max_step", 0.04)
+        self.declare_parameter("gripper_aperture_median_window", 7)
         self.declare_parameter("depth_scale_gain", 0.80)
         self.declare_parameter("depth_raw_blend", 0.15)
         self.declare_parameter("enable_uf850", True)
@@ -47,12 +61,17 @@ class WebcamHandTracker(Node):
         self.left_pinky_pinch_pub = self.create_publisher(Bool, "/teleop_hand_tracking/left/pinky_pinch", 10)
         self.right_fist_pub = self.create_publisher(Bool, "/teleop_hand_tracking/right/fist", 10)
         self.left_fist_pub = self.create_publisher(Bool, "/teleop_hand_tracking/left/fist", 10)
+        self.right_gripper_aperture_pub = self.create_publisher(Float32, "/teleop_hand_tracking/right/gripper_aperture", 10)
+        self.left_gripper_aperture_pub = self.create_publisher(Float32, "/teleop_hand_tracking/left/gripper_aperture", 10)
         self.debug_pub = self.create_publisher(String, "/teleop_hand_tracking/debug", 10)
         self.create_subscription(Bool, "/teleop_status/right_arm_enabled", self._right_arm_enabled_cb, 10)
         self.create_subscription(Bool, "/teleop_status/left_arm_enabled", self._left_arm_enabled_cb, 10)
 
         self._frame_id = self.get_parameter("frame_id").value
+        self._camera_width = int(self.get_parameter("camera_width").value)
+        self._camera_height = int(self.get_parameter("camera_height").value)
         self._show_visualization = bool(self.get_parameter("show_visualization").value)
+        self._visualization_scale = max(float(self.get_parameter("visualization_scale").value), 0.5)
         self._mirror_view = bool(self.get_parameter("mirror_view").value)
         self._period = 1.0 / max(float(self.get_parameter("publish_rate_hz").value), 1.0)
         self._pinch_on_threshold = float(self.get_parameter("pinch_on_threshold").value)
@@ -61,6 +80,18 @@ class WebcamHandTracker(Node):
         self._pinky_pinch_off_threshold = float(self.get_parameter("pinky_pinch_off_threshold").value)
         self._fist_on_threshold = float(self.get_parameter("fist_on_threshold").value)
         self._fist_off_threshold = float(self.get_parameter("fist_off_threshold").value)
+        self._gripper_aperture_min_ratio = float(self.get_parameter("gripper_aperture_min_ratio").value)
+        self._gripper_aperture_max_ratio = max(
+            self._gripper_aperture_min_ratio + 1e-3,
+            float(self.get_parameter("gripper_aperture_max_ratio").value),
+        )
+        self._gripper_aperture_alpha = max(
+            0.01,
+            min(1.0, float(self.get_parameter("gripper_aperture_filter_alpha").value)),
+        )
+        self._gripper_aperture_deadband = max(0.0, float(self.get_parameter("gripper_aperture_deadband").value))
+        self._gripper_aperture_max_step = max(0.001, float(self.get_parameter("gripper_aperture_max_step").value))
+        self._gripper_aperture_median_window = max(1, int(self.get_parameter("gripper_aperture_median_window").value))
         self._depth_scale_gain = float(self.get_parameter("depth_scale_gain").value)
         self._depth_raw_blend = max(0.0, min(1.0, float(self.get_parameter("depth_raw_blend").value)))
         self._enable_uf850 = bool(self.get_parameter("enable_uf850").value)
@@ -72,7 +103,17 @@ class WebcamHandTracker(Node):
         self._pinch_state = {"left": False, "right": False}
         self._pinky_pinch_state = {"left": False, "right": False}
         self._fist_state = {"left": False, "right": False}
+        self._gripper_aperture_state = {
+            "left": {"filtered": 0.0, "initialized": False, "history": deque(maxlen=self._gripper_aperture_median_window)},
+            "right": {"filtered": 0.0, "initialized": False, "history": deque(maxlen=self._gripper_aperture_median_window)},
+        }
         self._arm_enabled = {"right": False, "left": False}
+        self._window_initialized = False
+        self._window_name = "Webcam Hand Tracking"
+        self._window_size = None
+        self._visual_root: tk.Tk | None = None
+        self._visual_label: tk.Label | None = None
+        self._visual_image = None
 
         try:
             import cv2
@@ -91,10 +132,6 @@ class WebcamHandTracker(Node):
             message="Unable to import Axes3D.*",
             category=UserWarning,
         )
-        qt_font_dir = Path(self.cv2.__file__).resolve().parent / "qt" / "fonts"
-        if qt_font_dir.is_dir() and "QT_QPA_FONTDIR" not in os.environ:
-            os.environ["QT_QPA_FONTDIR"] = str(qt_font_dir)
-
         try:
             import mediapipe as mp
         except ModuleNotFoundError as exc:
@@ -103,14 +140,18 @@ class WebcamHandTracker(Node):
             ) from exc
         self.mp = mp
 
-        camera_index = int(self.get_parameter("camera_index").value)
-        self.cap = self.cv2.VideoCapture(camera_index)
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Unable to open webcam index {camera_index}.")
+        requested_camera_index = int(self.get_parameter("camera_index").value)
+        self.camera_index, self.cap = self._open_camera(requested_camera_index)
+        if self.cap is None:
+            available = ", ".join(self._available_video_devices()) or "none"
+            raise RuntimeError(
+                "Unable to open a usable webcam. "
+                f"requested_camera_index={requested_camera_index}, available_devices={available}"
+            )
 
         self.hands = self.mp.solutions.hands.Hands(
             static_image_mode=False,
-            model_complexity=1,
+            model_complexity=int(self.get_parameter("model_complexity").value),
             max_num_hands=int(self.get_parameter("max_num_hands").value),
             min_detection_confidence=float(self.get_parameter("min_detection_confidence").value),
             min_tracking_confidence=float(self.get_parameter("min_tracking_confidence").value),
@@ -119,7 +160,68 @@ class WebcamHandTracker(Node):
         self.hand_styles = self.mp.solutions.drawing_styles
 
         self.timer = self.create_timer(self._period, self._tick)
-        self.get_logger().info("Webcam hand tracker started. Topics: /teleop_hand_tracking/{left,right}/wrist")
+        self.get_logger().info(
+            f"Webcam hand tracker started on camera_index={self.camera_index}. "
+            "Topics: /teleop_hand_tracking/{left,right}/wrist"
+        )
+
+    def _available_video_devices(self) -> list[str]:
+        devices = sorted(Path("/dev").glob("video*"), key=lambda path: path.name)
+        return [str(path) for path in devices]
+
+    def _candidate_camera_indices(self, requested_index: int) -> list[int]:
+        candidates: list[int] = []
+        if requested_index >= 0:
+            candidates.append(requested_index)
+        for device in self._available_video_devices():
+            try:
+                index = int(Path(device).name.replace("video", ""))
+            except ValueError:
+                continue
+            if index not in candidates:
+                candidates.append(index)
+        return candidates
+
+    def _try_open_camera(self, camera_index: int):
+        cap = self.cv2.VideoCapture(camera_index)
+        if not cap.isOpened():
+            cap.release()
+            return None
+        cap.set(self.cv2.CAP_PROP_FOURCC, self.cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(self.cv2.CAP_PROP_FRAME_WIDTH, float(self._camera_width))
+        cap.set(self.cv2.CAP_PROP_FRAME_HEIGHT, float(self._camera_height))
+        ok, _frame = cap.read()
+        if not ok:
+            cap.release()
+            return None
+        return cap
+
+    def _open_camera(self, requested_index: int):
+        attempted: list[int] = []
+        for camera_index in self._candidate_camera_indices(requested_index):
+            attempted.append(camera_index)
+            cap = self._try_open_camera(camera_index)
+            if cap is not None:
+                if requested_index >= 0 and camera_index != requested_index:
+                    self.get_logger().warning(
+                        f"Requested camera_index={requested_index} was unavailable. "
+                        f"Falling back to camera_index={camera_index}."
+                    )
+                elif requested_index < 0:
+                    self.get_logger().info(f"Auto-selected camera_index={camera_index}.")
+                actual_width = int(cap.get(self.cv2.CAP_PROP_FRAME_WIDTH))
+                actual_height = int(cap.get(self.cv2.CAP_PROP_FRAME_HEIGHT))
+                self.get_logger().info(
+                    "Using webcam "
+                    f"camera_index={camera_index} at resolution {actual_width}x{actual_height} "
+                    f"(requested {self._camera_width}x{self._camera_height})."
+                )
+                return camera_index, cap
+        self.get_logger().error(
+            f"Failed to open any usable camera. attempted_indices={attempted}, "
+            f"available_devices={self._available_video_devices()}"
+        )
+        return None, None
 
     def _normalize_hand_name(self, value: str, default: str) -> str:
         hand = value.strip().lower()
@@ -132,10 +234,73 @@ class WebcamHandTracker(Node):
             pass
         try:
             if self._show_visualization:
-                self.cv2.destroyAllWindows()
+                if self._visual_root is not None:
+                    self._visual_root.destroy()
         except Exception:
             pass
         return super().destroy_node()
+
+    def _on_visualization_resize(self, event):
+        if event.widget is self._visual_root and event.width > 1 and event.height > 1:
+            self._window_size = (int(event.width), int(event.height))
+
+    def _close_visualization_window(self):
+        self.get_logger().info("Visualization window requested shutdown.")
+        if self._visual_root is not None:
+            try:
+                self._visual_root.destroy()
+            except Exception:
+                pass
+            self._visual_root = None
+            self._visual_label = None
+            self._visual_image = None
+        time.sleep(0.1)
+        if rclpy.ok():
+            rclpy.shutdown()
+
+    def _ensure_visualization_window(self, frame):
+        if self._window_initialized:
+            return
+        height, width = frame.shape[0], frame.shape[1]
+        window_width = max(int(width * self._visualization_scale), 640)
+        window_height = max(int(height * self._visualization_scale), 480)
+        self._visual_root = tk.Tk()
+        self._visual_root.title(self._window_name)
+        self._visual_root.geometry(f"{window_width}x{window_height}")
+        self._visual_root.minsize(320, 240)
+        self._visual_root.configure(bg="black")
+        self._visual_root.protocol("WM_DELETE_WINDOW", self._close_visualization_window)
+        self._visual_root.bind("<Configure>", self._on_visualization_resize)
+        self._visual_label = tk.Label(self._visual_root, bg="black", bd=0, highlightthickness=0)
+        self._visual_label.pack(fill=tk.BOTH, expand=True)
+        self._visual_root.update_idletasks()
+        self._window_size = (
+            max(self._visual_label.winfo_width(), window_width),
+            max(self._visual_label.winfo_height(), window_height),
+        )
+        self._window_initialized = True
+
+    def _show_visualization_frame(self, frame):
+        self._ensure_visualization_window(frame)
+        if self._visual_root is None or self._visual_label is None:
+            return
+        current_width = max(self._visual_label.winfo_width(), 1)
+        current_height = max(self._visual_label.winfo_height(), 1)
+        self._window_size = (current_width, current_height)
+        display_frame = self.cv2.resize(
+            frame,
+            (current_width, current_height),
+            interpolation=self.cv2.INTER_LINEAR,
+        )
+        rgb_frame = self.cv2.cvtColor(display_frame, self.cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(rgb_frame)
+        self._visual_image = ImageTk.PhotoImage(image=image)
+        self._visual_label.configure(image=self._visual_image)
+        try:
+            self._visual_root.update_idletasks()
+            self._visual_root.update()
+        except tk.TclError:
+            self._close_visualization_window()
 
     def _normalized_point(self, landmark) -> list[float]:
         return [
@@ -235,6 +400,32 @@ class WebcamHandTracker(Node):
         self._fist_state[label] = current
         return current, average_distance
 
+    def _compute_gripper_aperture(self, hand_landmarks) -> tuple[float, float]:
+        thumb_tip = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.THUMB_TIP])
+        index_tip = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.INDEX_FINGER_TIP])
+        thumb_index_distance = sum((thumb_tip[i] - index_tip[i]) ** 2 for i in range(3)) ** 0.5
+
+        index_mcp = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.INDEX_FINGER_MCP])
+        pinky_mcp = self._normalized_point(hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.PINKY_MCP])
+        palm_width = sum((index_mcp[i] - pinky_mcp[i]) ** 2 for i in range(3)) ** 0.5
+        if palm_width < 1e-6:
+            return 0.0, thumb_index_distance
+
+        aperture_ratio = thumb_index_distance / palm_width
+        normalized_aperture = (aperture_ratio - self._gripper_aperture_min_ratio) / (
+            self._gripper_aperture_max_ratio - self._gripper_aperture_min_ratio
+        )
+        normalized_aperture = max(0.0, min(1.0, normalized_aperture))
+        return normalized_aperture, aperture_ratio
+
+    def _filter_gripper_aperture(self, hand: str, aperture: float) -> float:
+        # Only apply a short median window to reject single-frame outliers.
+        # All smoothing, deadband, and hysteresis is handled in the teleop node.
+        state = self._gripper_aperture_state[hand]
+        raw = max(0.0, min(1.0, float(aperture)))
+        state["history"].append(raw)
+        return float(statistics.median(state["history"]))
+
     def _publish_pose(self, publisher, position: list[float], quat: list[float]):
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -308,6 +499,8 @@ class WebcamHandTracker(Node):
                 pinch, pinch_distance = self._compute_pinch(hand_landmarks, label)
                 pinky_pinch, pinky_pinch_distance = self._compute_pinky_pinch(hand_landmarks, label)
                 fist, fist_metric = self._compute_fist(hand_landmarks, label)
+                gripper_aperture_raw, gripper_aperture_ratio = self._compute_gripper_aperture(hand_landmarks)
+                gripper_aperture = self._filter_gripper_aperture(label, gripper_aperture_raw)
                 tracked[label] = {
                     "pose": pose,
                     "pinch": pinch,
@@ -316,6 +509,8 @@ class WebcamHandTracker(Node):
                     "pinky_pinch_distance": pinky_pinch_distance,
                     "fist": fist,
                     "fist_metric": fist_metric,
+                    "gripper_aperture": gripper_aperture,
+                    "gripper_aperture_ratio": gripper_aperture_ratio,
                 }
                 wrist, quat = pose
                 debug_lines.append(
@@ -323,6 +518,7 @@ class WebcamHandTracker(Node):
                     f"pinch={'on' if pinch else 'off'} d={pinch_distance:.3f} "
                     f"pinky={'on' if pinky_pinch else 'off'} d={pinky_pinch_distance:.3f} "
                     f"fist={'on' if fist else 'off'} m={fist_metric:.3f} "
+                    f"grip={gripper_aperture:.2f} raw={gripper_aperture_raw:.2f} r={gripper_aperture_ratio:.2f} "
                     f"quat=({quat[0]:+.2f},{quat[1]:+.2f},{quat[2]:+.2f},{quat[3]:+.2f})"
                 )
                 if self._show_visualization:
@@ -333,18 +529,22 @@ class WebcamHandTracker(Node):
                         self.hand_styles.get_default_hand_landmarks_style(),
                         self.hand_styles.get_default_hand_connections_style(),
                     )
+                    thumb_tip_px = hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.THUMB_TIP]
+                    index_tip_px = hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.INDEX_FINGER_TIP]
+                    thumb_point = (
+                        int(thumb_tip_px.x * frame.shape[1]),
+                        int(thumb_tip_px.y * frame.shape[0]),
+                    )
+                    index_point = (
+                        int(index_tip_px.x * frame.shape[1]),
+                        int(index_tip_px.y * frame.shape[0]),
+                    )
+                    self.cv2.line(frame, thumb_point, index_point, (0, 255, 255), 3)
+                    self.cv2.circle(frame, thumb_point, 6, (0, 255, 255), -1)
+                    self.cv2.circle(frame, index_point, 6, (0, 255, 255), -1)
                     wrist_px = hand_landmarks.landmark[self.mp.solutions.hands.HandLandmark.WRIST]
                     x_px = int(wrist_px.x * frame.shape[1])
                     y_px = int(wrist_px.y * frame.shape[0])
-                    self.cv2.putText(
-                        frame,
-                        f"{label.upper()} {'PINCH' if pinch else ''} {'FIST' if fist else ''} {'PINKY' if pinky_pinch else ''}",
-                        (x_px + 10, y_px - 10),
-                        self.cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        (0, 255, 0) if label == "right" else (255, 180, 0),
-                        2,
-                    )
 
         if "right" in tracked:
             self._publish_pose(self.right_pub, tracked["right"]["pose"][0], tracked["right"]["pose"][1])
@@ -369,42 +569,19 @@ class WebcamHandTracker(Node):
         left_fist_msg = Bool()
         left_fist_msg.data = bool(tracked.get("left", {}).get("fist", False))
         self.left_fist_pub.publish(left_fist_msg)
+        right_gripper_aperture_msg = Float32()
+        right_gripper_aperture_msg.data = float(tracked.get("right", {}).get("gripper_aperture", 0.0))
+        self.right_gripper_aperture_pub.publish(right_gripper_aperture_msg)
+        left_gripper_aperture_msg = Float32()
+        left_gripper_aperture_msg.data = float(tracked.get("left", {}).get("gripper_aperture", 0.0))
+        self.left_gripper_aperture_pub.publish(left_gripper_aperture_msg)
 
         debug_msg = String()
         debug_msg.data = " | ".join(debug_lines) if debug_lines else "no hands tracked"
         self.debug_pub.publish(debug_msg)
 
         if self._show_visualization:
-            status = f"L:{'yes' if 'left' in tracked else 'no'} R:{'yes' if 'right' in tracked else 'no'}"
-            uf850_text, uf850_color = self._robot_status_text("uf850")
-            xarm5_text, xarm5_color = self._robot_status_text("xarm5")
-            self.cv2.putText(frame, "Webcam Hand Tracking", (20, 30), self.cv2.FONT_HERSHEY_SIMPLEX, 0.9, (40, 220, 40), 2)
-            self.cv2.putText(frame, status, (20, 60), self.cv2.FONT_HERSHEY_SIMPLEX, 0.7, (40, 220, 220), 2)
-            self.cv2.putText(
-                frame,
-                uf850_text,
-                (20, 90),
-                self.cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                uf850_color,
-                2,
-            )
-            self.cv2.putText(
-                frame,
-                xarm5_text,
-                (20, 120),
-                self.cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                xarm5_color,
-                2,
-            )
-            self.cv2.imshow("Webcam Hand Tracking", frame)
-            key = self.cv2.waitKey(1) & 0xFF
-            if key in (27, ord("q")):
-                self.get_logger().info("Visualization window requested shutdown.")
-                time.sleep(0.1)
-                if rclpy.ok():
-                    rclpy.shutdown()
+            self._show_visualization_frame(frame)
 
 
 def main(args=None):

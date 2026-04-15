@@ -135,6 +135,39 @@ def matrix_to_quat(matrix: list[list[float]]) -> list[float]:
     return quat_normalize([qx, qy, qz, qw])
 
 
+def quat_to_rpy(q: Iterable[float]) -> tuple[float, float, float]:
+    """Convert quaternion [qx, qy, qz, qw] to (roll, pitch, yaw) in radians (ZYX convention)."""
+    qx, qy, qz, qw = quat_normalize(q)
+    sinr_cosp = 2.0 * (qw * qx + qy * qz)
+    cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+    sinp = 2.0 * (qw * qy - qz * qx)
+    if abs(sinp) >= 1.0:
+        pitch = math.copysign(math.pi / 2.0, sinp)
+    else:
+        pitch = math.asin(sinp)
+    siny_cosp = 2.0 * (qw * qz + qx * qy)
+    cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+    return roll, pitch, yaw
+
+
+def rpy_to_quat(roll: float, pitch: float, yaw: float) -> list[float]:
+    """Convert (roll, pitch, yaw) in radians (ZYX convention) to quaternion [qx, qy, qz, qw]."""
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+    return quat_normalize([
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    ])
+
+
 def quaternion_slerp(q0: Iterable[float], q1: Iterable[float], alpha: float) -> list[float]:
     ax, ay, az, aw = quat_normalize(q0)
     bx, by, bz, bw = quat_normalize(q1)

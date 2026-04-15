@@ -1,10 +1,37 @@
 from glob import glob
 import os
+import sys
+
+# Prefer the system setuptools shipped with ROS/Ubuntu over a newer user-local
+# setuptools, which changes `setup.py develop` semantics in a way that breaks
+# ament_python/colcon editable installs.
+sys.path = [path for path in sys.path if "/.local/lib/python" not in path]
 
 from setuptools import setup
+from setuptools.command.develop import develop as _develop
 
 
 package_name = "arm_teleop"
+
+if "develop" in sys.argv:
+    for flag in ("--uninstall", "--editable"):
+        if flag in sys.argv:
+            sys.argv.remove(flag)
+    if "--build-directory" in sys.argv:
+        idx = sys.argv.index("--build-directory")
+        del sys.argv[idx : idx + 2]
+
+
+class DevelopCommand(_develop):
+    user_options = _develop.user_options + [
+        ("script-dir=", None, "compat no-op for colcon"),
+        ("install-scripts=", None, "compat no-op for colcon"),
+    ]
+
+    def initialize_options(self):
+        super().initialize_options()
+        self.script_dir = None
+        self.install_scripts = None
 
 
 setup(
@@ -29,6 +56,8 @@ setup(
             "webcam_hand_tracker = arm_teleop.webcam_hand_tracker:main",
             "exotica_arm_teleop = arm_teleop.exotica_arm_teleop:main",
             "wait_for_exotica_ready = arm_teleop.wait_for_exotica_ready:main",
+            "teleop_control_panel = arm_teleop.teleop_control_panel:main",
         ],
     },
+    cmdclass={"develop": DevelopCommand},
 )
