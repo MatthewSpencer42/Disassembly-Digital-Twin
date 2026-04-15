@@ -49,3 +49,9 @@ exotica_arm_teleop:
        0.0, 1.0, 0.0]
     uf850.track_orientation: true
     xarm5.track_orientation: false
+    # Gripper binary mode: snap fully open/closed based on thumb-index distance.
+    # Aperture < close_threshold → close; aperture > open_threshold → open.
+    # The gap between the two values is the hysteresis dead-band.
+    gripper_binary_mode: true
+    gripper_close_threshold: 0.35
+    gripper_open_threshold: 0.40

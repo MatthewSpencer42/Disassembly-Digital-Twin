@@ -103,6 +103,13 @@ class ExoticaArmTeleop(Node):
         # hand tracking's actual output range.
         self.declare_parameter("gripper_aperture_min", 0.10)
         self.declare_parameter("gripper_aperture_max", 0.90)
+        # Binary gripper mode: instead of continuously following hand aperture, the
+        # gripper snaps fully closed when aperture drops below gripper_close_threshold
+        # and fully opens when it rises above gripper_open_threshold.  The two thresholds
+        # create a hysteresis band that prevents rapid toggling near the boundary.
+        self.declare_parameter("gripper_binary_mode", True)
+        self.declare_parameter("gripper_close_threshold", 0.35)
+        self.declare_parameter("gripper_open_threshold", 0.55)
 
         self._hardware_type = str(self.get_parameter("hardware_type").value)
         self._rate_hz = max(float(self.get_parameter("control_rate_hz").value), 1.0)
@@ -127,6 +134,9 @@ class ExoticaArmTeleop(Node):
         self._gripper_aperture_hysteresis = max(0.0, float(self.get_parameter("gripper_aperture_hysteresis").value))
         self._gripper_aperture_min = float(self.get_parameter("gripper_aperture_min").value)
         self._gripper_aperture_max = float(self.get_parameter("gripper_aperture_max").value)
+        self._gripper_binary_mode = bool(self.get_parameter("gripper_binary_mode").value)
+        self._gripper_close_threshold = float(self.get_parameter("gripper_close_threshold").value)
+        self._gripper_open_threshold = float(self.get_parameter("gripper_open_threshold").value)
 
         rotation_raw = [float(v) for v in self.get_parameter("camera_to_base_rotation").value]
         self._camera_to_base = [
@@ -146,6 +156,8 @@ class ExoticaArmTeleop(Node):
         # Per-hand low-pass filter state and hysteresis tracking.
         self._gripper_aperture_filter: dict[str, float | None] = {"right": None, "left": None}
         self._gripper_last_committed_aperture: dict[str, float | None] = {"right": None, "left": None}
+        # Binary mode: last commanded state (True=closed, False=open, None=unknown).
+        self._gripper_binary_state: dict[str, bool | None] = {"right": None, "left": None}
         # Minimum seconds of continuous hand tracking required before calibration.
         # Prevents calibrating on the first noisy frame when the hand enters view.
         self._calibration_stability_sec = 0.5
@@ -421,6 +433,7 @@ class ExoticaArmTeleop(Node):
         arm["last_gripper_command"] = None
         self._gripper_aperture_filter[hand] = None
         self._gripper_last_committed_aperture[hand] = None
+        self._gripper_binary_state[hand] = None
         state = "ENABLED" if enabled else "DISABLED"
         self.get_logger().info(f"[{arm['label']}] Teleoperation {state} via UI/service command.")
         self._publish_arm_enabled_status()
@@ -491,15 +504,16 @@ class ExoticaArmTeleop(Node):
             self._gripper_aperture_state[hand_name]["stamp"] = 0.0
             self._gripper_aperture_filter[hand_name] = None
             self._gripper_last_committed_aperture[hand_name] = None
+            self._gripper_binary_state[hand_name] = None
 
     def _command_gripper(self, arm: dict, closed: bool) -> bool:
         target = arm["gripper_closed_position"] if closed else arm["gripper_open_position"]
         backend = arm["gripper_backend"]
         if arm["label"] == "right/uf850":
-            return backend.move_gripper(target, velocity=0.5)
+            return backend.move_gripper(target, velocity=1.0)
         return backend.move_to_joint_positions(
             {arm["gripper_joint_name"]: float(target)},
-            velocity=0.5,
+            velocity=1.0,
         )
 
     def _current_gripper_aperture(self, hand: str):
@@ -515,10 +529,32 @@ class ExoticaArmTeleop(Node):
         if aperture is None:
             return
 
-        # Hysteresis gate: only send a command when the (already low-pass filtered)
-        # aperture moves more than gripper_aperture_hysteresis from the last sent value.
-        # The strong alpha=0.12 filter absorbs sensor noise; the hysteresis keeps the
-        # gripper still when the hand is steady despite residual filter wobble.
+        if self._gripper_binary_mode:
+            # Binary snap: close when aperture < close_threshold, open when > open_threshold.
+            # The gap between the two thresholds is a hysteresis band that prevents rapid
+            # toggling when the finger width hovers near the decision boundary.
+            last_binary = self._gripper_binary_state[hand_name]
+            want_closed: bool | None = None
+            if aperture < self._gripper_close_threshold:
+                want_closed = True
+            elif aperture > self._gripper_open_threshold:
+                want_closed = False
+            # In the dead-band region (between thresholds) keep the last state.
+            if want_closed is None or want_closed == last_binary:
+                return
+            self._gripper_binary_state[hand_name] = want_closed
+            state = "closed" if want_closed else "open"
+            if self._command_gripper(arm, want_closed):
+                self.get_logger().info(
+                    f"[{arm['label']}] Binary gripper → {state} (aperture={aperture:.2f})"
+                )
+            else:
+                self.get_logger().warning(
+                    f"[{arm['label']}] Binary gripper command failed (→ {state})"
+                )
+            return
+
+        # Continuous follow mode (legacy): hysteresis gate on the filtered aperture.
         last_committed = self._gripper_last_committed_aperture[hand_name]
         if last_committed is not None and abs(aperture - last_committed) < self._gripper_aperture_hysteresis:
             return
