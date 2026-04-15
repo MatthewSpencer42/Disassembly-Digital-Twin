@@ -17,7 +17,9 @@ from arm_teleop.hand_math import (
     mat_vec_mul,
     quat_conjugate,
     quat_multiply,
+    quat_to_rpy,
     quaternion_slerp,
+    rpy_to_quat,
     vec_add,
     vec_scale,
     vec_sub,
@@ -85,6 +87,12 @@ class ExoticaArmTeleop(Node):
         self.declare_parameter("camera_to_base_rotation", [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
         self.declare_parameter("uf850.track_orientation", True)
         self.declare_parameter("xarm5.track_orientation", False)
+        # xArm5 is 5-DOF (joints: Z-Y-Y-X-Y).  Roll is kinematically coupled and cannot
+        # be commanded independently (no terminal wrist-roll joint).  Yaw and pitch can be
+        # enabled individually; each zeroes the other unused delta components before passing
+        # the reconstructed quaternion to EXOTica.
+        self.declare_parameter("xarm5.track_yaw", True)
+        self.declare_parameter("xarm5.track_pitch", False)
         self.declare_parameter("gripper_command_alpha", 0.45)
         self.declare_parameter("gripper_command_deadband", 0.005)
         self.declare_parameter("gripper_max_step", 0.06)
@@ -95,6 +103,13 @@ class ExoticaArmTeleop(Node):
         # hand tracking's actual output range.
         self.declare_parameter("gripper_aperture_min", 0.10)
         self.declare_parameter("gripper_aperture_max", 0.90)
+        # Binary gripper mode: instead of continuously following hand aperture, the
+        # gripper snaps fully closed when aperture drops below gripper_close_threshold
+        # and fully opens when it rises above gripper_open_threshold.  The two thresholds
+        # create a hysteresis band that prevents rapid toggling near the boundary.
+        self.declare_parameter("gripper_binary_mode", True)
+        self.declare_parameter("gripper_close_threshold", 0.35)
+        self.declare_parameter("gripper_open_threshold", 0.55)
 
         self._hardware_type = str(self.get_parameter("hardware_type").value)
         self._rate_hz = max(float(self.get_parameter("control_rate_hz").value), 1.0)
@@ -119,6 +134,9 @@ class ExoticaArmTeleop(Node):
         self._gripper_aperture_hysteresis = max(0.0, float(self.get_parameter("gripper_aperture_hysteresis").value))
         self._gripper_aperture_min = float(self.get_parameter("gripper_aperture_min").value)
         self._gripper_aperture_max = float(self.get_parameter("gripper_aperture_max").value)
+        self._gripper_binary_mode = bool(self.get_parameter("gripper_binary_mode").value)
+        self._gripper_close_threshold = float(self.get_parameter("gripper_close_threshold").value)
+        self._gripper_open_threshold = float(self.get_parameter("gripper_open_threshold").value)
 
         rotation_raw = [float(v) for v in self.get_parameter("camera_to_base_rotation").value]
         self._camera_to_base = [
@@ -138,6 +156,8 @@ class ExoticaArmTeleop(Node):
         # Per-hand low-pass filter state and hysteresis tracking.
         self._gripper_aperture_filter: dict[str, float | None] = {"right": None, "left": None}
         self._gripper_last_committed_aperture: dict[str, float | None] = {"right": None, "left": None}
+        # Binary mode: last commanded state (True=closed, False=open, None=unknown).
+        self._gripper_binary_state: dict[str, bool | None] = {"right": None, "left": None}
         # Minimum seconds of continuous hand tracking required before calibration.
         # Prevents calibrating on the first noisy frame when the hand enters view.
         self._calibration_stability_sec = 0.5
@@ -202,6 +222,8 @@ class ExoticaArmTeleop(Node):
             "min_tcp_z": float(self.get_parameter("xarm5.min_tcp_z").value),
             "max_tcp_z": float(self.get_parameter("xarm5.max_tcp_z").value),
             "track_orientation": False,
+            "track_yaw": bool(self.get_parameter("xarm5.track_yaw").value),
+            "track_pitch": bool(self.get_parameter("xarm5.track_pitch").value),
             "origin_hand_pos": None,
             "origin_hand_quat": None,
             "origin_robot_pos": None,
@@ -329,7 +351,9 @@ class ExoticaArmTeleop(Node):
             f"EXOTica arm teleop node started. uf850 is on {uf850_hand}, xarm5 is on {xarm5_hand}. "
             "Arm teleop is controlled from the UI/services. xarm5 gripper follows hand aperture when available; "
             "pinky pinch remains a fallback toggle. "
-            "xarm5 orientation tracking is locked off."
+            "xarm5 orientation: yaw=" + str(bool(self.get_parameter("xarm5.track_yaw").value))
+            + " pitch=" + str(bool(self.get_parameter("xarm5.track_pitch").value))
+            + " roll=False (5-DOF kinematic limit)."
         )
         self._publish_arm_enabled_status()
 
@@ -409,6 +433,7 @@ class ExoticaArmTeleop(Node):
         arm["last_gripper_command"] = None
         self._gripper_aperture_filter[hand] = None
         self._gripper_last_committed_aperture[hand] = None
+        self._gripper_binary_state[hand] = None
         state = "ENABLED" if enabled else "DISABLED"
         self.get_logger().info(f"[{arm['label']}] Teleoperation {state} via UI/service command.")
         self._publish_arm_enabled_status()
@@ -479,15 +504,16 @@ class ExoticaArmTeleop(Node):
             self._gripper_aperture_state[hand_name]["stamp"] = 0.0
             self._gripper_aperture_filter[hand_name] = None
             self._gripper_last_committed_aperture[hand_name] = None
+            self._gripper_binary_state[hand_name] = None
 
     def _command_gripper(self, arm: dict, closed: bool) -> bool:
         target = arm["gripper_closed_position"] if closed else arm["gripper_open_position"]
         backend = arm["gripper_backend"]
         if arm["label"] == "right/uf850":
-            return backend.move_gripper(target, velocity=0.5)
+            return backend.move_gripper(target, velocity=1.0)
         return backend.move_to_joint_positions(
             {arm["gripper_joint_name"]: float(target)},
-            velocity=0.5,
+            velocity=1.0,
         )
 
     def _current_gripper_aperture(self, hand: str):
@@ -503,10 +529,32 @@ class ExoticaArmTeleop(Node):
         if aperture is None:
             return
 
-        # Hysteresis gate: only send a command when the (already low-pass filtered)
-        # aperture moves more than gripper_aperture_hysteresis from the last sent value.
-        # The strong alpha=0.12 filter absorbs sensor noise; the hysteresis keeps the
-        # gripper still when the hand is steady despite residual filter wobble.
+        if self._gripper_binary_mode:
+            # Binary snap: close when aperture < close_threshold, open when > open_threshold.
+            # The gap between the two thresholds is a hysteresis band that prevents rapid
+            # toggling when the finger width hovers near the decision boundary.
+            last_binary = self._gripper_binary_state[hand_name]
+            want_closed: bool | None = None
+            if aperture < self._gripper_close_threshold:
+                want_closed = True
+            elif aperture > self._gripper_open_threshold:
+                want_closed = False
+            # In the dead-band region (between thresholds) keep the last state.
+            if want_closed is None or want_closed == last_binary:
+                return
+            self._gripper_binary_state[hand_name] = want_closed
+            state = "closed" if want_closed else "open"
+            if self._command_gripper(arm, want_closed):
+                self.get_logger().info(
+                    f"[{arm['label']}] Binary gripper → {state} (aperture={aperture:.2f})"
+                )
+            else:
+                self.get_logger().warning(
+                    f"[{arm['label']}] Binary gripper command failed (→ {state})"
+                )
+            return
+
+        # Continuous follow mode (legacy): hysteresis gate on the filtered aperture.
         last_committed = self._gripper_last_committed_aperture[hand_name]
         if last_committed is not None and abs(aperture - last_committed) < self._gripper_aperture_hysteresis:
             return
@@ -760,8 +808,20 @@ class ExoticaArmTeleop(Node):
         target_position = self._clamp_position(arm, unclamped_position)
 
         if arm["track_orientation"]:
+            # Full 6-DOF orientation tracking (UF850 / 6-DOF arms).
             hand_delta_quat = quat_multiply(current_hand_quat, quat_conjugate(arm["origin_hand_quat"]))
             target_quat = quat_multiply(hand_delta_quat, arm["origin_robot_quat"])
+        elif arm.get("track_yaw", False) or arm.get("track_pitch", False):
+            # Partial orientation tracking for 5-DOF arms (xArm5: joints Z-Y-Y-X-Y).
+            # Roll is kinematically coupled (no terminal wrist-roll joint) and is always
+            # kept at the calibration-moment value.  Yaw and pitch are independently
+            # selectable via the track_yaw / track_pitch parameters.
+            hand_delta_quat = quat_multiply(current_hand_quat, quat_conjugate(arm["origin_hand_quat"]))
+            _, delta_pitch, delta_yaw = quat_to_rpy(hand_delta_quat)
+            active_pitch = delta_pitch if arm.get("track_pitch", False) else 0.0
+            active_yaw   = delta_yaw   if arm.get("track_yaw",   False) else 0.0
+            partial_delta_quat = rpy_to_quat(0.0, active_pitch, active_yaw)
+            target_quat = quat_multiply(partial_delta_quat, arm["origin_robot_quat"])
         else:
             target_quat = arm["origin_robot_quat"]
 
