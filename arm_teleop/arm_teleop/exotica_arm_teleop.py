@@ -85,7 +85,13 @@ class ExoticaArmTeleop(Node):
         self.declare_parameter("xarm5.min_tcp_z", 0.92706)
         self.declare_parameter("xarm5.max_tcp_z", 1.28452)
         self.declare_parameter("camera_to_base_rotation", [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
-        self.declare_parameter("uf850.track_orientation", True)
+        # UF850 is 6-DOF.  By default only yaw is tracked; pitch and roll can be
+        # enabled individually via launch args.  Setting track_orientation=True enables
+        # full 6-DOF tracking and overrides the individual yaw/pitch/roll flags.
+        self.declare_parameter("uf850.track_orientation", False)
+        self.declare_parameter("uf850.track_yaw", True)
+        self.declare_parameter("uf850.track_pitch", False)
+        self.declare_parameter("uf850.track_roll", False)
         self.declare_parameter("xarm5.track_orientation", False)
         # xArm5 is 5-DOF (joints: Z-Y-Y-X-Y).  Roll is kinematically coupled and cannot
         # be commanded independently (no terminal wrist-roll joint).  Yaw and pitch can be
@@ -190,6 +196,9 @@ class ExoticaArmTeleop(Node):
             "min_tcp_z": float(self.get_parameter("uf850.min_tcp_z").value),
             "max_tcp_z": float(self.get_parameter("uf850.max_tcp_z").value),
             "track_orientation": bool(self.get_parameter("uf850.track_orientation").value),
+            "track_yaw": bool(self.get_parameter("uf850.track_yaw").value),
+            "track_pitch": bool(self.get_parameter("uf850.track_pitch").value),
+            "track_roll": bool(self.get_parameter("uf850.track_roll").value),
             "origin_hand_pos": None,
             "origin_hand_quat": None,
             "origin_robot_pos": None,
@@ -207,7 +216,7 @@ class ExoticaArmTeleop(Node):
             "gripper_open_position": -0.625,
             "gripper_closed_position": 0.625,
             "gripper_closed": False,
-            "gripper_follow_hand": False,
+            "gripper_follow_hand": True,
             "last_gripper_command": None,
             "_ik_lock": threading.Lock(),
             "_last_filtered_joints": None,
@@ -347,11 +356,17 @@ class ExoticaArmTeleop(Node):
             self._tick,
             callback_group=self._cb_group,
         )
+        uf850_full_orient = bool(self.get_parameter("uf850.track_orientation").value)
         self.get_logger().info(
             f"EXOTica arm teleop node started. uf850 is on {uf850_hand}, xarm5 is on {xarm5_hand}. "
-            "Arm teleop is controlled from the UI/services. xarm5 gripper follows hand aperture when available; "
-            "pinky pinch remains a fallback toggle. "
-            "xarm5 orientation: yaw=" + str(bool(self.get_parameter("xarm5.track_yaw").value))
+            "Arm teleop is controlled from the UI/services. Both grippers follow hand aperture (binary mode). "
+            "uf850 orientation: "
+            + ("full 6-DOF" if uf850_full_orient else (
+                "yaw=" + str(bool(self.get_parameter("uf850.track_yaw").value))
+                + " pitch=" + str(bool(self.get_parameter("uf850.track_pitch").value))
+                + " roll=" + str(bool(self.get_parameter("uf850.track_roll").value))
+            ))
+            + ".  xarm5 orientation: yaw=" + str(bool(self.get_parameter("xarm5.track_yaw").value))
             + " pitch=" + str(bool(self.get_parameter("xarm5.track_pitch").value))
             + " roll=False (5-DOF kinematic limit)."
         )
@@ -509,7 +524,7 @@ class ExoticaArmTeleop(Node):
     def _command_gripper(self, arm: dict, closed: bool) -> bool:
         target = arm["gripper_closed_position"] if closed else arm["gripper_open_position"]
         backend = arm["gripper_backend"]
-        if arm["label"] == "right/uf850":
+        if arm["robot_name"] == "uf850":
             return backend.move_gripper(target, velocity=1.0)
         return backend.move_to_joint_positions(
             {arm["gripper_joint_name"]: float(target)},
@@ -555,6 +570,16 @@ class ExoticaArmTeleop(Node):
             return
 
         # Continuous follow mode (legacy): hysteresis gate on the filtered aperture.
+        # RG6 gripper (uf850) has no gripper_joint_name — use binary _command_gripper instead.
+        if "gripper_joint_name" not in arm:
+            last_binary = self._gripper_binary_state[hand_name]
+            want_closed = aperture < 0.5
+            if want_closed == last_binary:
+                return
+            self._gripper_binary_state[hand_name] = want_closed
+            self._command_gripper(arm, want_closed)
+            return
+
         last_committed = self._gripper_last_committed_aperture[hand_name]
         if last_committed is not None and abs(aperture - last_committed) < self._gripper_aperture_hysteresis:
             return
@@ -808,19 +833,19 @@ class ExoticaArmTeleop(Node):
         target_position = self._clamp_position(arm, unclamped_position)
 
         if arm["track_orientation"]:
-            # Full 6-DOF orientation tracking (UF850 / 6-DOF arms).
+            # Full 6-DOF orientation tracking.
             hand_delta_quat = quat_multiply(current_hand_quat, quat_conjugate(arm["origin_hand_quat"]))
             target_quat = quat_multiply(hand_delta_quat, arm["origin_robot_quat"])
-        elif arm.get("track_yaw", False) or arm.get("track_pitch", False):
-            # Partial orientation tracking for 5-DOF arms (xArm5: joints Z-Y-Y-X-Y).
-            # Roll is kinematically coupled (no terminal wrist-roll joint) and is always
-            # kept at the calibration-moment value.  Yaw and pitch are independently
-            # selectable via the track_yaw / track_pitch parameters.
+        elif arm.get("track_yaw", False) or arm.get("track_pitch", False) or arm.get("track_roll", False):
+            # Partial orientation tracking: each axis is independently selectable.
+            # xArm5 (5-DOF): roll is kinematically coupled — track_roll is never set.
+            # UF850 (6-DOF): any combination of yaw/pitch/roll can be enabled.
             hand_delta_quat = quat_multiply(current_hand_quat, quat_conjugate(arm["origin_hand_quat"]))
-            _, delta_pitch, delta_yaw = quat_to_rpy(hand_delta_quat)
+            delta_roll, delta_pitch, delta_yaw = quat_to_rpy(hand_delta_quat)
+            active_roll  = delta_roll  if arm.get("track_roll",  False) else 0.0
             active_pitch = delta_pitch if arm.get("track_pitch", False) else 0.0
             active_yaw   = delta_yaw   if arm.get("track_yaw",   False) else 0.0
-            partial_delta_quat = rpy_to_quat(0.0, active_pitch, active_yaw)
+            partial_delta_quat = rpy_to_quat(active_roll, active_pitch, active_yaw)
             target_quat = quat_multiply(partial_delta_quat, arm["origin_robot_quat"])
         else:
             target_quat = arm["origin_robot_quat"]

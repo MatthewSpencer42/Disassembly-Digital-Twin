@@ -22,6 +22,9 @@ def generate_launch_description():
     uf850_hand = LaunchConfiguration("uf850_hand")
     xarm5_hand = LaunchConfiguration("xarm5_hand")
     camera_index = LaunchConfiguration("camera_index")
+    uf850_track_orientation = LaunchConfiguration("uf850_track_orientation")
+    uf850_track_pitch = LaunchConfiguration("uf850_track_pitch")
+    uf850_track_roll = LaunchConfiguration("uf850_track_roll")
 
     webcam_tracker = Node(
         package="arm_teleop",
@@ -62,6 +65,9 @@ def generate_launch_description():
                 "enable_xarm5": enable_xarm5,
                 "uf850.hand": uf850_hand,
                 "xarm5.hand": xarm5_hand,
+                "uf850.track_orientation": uf850_track_orientation,
+                "uf850.track_pitch": uf850_track_pitch,
+                "uf850.track_roll": uf850_track_roll,
             },
         ],
     )
@@ -84,6 +90,9 @@ def generate_launch_description():
             DeclareLaunchArgument("uf850_hand", default_value="right"),
             DeclareLaunchArgument("xarm5_hand", default_value="left"),
             DeclareLaunchArgument("camera_index", default_value="-1"),
+            DeclareLaunchArgument("uf850_track_orientation", default_value="false"),
+            DeclareLaunchArgument("uf850_track_pitch", default_value="false"),
+            DeclareLaunchArgument("uf850_track_roll", default_value="false"),
             DeclareLaunchArgument(
                 "config_file",
                 default_value=str(package_share / "config" / "webcam_exotica_teleop.yaml"),
