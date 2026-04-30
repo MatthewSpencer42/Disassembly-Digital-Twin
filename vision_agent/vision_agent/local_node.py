@@ -3,6 +3,10 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from vision_agent.runtime_env import setup_python_env
+
+setup_python_env(__file__)
+
 import cv2
 import rclpy
 from cv_bridge import CvBridge
@@ -14,6 +18,7 @@ from vision_agent.common import (
     LOCAL_CROSSHAIR_OFFSET_X,
     LOCAL_CROSSHAIR_OFFSET_Y,
     LOCAL_INFERENCE_EVERY_N_FRAMES,
+    LOCAL_COLOR_TOPIC,
     PATH_SNIPER,
     PERF_LOG_INTERVAL_SEC,
     PROCESSING_RATE_HZ,
@@ -38,7 +43,7 @@ class LocalVisionNode(Node):
 
         self.create_subscription(
             CompressedImage,
-            "/tool_cam/image_raw/compressed",
+            LOCAL_COLOR_TOPIC,
             self.cb_local,
             10,
         )
@@ -60,6 +65,8 @@ class LocalVisionNode(Node):
         stat[1] += 1
 
     def _maybe_log_perf(self):
+        if PERF_LOG_INTERVAL_SEC <= 0:
+            return
         now = time.time()
         if now - self._perf_time < PERF_LOG_INTERVAL_SEC:
             return
@@ -97,6 +104,7 @@ class LocalVisionNode(Node):
         cross_x = (w_loc // 2) + LOCAL_CROSSHAIR_OFFSET_X
         cross_y = (h_loc // 2) + LOCAL_CROSSHAIR_OFFSET_Y
         packet["crosshair"] = [int(cross_x), int(cross_y)]
+        packet["image_size"] = [int(w_loc), int(h_loc)]
         packet["timestamp"] = self.get_clock().now().nanoseconds
         self.state_pub.publish(String(data=json.dumps(packet)))
         self.frame_counter += 1
@@ -110,9 +118,18 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.pool.shutdown(wait=False, cancel_futures=True)
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

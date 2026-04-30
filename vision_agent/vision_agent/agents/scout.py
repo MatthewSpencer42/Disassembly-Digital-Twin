@@ -15,7 +15,7 @@ class ScoutAgent:
             'Spindle_Hub', 'Top_Lid', 'Voice_Coil_Magnet'
         ]
 
-    def scan(self, frame):
+    def scan(self, frame, draw_debug=True):
         """Returns list of detected objects with bounding boxes and debug image."""
         if frame is None:
             return [], None
@@ -27,7 +27,7 @@ class ScoutAgent:
         detections = self.model.predict(pil_img, threshold=0.4)
         
         processed_detections = []
-        debug_frame = frame.copy()
+        debug_frame = frame.copy() if draw_debug else None
         
         for i in range(len(detections.xyxy)):
             x1, y1, x2, y2 = detections.xyxy[i]
@@ -54,8 +54,9 @@ class ScoutAgent:
             processed_detections.append(obj)
             
             # Draw debug visuals
-            cv2.rectangle(debug_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            cv2.putText(debug_frame, f"{label} {conf:.2f}", (int(x1), int(y1)-10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            if draw_debug:
+                cv2.rectangle(debug_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                cv2.putText(debug_frame, f"{label} {conf:.2f}", (int(x1), int(y1)-10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
             
         return processed_detections, debug_frame

@@ -61,6 +61,9 @@ venv/
 .claude/
 .claude-flow/
 .swarm/
+graphify-out/
+.graphify*
+.gemini
 
 # ROS 2 / Colcon
 build/

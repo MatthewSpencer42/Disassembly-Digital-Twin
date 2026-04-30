@@ -1,0 +1,27 @@
+camera_crop_republisher:
+  ros__parameters:
+    # Absolute pixel coordinates at 3840×2160.
+    # Set crop_reference_width/height to 0 to use absolute coords (no scaling).
+    crop_reference_width: 0
+    crop_reference_height: 0
+    crop_x: 900
+    crop_y: 640
+    crop_width: 1735
+    crop_height: 1290
+
+    # /camera/cropped/color/image_raw        — full-res exact crop for geometry/debug
+    # /camera/cropped/color/image_inference  — resized crop for RF-DETR
+    # /camera/cropped/color/image_display    — lighter preview for RViz
+    display_height: 360
+    display_rate_divisor: 2
+    inference_width: 1020
+    inference_height: 0
+    publish_color_raw: true      # enables /image_raw topic (rqt "Image" transport)
+    publish_color_compressed: false
+
+    # Depth: SW alignment in the camera driver limits actual output to ~2fps.
+    # divisor=1 passes everything through — the camera is the rate limiter.
+    enable_depth: true
+    depth_rate_divisor: 1
+
+    enable_pointcloud: false

@@ -13,12 +13,14 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
         
         # --- NEW ADDITION: Install the launch files ---
         # This tells colcon to copy files from the 'launch' folder to the install directory
-        ('share/' + package_name + '/launch', ['launch/start_vision.launch.py', 
+        ('share/' + package_name + '/launch', ['launch/start_vision.launch.py',
                                                'launch/system_startup.launch.py',
-                                               'launch/visualize_workspace.launch.py'
+                                               'launch/visualize_workspace.launch.py',
+                                               'launch/orbbec_camera.launch.py',
                                                ]),
     ],
     install_requires=['setuptools'],
@@ -39,6 +41,7 @@ setup(
             'start_vision_classifier = vision_agent.classifier_node:main',
             'start_vision_dashboard = vision_agent.dashboard_node:main',
             'detect_workspace = vision_agent.workspace_detector:main',
+            'crop_camera_streams = vision_agent.camera_crop_republisher:main',
         ],
     },
 )

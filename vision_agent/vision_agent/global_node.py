@@ -4,6 +4,10 @@ import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from vision_agent.runtime_env import setup_python_env
+
+setup_python_env(__file__)
+
 import cv2
 import numpy as np
 import rclpy
@@ -18,6 +22,10 @@ from vision_agent.common import (
     PERF_LOG_INTERVAL_SEC,
     PROCESSING_RATE_HZ,
     SHAPE_CONFIG,
+    GLOBAL_CAMERA_INFO_TOPIC,
+    GLOBAL_COLOR_INFERENCE_TOPIC,
+    GLOBAL_DEPTH_TOPIC,
+    GLOBAL_RELIABLE_QOS,
     AngleStabilizer,
     Point3DStabilizer,
     StaticAnchorTracker,
@@ -58,22 +66,22 @@ class GlobalVisionNode(Node):
         self._perf_stats = {"scout_ms": [0.0, 0]}
 
         self.create_subscription(
-            CompressedImage,
-            "/camera/camera/color/image_raw/compressed",
+            Image,
+            GLOBAL_COLOR_INFERENCE_TOPIC,
             self.cb_global,
-            10,
+            GLOBAL_RELIABLE_QOS,
         )
         self.create_subscription(
             Image,
-            "/camera/camera/aligned_depth_to_color/image_raw",
+            GLOBAL_DEPTH_TOPIC,
             self.cb_depth,
-            10,
+            GLOBAL_RELIABLE_QOS,
         )
         self.create_subscription(
             CameraInfo,
-            "/camera/camera/aligned_depth_to_color/camera_info",
+            GLOBAL_CAMERA_INFO_TOPIC,
             self.cb_info,
-            10,
+            GLOBAL_RELIABLE_QOS,
         )
         self.create_subscription(String, "/vision/reset_tracker", self.cb_reset_request, 10)
 
@@ -92,7 +100,7 @@ class GlobalVisionNode(Node):
 
     def cb_global(self, msg):
         try:
-            self.frame_global = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+            self.frame_global = self.bridge.imgmsg_to_cv2(msg, "bgr8")
         except Exception:
             pass
 
@@ -157,6 +165,8 @@ class GlobalVisionNode(Node):
         stat[1] += 1
 
     def _maybe_log_perf(self):
+        if PERF_LOG_INTERVAL_SEC <= 0:
+            return
         now = time.time()
         if now - self._perf_time < PERF_LOG_INTERVAL_SEC:
             return
@@ -170,8 +180,8 @@ class GlobalVisionNode(Node):
 
     def _run_scout(self, frame):
         t0 = time.perf_counter()
-        result = self.scout.scan(frame)
-        return result, time.perf_counter() - t0
+        detections, _ = self.scout.scan(frame, draw_debug=False)
+        return detections, time.perf_counter() - t0
 
     def _poll_future(self):
         if self.scout_future and self.scout_future.done():
@@ -291,6 +301,7 @@ class GlobalVisionNode(Node):
             "timestamp": timestamp,
             "objects": objects,
             "bin_locations": bin_locations,
+            "image_size": [int(self.frame_global.shape[1]), int(self.frame_global.shape[0])],
         }
         self.state_pub.publish(String(data=json.dumps(packet)))
         if bin_locations:
@@ -307,9 +318,18 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.pool.shutdown(wait=False, cancel_futures=True)
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

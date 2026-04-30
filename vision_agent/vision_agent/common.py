@@ -4,58 +4,27 @@ import os
 import sys
 from collections import deque
 
-# Preserve the system scientific stack before prepending the model venv.
-try:
-    import numpy  # noqa: F401
-    import matplotlib  # noqa: F401
-except Exception:
-    pass
+from vision_agent.runtime_env import setup_python_env
+
+WS_ROOT = setup_python_env(__file__)
 
 import cv2
+from rclpy.qos import QoSHistoryPolicy
+from rclpy.qos import QoSProfile
+from rclpy.qos import QoSReliabilityPolicy
 
-
-def find_repo_root(current_path, target_name="disassembly_pipeline"):
-    curr = os.path.abspath(current_path)
-    while curr != os.path.dirname(curr):
-        if os.path.basename(curr) == target_name:
-            return curr
-        candidate = os.path.join(curr, target_name)
-        if os.path.exists(candidate):
-            return candidate
-        curr = os.path.dirname(curr)
-    return None
-
-
-WS_ROOT = find_repo_root(__file__)
-if not WS_ROOT or not os.path.exists(os.path.join(WS_ROOT, "vision_training")):
-    WS_ROOT = "/home/adip/workspace/dev_ws/src/disassembly_pipeline"
-
-if os.path.exists(WS_ROOT):
-    venv_paths = [
-        os.path.join(WS_ROOT, "vision_training", ".venv", "lib", "python3.10", "site-packages"),
-        os.path.join(
-            WS_ROOT,
-            "vision_training",
-            "train_vision_model",
-            ".venv",
-            "lib",
-            "python3.10",
-            "site-packages",
-        ),
-    ]
-    for path in venv_paths:
-        if os.path.exists(path):
-            sys.path.insert(0, path)
-            break
-else:
-    sys.path.insert(
-        0,
-        "/home/adip/workspace/dev_ws/src/disassembly_pipeline/vision_training/.venv/lib/python3.10/site-packages",
-    )
-
-os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
-os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
+GLOBAL_COLOR_RAW_TOPIC = "/camera/cropped/color/image_raw"
+GLOBAL_COLOR_INFERENCE_TOPIC = "/camera/cropped/color/image_inference"
+GLOBAL_COLOR_DISPLAY_TOPIC = "/camera/cropped/color/image_display"
+GLOBAL_COLOR_TOPIC = GLOBAL_COLOR_INFERENCE_TOPIC
+GLOBAL_DEPTH_TOPIC = "/camera/cropped/depth/image_raw"
+GLOBAL_CAMERA_INFO_TOPIC = "/camera/cropped/depth/camera_info"
+LOCAL_COLOR_TOPIC = "/tool_cam/image_raw/compressed"
+GLOBAL_RELIABLE_QOS = QoSProfile(
+    history=QoSHistoryPolicy.KEEP_LAST,
+    depth=10,
+    reliability=QoSReliabilityPolicy.RELIABLE,
+)
 
 DASHBOARD_HEIGHT = 550
 PROCESSING_RATE_HZ = 30.0
@@ -64,7 +33,7 @@ LOCAL_INFERENCE_EVERY_N_FRAMES = 1
 REFEREE_EVERY_N_FRAMES = 3
 DEBUG_PUBLISH_RATE_HZ = 8.0
 DEBUG_JPEG_QUALITY = 75
-PERF_LOG_INTERVAL_SEC = 5.0
+PERF_LOG_INTERVAL_SEC = 0.0
 PUBLISH_RAW_DEBUG = False
 LOCAL_CROSSHAIR_OFFSET_X = -3
 LOCAL_CROSSHAIR_OFFSET_Y = -10

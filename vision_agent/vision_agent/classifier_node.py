@@ -3,6 +3,10 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from vision_agent.runtime_env import setup_python_env
+
+setup_python_env(__file__)
+
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
@@ -49,6 +53,8 @@ class ClassifierVisionNode(Node):
         stat[1] += 1
 
     def _maybe_log_perf(self):
+        if PERF_LOG_INTERVAL_SEC <= 0:
+            return
         now = time.time()
         if now - self._perf_time < PERF_LOG_INTERVAL_SEC:
             return
@@ -95,9 +101,18 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.pool.shutdown(wait=False, cancel_futures=True)
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

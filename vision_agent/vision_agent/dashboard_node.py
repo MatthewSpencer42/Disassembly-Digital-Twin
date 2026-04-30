@@ -2,6 +2,10 @@
 import json
 import time
 
+from vision_agent.runtime_env import setup_python_env
+
+setup_python_env(__file__)
+
 import cv2
 import numpy as np
 import rclpy
@@ -17,6 +21,9 @@ from vision_agent.common import (
     DEBUG_PUBLISH_RATE_HZ,
     LOCAL_CROSSHAIR_OFFSET_X,
     LOCAL_CROSSHAIR_OFFSET_Y,
+    GLOBAL_COLOR_DISPLAY_TOPIC,
+    GLOBAL_RELIABLE_QOS,
+    LOCAL_COLOR_TOPIC,
     PERF_LOG_INTERVAL_SEC,
     PROCESSING_RATE_HZ,
     PUBLISH_RAW_DEBUG,
@@ -40,18 +47,24 @@ class DashboardNode(Node):
         self._fps_time = time.time()
         self._fps_count = 0
         self._fps_display = 0.0
+        self._global_rx_time = time.time()
+        self._global_rx_count = 0
+        self._global_rx_fps = 0.0
+        self._local_rx_time = time.time()
+        self._local_rx_count = 0
+        self._local_rx_fps = 0.0
         self._perf_time = time.time()
         self._perf_stats = {"debug_ms": [0.0, 0]}
 
         self.create_subscription(
-            CompressedImage,
-            "/camera/camera/color/image_raw/compressed",
+            Image,
+            GLOBAL_COLOR_DISPLAY_TOPIC,
             self.cb_global_image,
-            10,
+            GLOBAL_RELIABLE_QOS,
         )
         self.create_subscription(
             CompressedImage,
-            "/tool_cam/image_raw/compressed",
+            LOCAL_COLOR_TOPIC,
             self.cb_local_image,
             10,
         )
@@ -74,7 +87,14 @@ class DashboardNode(Node):
 
     def cb_global_image(self, msg):
         try:
-            self.frame_global = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+            self.frame_global = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            self._global_rx_count += 1
+            now = time.time()
+            elapsed = now - self._global_rx_time
+            if elapsed >= 1.0:
+                self._global_rx_fps = self._global_rx_count / elapsed
+                self._global_rx_count = 0
+                self._global_rx_time = now
         except Exception:
             pass
 
@@ -84,6 +104,13 @@ class DashboardNode(Node):
             if img.shape[1] > 640:
                 img = cv2.resize(img, (640, 480))
             self.frame_local = img
+            self._local_rx_count += 1
+            now = time.time()
+            elapsed = now - self._local_rx_time
+            if elapsed >= 1.0:
+                self._local_rx_fps = self._local_rx_count / elapsed
+                self._local_rx_count = 0
+                self._local_rx_time = now
         except Exception:
             pass
 
@@ -155,12 +182,17 @@ class DashboardNode(Node):
         stat[1] += 1
 
     def _maybe_log_perf(self):
+        if PERF_LOG_INTERVAL_SEC <= 0:
+            return
         now = time.time()
         if now - self._perf_time < PERF_LOG_INTERVAL_SEC:
             return
         total_ms, count = self._perf_stats["debug_ms"]
         avg_ms = (total_ms / count) if count else 0.0
-        self.get_logger().info(f"Dashboard perf: FPS={self._fps_display:.1f} | debug={avg_ms:.1f}ms")
+        self.get_logger().info(
+            f"Dashboard perf: dbg={self._fps_display:.1f}fps | global={self._global_rx_fps:.1f}fps | "
+            f"local={self._local_rx_fps:.1f}fps | debug={avg_ms:.1f}ms"
+        )
         self._perf_stats["debug_ms"] = [0.0, 0]
         self._perf_time = now
 
@@ -176,8 +208,10 @@ class DashboardNode(Node):
 
         cv2.rectangle(panel, (0, 0), (width, 45), (40, 40, 40), -1)
         draw_text(panel, "SYSTEM DASHBOARD", 20, 35, 1.0, (0, 255, 255), 2)
-        fps_color = (0, 255, 0) if self._fps_display >= 15 else (0, 255, 255) if self._fps_display >= 5 else (0, 0, 255)
-        draw_text(panel, f"FPS: {self._fps_display:.1f}", width - 200, 35, 0.9, fps_color, 2)
+        global_fps_color = (0, 255, 0) if self._global_rx_fps >= 15 else (0, 255, 255) if self._global_rx_fps >= 5 else (0, 0, 255)
+        local_fps_color = (0, 255, 0) if self._local_rx_fps >= 15 else (0, 255, 255) if self._local_rx_fps >= 5 else (0, 0, 255)
+        draw_text(panel, f"GLOBAL FPS: {self._global_rx_fps:.1f}", width - 420, 35, 0.75, global_fps_color, 2)
+        draw_text(panel, f"LOCAL FPS: {self._local_rx_fps:.1f}", width - 210, 35, 0.75, local_fps_color, 2)
 
         col1_x = 20
         draw_text(panel, "DETECTED PARTS", col1_x, 80, 0.75, (200, 200, 200), 2)
@@ -229,32 +263,54 @@ class DashboardNode(Node):
             draw_text(panel, f"Torque Z: {tz:>7.3f} Nm", col2_x + 10, y + 160, 0.8, (180, 180, 180), 2)
 
         col3_x = width - 350
-        draw_text(panel, "LOCATIONS (Cam Frame)", col3_x, 80, 0.75, (200, 200, 200), 2)
+        draw_text(panel, "DROP BIN", col3_x, 80, 0.75, (200, 200, 200), 2)
         y = 120
-        if "workspace" in bin_locations and bin_locations["workspace"].get("xyz"):
-            draw_text(panel, f"WORK: Z:{bin_locations['workspace']['xyz'][2]:.3f}m", col3_x, y, 0.85, (0, 255, 255), 2)
-            y += 40
-        for i in range(1, 4):
-            key = f"bin_{i}"
-            xyz = bin_locations.get(key, {}).get("xyz")
-            if xyz:
-                draw_text(panel, f"BIN {i}: Z:{xyz[2]:.3f}m", col3_x, y, 0.85, (0, 255, 0), 2)
-            else:
-                draw_text(panel, f"BIN {i}: ...", col3_x, y, 0.85, (0, 255, 255), 2)
-            y += 40
+        bin1_xyz = bin_locations.get("bin_1", {}).get("xyz")
+        if bin1_xyz:
+            draw_text(panel, f"BIN 1: Z:{bin1_xyz[2]:.3f}m", col3_x, y, 0.85, (0, 255, 0), 2)
+        else:
+            draw_text(panel, "BIN 1: ...", col3_x, y, 0.85, (0, 255, 255), 2)
         return panel
+
+    @staticmethod
+    def _scale_point(point, scale_x, scale_y):
+        return [int(round(point[0] * scale_x)), int(round(point[1] * scale_y))]
+
+    @staticmethod
+    def _scale_box(box, scale_x, scale_y):
+        return [
+            int(round(box[0] * scale_x)),
+            int(round(box[1] * scale_y)),
+            int(round(box[2] * scale_x)),
+            int(round(box[3] * scale_y)),
+        ]
+
+    def _global_scale_factors(self, frame):
+        source_size = self.global_state.get("image_size") or []
+        if len(source_size) != 2 or source_size[0] <= 0 or source_size[1] <= 0:
+            return 1.0, 1.0
+        src_w, src_h = source_size
+        dst_h, dst_w = frame.shape[:2]
+        return dst_w / float(src_w), dst_h / float(src_h)
 
     def draw_global_overlay(self, frame):
         vis = frame.copy()
-        for bin_data in self.global_state.get("bin_locations", {}).values():
-            polygon = bin_data.get("polygon")
-            if polygon:
-                poly = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
-                cv2.polylines(vis, [poly], True, (0, 255, 255), 2)
+        scale_x, scale_y = self._global_scale_factors(vis)
+        bin1_data = self.global_state.get("bin_locations", {}).get("bin_1", {})
+        polygon = bin1_data.get("polygon")
+        if polygon:
+            scaled_poly = np.array(
+                [self._scale_point(pt, scale_x, scale_y) for pt in polygon],
+                dtype=np.int32,
+            ).reshape((-1, 1, 2))
+            cv2.polylines(vis, [scaled_poly], True, (0, 255, 255), 2)
+            label_pt = scaled_poly.reshape(-1, 2)[0]
+            cv2.putText(vis, "BIN 1", (int(label_pt[0]), int(label_pt[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         for obj in self.global_state.get("objects", []):
             box = obj.get("box")
             if not box:
                 continue
+            box = self._scale_box(box, scale_x, scale_y)
             cv2.rectangle(vis, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
             text = f"ID:{obj.get('id', '?')} {obj.get('label', 'obj')}"
             xyz = obj.get("xyz")
@@ -265,10 +321,18 @@ class DashboardNode(Node):
 
     def draw_local_overlay(self, frame):
         vis = frame.copy()
+        source_size = self.local_state.get("image_size") or []
+        if len(source_size) == 2 and source_size[0] > 0 and source_size[1] > 0:
+            scale_x = vis.shape[1] / float(source_size[0])
+            scale_y = vis.shape[0] / float(source_size[1])
+        else:
+            scale_x = 1.0
+            scale_y = 1.0
         for screw in self.local_state.get("screw_heads", []):
             box = screw.get("box")
             if not box:
                 continue
+            box = self._scale_box(box, scale_x, scale_y)
             cx = int((box[0] + box[2]) / 2)
             cy = int((box[1] + box[3]) / 2)
             cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (255, 255, 0), 2)
@@ -278,6 +342,7 @@ class DashboardNode(Node):
             box = tool.get("box")
             if not box:
                 continue
+            box = self._scale_box(box, scale_x, scale_y)
             cx = int((box[0] + box[2]) / 2)
             cy = int((box[1] + box[3]) / 2)
             cv2.circle(vis, (cx, cy), 5, (255, 0, 255), -1)
@@ -286,6 +351,7 @@ class DashboardNode(Node):
             box = hole.get("box")
             if not box:
                 continue
+            box = self._scale_box(box, scale_x, scale_y)
             cx = int((box[0] + box[2]) / 2)
             cy = int((box[1] + box[3]) / 2)
             cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
@@ -293,7 +359,8 @@ class DashboardNode(Node):
             cv2.putText(vis, "Hole", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
         crosshair = self.local_state.get("crosshair")
         if crosshair and len(crosshair) == 2:
-            cross_x, cross_y = int(crosshair[0]), int(crosshair[1])
+            cross_x = int(round(crosshair[0] * scale_x))
+            cross_y = int(round(crosshair[1] * scale_y))
         else:
             h_loc, w_loc = vis.shape[:2]
             cross_x = (w_loc // 2) + LOCAL_CROSSHAIR_OFFSET_X
@@ -320,8 +387,24 @@ class DashboardNode(Node):
         top_row = np.hstack((viz_g, viz_l))
         dashboard = self.draw_wide_dashboard(top_row.shape[1])
         final_frame = np.vstack((top_row, dashboard))
-        cv2.putText(final_frame, "GLOBAL (RGB+D)", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(final_frame, "TOOL CAMERA", (viz_g.shape[1] + 20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        cv2.putText(
+            final_frame,
+            f"GLOBAL (RGB+D) {self._global_rx_fps:.1f} FPS",
+            (20, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 255, 255),
+            2,
+        )
+        cv2.putText(
+            final_frame,
+            f"TOOL CAMERA {self._local_rx_fps:.1f} FPS",
+            (viz_g.shape[1] + 20, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 255, 255),
+            2,
+        )
 
         compressed_msg = CompressedImage()
         compressed_msg.header.stamp = self.get_clock().now().to_msg()
@@ -356,8 +439,14 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
