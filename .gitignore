@@ -82,3 +82,6 @@ log/
 lerobot_pick_place/rosbags_to_leorobot_data/pick_place_rosbags/
 lerobot_pick_place/lerobot_converted_dataset/pick_place_rosbags_lerobot/
 lerobot_pick_place/smolvla_training_output/
+
+vision_training/Project 1 (Segmentation)/rfdetr/Electronic_Device_Global-1
+vision_training/Project 2 (Tool-Screw)/rfdetr/Electronic_Devices_Local-1
