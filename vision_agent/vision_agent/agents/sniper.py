@@ -1,26 +1,36 @@
 from rfdetr import RFDETRSmall
 from PIL import Image
-import numpy as np
 import cv2
 
 class SniperAgent:
     def __init__(self, model_path):
         print(f"🎯 Loading Local Sniper (RF-DETR): {model_path}")
+        # Match the training-time inference resolution used for the local model.
         self.model = RFDETRSmall(pretrain_weights=model_path, resolution=640)
-        self.model.optimize_for_inference() # Reduce latency
-        self.class_names = ['Hole', 'Screw_Head', 'Tool_Tip']
+        try:
+            self.model.optimize_for_inference()
+        except RuntimeError as exc:
+            if "No CUDA GPUs are available" not in str(exc):
+                raise
+            print("⚠️ Local Sniper running without CUDA optimization; falling back to eager inference.")
+        raw = self.model.class_names or {}
+        if isinstance(raw, dict):
+            self.class_names = [str(raw[k]) for k in sorted(raw.keys())]
+        else:
+            self.class_names = [str(c) for c in raw]
 
     def target(self, frame):
         """
-        Returns structured dict with screw_heads, tool_tips, and holes.
+        Returns structured dict with screws, screw_heads, tool_tips, and holes.
         """
         if frame is None:
-            return {"screw_heads": [], "tool_tips": [], "holes": []}
+            return {"screws": [], "screw_heads": [], "tool_tips": [], "holes": []}
             
         pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         detections = self.model.predict(pil_img, threshold=0.4)
         
         data = {
+            "screws": [],
             "screw_heads": [],
             "tool_tips": [],
             "holes": []
@@ -42,13 +52,18 @@ class SniperAgent:
                 "box": box
             }
             
-            if label == "Screw_Head":
+            label_key = label.lower()
+
+            if label_key == "screw":
+                obj["center"] = [cx, cy]
+                data["screws"].append(obj)
+            elif label_key == "screw_head":
                 obj["center"] = [cx, cy]
                 data["screw_heads"].append(obj)
-            elif label == "Tool_Tip":
+            elif label_key == "tool_head":
                 obj["contact_point"] = [cx, cy]
                 data["tool_tips"].append(obj)
-            elif label == "Hole":
+            elif label_key == "hole":
                 data["holes"].append(obj)
                 
         return data

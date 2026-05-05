@@ -11,7 +11,7 @@ import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
 
 from vision_agent.common import (
@@ -25,6 +25,9 @@ from vision_agent.common import (
 )
 from vision_agent.agents.sniper import SniperAgent
 
+# Raw fallback: usb_cam namespace → /tool_cam/image_raw
+_LOCAL_COLOR_RAW_TOPIC = LOCAL_COLOR_TOPIC.replace("/compressed", "")
+
 
 class LocalVisionNode(Node):
     def __init__(self):
@@ -34,28 +37,40 @@ class LocalVisionNode(Node):
         self.sniper = SniperAgent(PATH_SNIPER)
         self.bridge = CvBridge()
         self.frame_local = None
+        self._active_source = None
         self.frame_counter = 0
-        self.last_sniper_data = {"screw_heads": [], "tool_tips": [], "holes": [], "crosshair": []}
+        self.last_sniper_data = {"screws": [], "screw_heads": [], "tool_tips": [], "holes": [], "crosshair": []}
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.sniper_future = None
         self._perf_time = time.time()
         self._perf_stats = {"sniper_ms": [0.0, 0]}
 
-        self.create_subscription(
-            CompressedImage,
-            LOCAL_COLOR_TOPIC,
-            self.cb_local,
-            10,
-        )
+        self.create_subscription(CompressedImage, LOCAL_COLOR_TOPIC, self.cb_local_compressed, 10)
+        self.create_subscription(Image, _LOCAL_COLOR_RAW_TOPIC, self.cb_local_raw, 10)
         self.state_pub = self.create_publisher(String, "/vision/local_state", 10)
         self.timer = self.create_timer(1.0 / PROCESSING_RATE_HZ, self.processing_loop)
 
-    def cb_local(self, msg):
+    def _set_frame(self, img, source):
+        if img.shape[1] > 640:
+            img = cv2.resize(img, (640, 480))
+        if self._active_source != source:
+            self._active_source = source
+            self.get_logger().info(f"Tool camera connected via {source}: {img.shape[1]}x{img.shape[0]}")
+        self.frame_local = img
+
+    def cb_local_compressed(self, msg):
         try:
             img = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
-            if img.shape[1] > 640:
-                img = cv2.resize(img, (640, 480))
-            self.frame_local = img
+            self._set_frame(img, "compressed")
+        except Exception:
+            pass
+
+    def cb_local_raw(self, msg):
+        if self._active_source == "compressed":
+            return
+        try:
+            img = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            self._set_frame(img, "raw")
         except Exception:
             pass
 

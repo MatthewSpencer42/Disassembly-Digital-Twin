@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import glob
 import os
 import sys
 
@@ -22,18 +23,15 @@ def setup_python_env(current_path):
     if repo_root is None:
         repo_root = "/home/adip/workspace/disassembly_ws/src/agentic_disassembly"
 
-    venv_candidates = [
-        os.path.join(repo_root, "vision_training", ".venv", "lib", "python3.10", "site-packages"),
-        os.path.join(
-            repo_root,
-            "vision_training",
-            "train_vision_model",
-            ".venv",
-            "lib",
-            "python3.10",
-            "site-packages",
-        ),
-    ]
+    venv_candidates = []
+    for rel_path in (
+        os.path.join("vision_training", ".venv"),
+        os.path.join("vision_training", "train_vision_model", ".venv"),
+    ):
+        base = os.path.join(repo_root, rel_path, "lib")
+        venv_candidates.extend(
+            sorted(glob.glob(os.path.join(base, "python*", "site-packages")))
+        )
 
     for path in venv_candidates:
         if os.path.exists(path) and path not in sys.path:

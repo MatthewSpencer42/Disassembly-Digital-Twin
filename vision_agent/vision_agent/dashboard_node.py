@@ -14,6 +14,7 @@ from geometry_msgs.msg import WrenchStamped
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
+from rclpy.qos import qos_profile_sensor_data
 
 from vision_agent.common import (
     DASHBOARD_HEIGHT,
@@ -39,7 +40,7 @@ class DashboardNode(Node):
         self.frame_global = None
         self.frame_local = None
         self.global_state = {"objects": [], "bin_locations": {}}
-        self.local_state = {"screw_heads": [], "tool_tips": [], "holes": [], "crosshair": []}
+        self.local_state = {"screws": [], "screw_heads": [], "tool_tips": [], "holes": [], "crosshair": []}
         self.assembly_state = {"state": "unknown", "confidence": 0.0}
         self.robot_states = {"tool_arm": "OFFLINE", "manip_arm": "OFFLINE"}
         self.latest_zeroed_wrench = None
@@ -60,7 +61,7 @@ class DashboardNode(Node):
             Image,
             GLOBAL_COLOR_DISPLAY_TOPIC,
             self.cb_global_image,
-            GLOBAL_RELIABLE_QOS,
+            qos_profile_sensor_data,
         )
         self.create_subscription(
             CompressedImage,
@@ -166,6 +167,7 @@ class DashboardNode(Node):
             "timestamp": self.get_clock().now().nanoseconds,
             "global_view": {"objects": self.global_state.get("objects", [])},
             "local_view": {
+                "screws": self.local_state.get("screws", []),
                 "screw_heads": self.local_state.get("screw_heads", []),
                 "tool_tips": self.local_state.get("tool_tips", []),
                 "holes": self.local_state.get("holes", []),
@@ -218,7 +220,7 @@ class DashboardNode(Node):
         y = 120
         if objects:
             for obj in sorted(objects, key=lambda x: x.get("id", 999))[:6]:
-                label = obj.get("label", "Unknown")
+                label = str(obj.get("label", "Unknown"))
                 obj_id = obj.get("id", "?")
                 xyz = obj.get("xyz")
                 display = f"#{obj_id}: {label[:10]}"
@@ -312,7 +314,7 @@ class DashboardNode(Node):
                 continue
             box = self._scale_box(box, scale_x, scale_y)
             cv2.rectangle(vis, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
-            text = f"ID:{obj.get('id', '?')} {obj.get('label', 'obj')}"
+            text = f"ID:{obj.get('id', '?')} {str(obj.get('label', 'obj'))}"
             xyz = obj.get("xyz")
             if xyz:
                 text += f" Z:{xyz[2]:.2f}m"
@@ -328,6 +330,16 @@ class DashboardNode(Node):
         else:
             scale_x = 1.0
             scale_y = 1.0
+        for screw in self.local_state.get("screws", []):
+            box = screw.get("box")
+            if not box:
+                continue
+            box = self._scale_box(box, scale_x, scale_y)
+            cx = int((box[0] + box[2]) / 2)
+            cy = int((box[1] + box[3]) / 2)
+            cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (0, 200, 255), 2)
+            cv2.circle(vis, (cx, cy), 4, (0, 200, 255), -1)
+            cv2.putText(vis, "screw", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
         for screw in self.local_state.get("screw_heads", []):
             box = screw.get("box")
             if not box:
@@ -337,7 +349,7 @@ class DashboardNode(Node):
             cy = int((box[1] + box[3]) / 2)
             cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (255, 255, 0), 2)
             cv2.circle(vis, (cx, cy), 5, (255, 255, 0), -1)
-            cv2.putText(vis, "Screw", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            cv2.putText(vis, "screw_head", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
         for tool in self.local_state.get("tool_tips", []):
             box = tool.get("box")
             if not box:
@@ -345,8 +357,9 @@ class DashboardNode(Node):
             box = self._scale_box(box, scale_x, scale_y)
             cx = int((box[0] + box[2]) / 2)
             cy = int((box[1] + box[3]) / 2)
+            cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (255, 0, 255), 2)
             cv2.circle(vis, (cx, cy), 5, (255, 0, 255), -1)
-            cv2.putText(vis, "Tool", (cx + 10, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
+            cv2.putText(vis, "tool_head", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
         for hole in self.local_state.get("holes", []):
             box = hole.get("box")
             if not box:

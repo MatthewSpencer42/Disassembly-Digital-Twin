@@ -1,19 +1,27 @@
 from rfdetr import RFDETRLarge
 from PIL import Image
-import numpy as np
 import cv2
+import numpy as np
 
 class ScoutAgent:
     def __init__(self, model_path):
-        print(f"🚀 Loading Global Scout (RF-DETR): {model_path}")
+        print(f"Loading Global Scout (RF-DETR Large): {model_path}")
+        # resolution=1088 must match the value used at training / JIT-trace time.
         self.model = RFDETRLarge(pretrain_weights=model_path, resolution=1088)
-        self.model.optimize_for_inference() # Reduce latency
-        self.class_names = [
-            'Actuator_Arm', 'Connector_Port', 'Exterior_Screw_Zone', 'HDD_Chassis', 
-            'Hole', 'Internal_Screw_Zone', 'PCB_Main', 'PCB_Screw_Zone', 
-            'Platter', 'Platter_Separator', 'Platter_Separator_Ring', 
-            'Spindle_Hub', 'Top_Lid', 'Voice_Coil_Magnet'
-        ]
+        try:
+            self.model.optimize_for_inference()
+            # Warmup: compile CUDA kernels now (main thread) so the ThreadPoolExecutor
+            # worker doesn't hit a cold-start hang on the first predict() call.
+            dummy_pil = Image.fromarray(np.zeros((1088, 1088, 3), dtype=np.uint8))
+            self.model.predict(dummy_pil, threshold=0.5)
+            print("Global Scout: JIT optimization + CUDA warmup complete.")
+        except Exception as exc:
+            print(f"Global Scout: optimization skipped ({type(exc).__name__}: {exc}), using eager inference.")
+        raw = self.model.class_names or {}
+        if isinstance(raw, dict):
+            self.class_names = [str(raw[k]) for k in sorted(raw.keys())]
+        else:
+            self.class_names = [str(c) for c in raw]
 
     def scan(self, frame, draw_debug=True):
         """Returns list of detected objects with bounding boxes and debug image."""

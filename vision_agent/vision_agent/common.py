@@ -38,16 +38,27 @@ PUBLISH_RAW_DEBUG = False
 LOCAL_CROSSHAIR_OFFSET_X = -3
 LOCAL_CROSSHAIR_OFFSET_Y = -10
 
-PATH_SCOUT = os.path.join(
-    WS_ROOT,
+def resolve_checkpoint_path(*parts):
+    base_path = os.path.join(WS_ROOT, *parts)
+    candidates = (
+        base_path,
+        os.path.splitext(base_path)[0] + ".pth",
+        os.path.splitext(base_path)[0] + ".pt",
+    )
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return base_path
+
+
+PATH_SCOUT = resolve_checkpoint_path(
     "vision_training",
     "Project 1 (Segmentation)",
     "rfdetr",
     "global_model",
     "checkpoint_best_ema.pt",
 )
-PATH_SNIPER = os.path.join(
-    WS_ROOT,
+PATH_SNIPER = resolve_checkpoint_path(
     "vision_training",
     "Project 2 (Tool-Screw)",
     "rfdetr",

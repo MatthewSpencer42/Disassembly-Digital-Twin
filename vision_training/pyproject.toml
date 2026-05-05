@@ -14,7 +14,8 @@ dependencies = [
     "roboflow>=1.1,<2",
     "split-folders>=0.5,<1",
     "ultralytics>=8.3,<9",
-    "rfdetr>=1.2,<2",
+    "rfdetr==1.5.2",
+    "pytorch-lightning>=2.4,<3",
     "jupyterlab>=4,<5",
 ]
 

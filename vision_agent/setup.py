@@ -19,7 +19,6 @@ setup(
         # This tells colcon to copy files from the 'launch' folder to the install directory
         ('share/' + package_name + '/launch', ['launch/start_vision.launch.py',
                                                'launch/system_startup.launch.py',
-                                               'launch/visualize_workspace.launch.py',
                                                'launch/orbbec_camera.launch.py',
                                                ]),
     ],

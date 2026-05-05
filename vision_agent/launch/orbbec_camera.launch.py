@@ -12,7 +12,7 @@ def generate_launch_description():
     ----------------------
       enable_colored_point_cloud=false  — was burning ~1.5 CPU cores at 30fps
       enable_point_cloud=false          — same
-      depth_fps=15                      — lowest supported; halves SW-align work vs 30fps
+      depth_fps=15                      — lowest supported; keeps native depth load low
 
     NOTE: Always stop the camera with Ctrl+C (not kill -9).
     If the camera shows "Resource busy" errors after a crash, run:
@@ -30,7 +30,10 @@ def generate_launch_description():
                 "color_format": "MJPG",
                 "color_qos":    "default",
 
-                "depth_registration":  "true",
+                # Keep depth native. The global node already handles color/depth
+                # resolution differences, and avoiding SW alignment prevents the
+                # Orbbec driver from starving the 4K color stream.
+                "depth_registration":  "false",
                 "align_mode":          "SW",
                 "align_target_stream": "COLOR",
                 "depth_fps":           "15",

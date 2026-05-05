@@ -10,17 +10,19 @@ camera_crop_republisher:
     crop_height: 1290
 
     # /camera/cropped/color/image_raw        — full-res exact crop for geometry/debug
-    # /camera/cropped/color/image_inference  — resized crop for RF-DETR
-    # /camera/cropped/color/image_display    — lighter preview for RViz
-    display_height: 360
-    display_rate_divisor: 2
-    inference_width: 1020
+    # /camera/cropped/color/image_inference  — full-res crop for RF-DETR
+    # /camera/cropped/color/image_display    — reduced-res preview for RViz/dashboard
+    display_height: 480
+    display_rate_divisor: 1
+    inference_width: 0
     inference_height: 0
-    publish_color_raw: true      # enables /image_raw topic (rqt "Image" transport)
+    publish_color_raw: true
     publish_color_compressed: false
+    publish_display_compressed: false
+    preferred_color_input: raw
+    color_input_stale_sec: 5.0
+    preferred_color_fallback_sec: 6.0
 
-    # Depth: SW alignment in the camera driver limits actual output to ~2fps.
-    # divisor=1 passes everything through — the camera is the rate limiter.
     enable_depth: true
     depth_rate_divisor: 1
 

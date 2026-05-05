@@ -31,9 +31,11 @@ Depth output    : rate-limited via depth_rate_divisor (default 1 → pass-throug
                   camera SW alignment already limits to ~2 fps)
 """
 import copy
+import glob
 import os
 import sys
 import threading
+import time
 
 
 def find_repo_root(current_path, target_name="agentic_disassembly"):
@@ -54,12 +56,22 @@ if REPO_ROOT is None:
     if os.path.exists(os.path.join(fallback_root, "vision_training", ".venv")):
         REPO_ROOT = fallback_root
 if REPO_ROOT:
-    venv_site_packages = os.path.join(
-        REPO_ROOT, "vision_training", ".venv",
-        "lib", "python3.10", "site-packages",
+    venv_site_packages = sorted(
+        glob.glob(
+            os.path.join(
+                REPO_ROOT,
+                "vision_training",
+                ".venv",
+                "lib",
+                "python*",
+                "site-packages",
+            )
+        )
     )
-    if os.path.exists(venv_site_packages) and venv_site_packages not in sys.path:
-        sys.path.insert(0, venv_site_packages)
+    for path in venv_site_packages:
+        if os.path.exists(path) and path not in sys.path:
+            sys.path.insert(0, path)
+            break
 
 import cv2
 import numpy as np
@@ -94,8 +106,9 @@ CROPPED_COLOR_COMPRESSED_TOPIC = "/camera/cropped/color/image_raw/compressed"
 CROPPED_COLOR_DISPLAY_TOPIC    = "/camera/cropped/color/image_display"
 CROPPED_COLOR_CAMERA_INFO_TOPIC= "/camera/cropped/color/camera_info"
 CROPPED_DEPTH_IMAGE_TOPIC      = "/camera/cropped/depth/image_raw"
-CROPPED_DEPTH_CAMERA_INFO_TOPIC= "/camera/cropped/depth/camera_info"
-CROPPED_POINTCLOUD_TOPIC       = "/camera/cropped/depth_registered/points"
+CROPPED_DEPTH_CAMERA_INFO_TOPIC    = "/camera/cropped/depth/camera_info"
+CROPPED_POINTCLOUD_TOPIC           = "/camera/cropped/depth_registered/points"
+CROPPED_COLOR_DISPLAY_COMPRESSED_TOPIC = "/camera/cropped/color/image_display/compressed"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 DEFAULT_CROP_X      = 1100
@@ -109,7 +122,19 @@ PC_SPATIAL_STRIDE  = 4
 PC_TEMPORAL_STRIDE = 6
 
 # ── QoS ───────────────────────────────────────────────────────────────────────
-_INPUT_QOS = qos_profile_sensor_data
+_INPUT_QOS = QoSProfile(
+    history=QoSHistoryPolicy.KEEP_LAST,
+    depth=1,
+    reliability=QoSReliabilityPolicy.RELIABLE,
+    durability=QoSDurabilityPolicy.VOLATILE,
+)
+
+_DEPTH_INPUT_QOS = QoSProfile(
+    history=QoSHistoryPolicy.KEEP_LAST,
+    depth=1,
+    reliability=QoSReliabilityPolicy.RELIABLE,
+    durability=QoSDurabilityPolicy.VOLATILE,
+)
 
 _OUTPUT_QOS = QoSProfile(
     history=QoSHistoryPolicy.KEEP_LAST,
@@ -145,12 +170,16 @@ class CameraCropRepublisher(Node):
         self.declare_parameter("inference_height", 0)
         self.declare_parameter("publish_color_raw", True)  # kept for back-compat
         self.declare_parameter("publish_color_compressed", False)
+        self.declare_parameter("publish_display_compressed", True)
         self.declare_parameter("preferred_color_input", "auto")
+        self.declare_parameter("preferred_color_fallback_sec", 2.5)
+        self.declare_parameter("color_input_stale_sec", 1.0)
 
         enable_depth      = self.get_parameter("enable_depth").value
         enable_pointcloud = self.get_parameter("enable_pointcloud").value
         self._publish_color_raw = bool(self.get_parameter("publish_color_raw").value)
         self._publish_color_compressed = bool(self.get_parameter("publish_color_compressed").value)
+        self._publish_display_compressed = bool(self.get_parameter("publish_display_compressed").value)
         self._depth_rate_divisor = max(1, int(self.get_parameter("depth_rate_divisor").value))
         self._display_height     = int(self.get_parameter("display_height").value)
         self._display_rate_divisor = max(1, int(self.get_parameter("display_rate_divisor").value))
@@ -159,11 +188,21 @@ class CameraCropRepublisher(Node):
         # ── State ─────────────────────────────────────────────────────────────
         self._roi_log_cache  = None
         self._depth_frame_count = 0
+        self._depth_ready_logged = False
+        self._depth_input_logged = False
         self._depth_info_lock = threading.Lock()
         self.latest_cropped_depth_camera_info: CameraInfo | None = None
         self._preferred_color_input = str(self.get_parameter("preferred_color_input").value).lower()
+        self._preferred_color_fallback_sec = max(
+            0.0, float(self.get_parameter("preferred_color_fallback_sec").value)
+        )
+        self._color_input_stale_sec = max(
+            0.1, float(self.get_parameter("color_input_stale_sec").value)
+        )
         self._active_color_input = None
         self._color_frame_counter = 0
+        self._color_input_start_time = time.monotonic()
+        self._last_color_frame_time = None
 
         # ── Subscriptions ─────────────────────────────────────────────────────
         self.create_subscription(
@@ -179,17 +218,18 @@ class CameraCropRepublisher(Node):
         self.create_subscription(
             CameraInfo, COLOR_CAMERA_INFO_TOPIC,
             self.cb_color_camera_info, _INPUT_QOS,
-            callback_group=self._color_cb_group,
+            # Not in the exclusive color group — camera_info processing is fast
+            # and thread-safe; letting it run concurrently avoids blocking color decodes.
         )
         if enable_depth:
             self.create_subscription(
                 Image, DEPTH_IMAGE_TOPIC,
-                self.cb_depth_image, _INPUT_QOS,
+                self.cb_depth_image, _DEPTH_INPUT_QOS,
                 callback_group=self._depth_cb_group,
             )
             self.create_subscription(
                 CameraInfo, DEPTH_CAMERA_INFO_TOPIC,
-                self.cb_depth_camera_info, _INPUT_QOS,
+                self.cb_depth_camera_info, _DEPTH_INPUT_QOS,
                 callback_group=self._depth_cb_group,
             )
 
@@ -203,10 +243,14 @@ class CameraCropRepublisher(Node):
         self.pub_color_inference = self.create_publisher(
             Image, CROPPED_COLOR_INFERENCE_TOPIC, _OUTPUT_QOS,
         )
-        # Legacy display alias for RViz panels that reference /image_display
+        # Display topics use sensor_data QoS (BEST_EFFORT) so RViz can subscribe without mismatch
+        _DISPLAY_QOS = qos_profile_sensor_data
         self.pub_color_display = self.create_publisher(
-            Image, CROPPED_COLOR_DISPLAY_TOPIC, _OUTPUT_QOS,
+            Image, CROPPED_COLOR_DISPLAY_TOPIC, _DISPLAY_QOS,
         ) if self._display_height > 0 else None
+        self.pub_display_compressed = self.create_publisher(
+            CompressedImage, CROPPED_COLOR_DISPLAY_COMPRESSED_TOPIC, _DISPLAY_QOS,
+        ) if (self._display_height > 0 and self._publish_display_compressed) else None
         self.pub_color_camera_info = self.create_publisher(
             CameraInfo, CROPPED_COLOR_CAMERA_INFO_TOPIC, _OUTPUT_QOS,
         )
@@ -232,11 +276,13 @@ class CameraCropRepublisher(Node):
             f"display={disp_str}, "
             f"pointcloud={'ON' if (enable_depth and enable_pointcloud) else 'OFF'})\n"
             f"  color input preference: {self._preferred_color_input}\n"
-            f"  exact crop:         /camera/cropped/color/image_raw\n"
-            f"  inference image:    /camera/cropped/color/image_inference\n"
-            f"  preview image:     "
+            f"  exact crop:            /camera/cropped/color/image_raw\n"
+            f"  inference image:       /camera/cropped/color/image_inference\n"
+            f"  preview raw:           "
             f"{('/camera/cropped/color/image_display (' + disp_str + ', every ' + str(self._display_rate_divisor) + ' frame(s))') if self.pub_color_display is not None else 'OFF'}\n"
-            f"  compressed compat: {'ON' if self._publish_color_compressed else 'OFF'}"
+            f"  preview compressed:    "
+            f"{('/camera/cropped/color/image_display/compressed (' + disp_str + ')') if self.pub_display_compressed is not None else 'OFF'}\n"
+            f"  compressed full crop:  {'ON' if self._publish_color_compressed else 'OFF'}"
         )
 
     # ── ROI helpers ────────────────────────────────────────────────────────────
@@ -308,7 +354,7 @@ class CameraCropRepublisher(Node):
         if out_w == w and out_h == h:
             return cropped_bgr
 
-        return cv2.resize(cropped_bgr, (out_w, out_h), interpolation=cv2.INTER_AREA)
+        return cv2.resize(cropped_bgr, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
 
     def _resize_for_display(self, cropped_bgr, inference_bgr=None):
         if self._display_height <= 0:
@@ -325,16 +371,57 @@ class CameraCropRepublisher(Node):
             inf_h, inf_w = inference_bgr.shape[:2]
             if inf_w == disp_w and inf_h == disp_h:
                 return inference_bgr
+            # Resize from inference image (smaller source = faster than from full crop)
+            return cv2.resize(inference_bgr, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
 
-        return cv2.resize(cropped_bgr, (disp_w, disp_h), interpolation=cv2.INTER_AREA)
+        return cv2.resize(cropped_bgr, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
 
     # ── Color ──────────────────────────────────────────────────────────────────
 
     def _accept_color_source(self, source_name: str) -> bool:
         if self._preferred_color_input in {"raw", "compressed"}:
-            if source_name != self._preferred_color_input:
+            if self._active_color_input is not None:
+                if self._active_color_input == source_name:
+                    return True
+                if (
+                    source_name == self._preferred_color_input
+                    and self._active_color_input != self._preferred_color_input
+                ):
+                    previous_source = self._active_color_input
+                    self._active_color_input = source_name
+                    self.get_logger().info(
+                        f"Preferred {source_name} color input became available; "
+                        f"switching from {previous_source}"
+                    )
+                    return True
+                if (
+                    self._last_color_frame_time is not None
+                    and (time.monotonic() - self._last_color_frame_time) > self._color_input_stale_sec
+                ):
+                    previous_source = self._active_color_input
+                    self._active_color_input = source_name
+                    self.get_logger().warn(
+                        f"Active {previous_source} color input went stale; "
+                        f"switching to {source_name}"
+                    )
+                    return True
                 return False
+
+            if source_name == self._preferred_color_input:
+                self._active_color_input = source_name
+                self.get_logger().info(
+                    f"Using preferred {source_name} color input for crop republisher"
+                )
+                return True
+
+            if (time.monotonic() - self._color_input_start_time) < self._preferred_color_fallback_sec:
+                return False
+
             self._active_color_input = source_name
+            self.get_logger().warn(
+                f"Preferred {self._preferred_color_input} color input unavailable after "
+                f"{self._preferred_color_fallback_sec:.1f}s, falling back to {source_name}"
+            )
             return True
 
         if self._active_color_input is None:
@@ -352,6 +439,7 @@ class CameraCropRepublisher(Node):
         cx, cy, cw, ch = roi
 
         cropped_bgr = np.ascontiguousarray(img_bgr[cy:cy + ch, cx:cx + cw])
+        self._last_color_frame_time = time.monotonic()
 
         if self.pub_color_compressed is not None:
             ok, enc = cv2.imencode(".jpg", cropped_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -373,15 +461,23 @@ class CameraCropRepublisher(Node):
         self.pub_color_inference.publish(inference_msg)
 
         if (
-            self.pub_color_display is not None
-            and self._color_frame_counter % self._display_rate_divisor == 0
+            self._color_frame_counter == 1
+            or self._color_frame_counter % self._display_rate_divisor == 0
         ):
             display_bgr = self._resize_for_display(cropped_bgr, inference_bgr=inference_bgr)
-            if display_bgr is None:
-                return
-            disp_msg = self.bridge.cv2_to_imgmsg(display_bgr, encoding="bgr8")
-            disp_msg.header = header
-            self.pub_color_display.publish(disp_msg)
+            if display_bgr is not None:
+                if self.pub_color_display is not None:
+                    disp_msg = self.bridge.cv2_to_imgmsg(display_bgr, encoding="bgr8")
+                    disp_msg.header = header
+                    self.pub_color_display.publish(disp_msg)
+                if self.pub_display_compressed is not None:
+                    ok, enc = cv2.imencode(".jpg", display_bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ok:
+                        comp = CompressedImage()
+                        comp.header = header
+                        comp.format = "jpeg"
+                        comp.data = enc.tobytes()
+                        self.pub_display_compressed.publish(comp)
 
     def cb_color_raw(self, msg: Image):
         if not self._accept_color_source("raw"):
@@ -393,11 +489,6 @@ class CameraCropRepublisher(Node):
             self.get_logger().error(f"Raw color crop error: {exc}")
 
     def cb_color_compressed(self, msg: CompressedImage):
-        """
-        MutuallyExclusiveCallbackGroup guarantees this never runs concurrently
-        with itself.  The depth=1 subscription drops stale frames while we're
-        busy, so we always get the freshest available frame on each call.
-        """
         if not self._accept_color_source("compressed"):
             return
         try:
@@ -417,18 +508,30 @@ class CameraCropRepublisher(Node):
         if self._depth_frame_count % self._depth_rate_divisor != 0:
             return
         try:
+            if not self._depth_input_logged:
+                self._depth_input_logged = True
+                self.get_logger().info(
+                    f"Depth input received: {msg.width}x{msg.height} {msg.encoding} step={msg.step}"
+                )
             roi = self._get_crop_roi(msg.width, msg.height)
             cx, cy, cw, ch = roi
 
-            depth_raw = np.frombuffer(msg.data, dtype=np.uint16).reshape(
-                msg.height, msg.width
-            )
+            desired_encoding = "16UC1" if msg.encoding == "16UC1" else "passthrough"
+            depth_raw = self.bridge.imgmsg_to_cv2(msg, desired_encoding)
+            if depth_raw.dtype != np.uint16:
+                depth_raw = depth_raw.astype(np.uint16, copy=False)
+
             cropped = np.ascontiguousarray(depth_raw[cy:cy + ch, cx:cx + cw])
 
-            depth_out = self.bridge.cv2_to_imgmsg(cropped, encoding=msg.encoding)
+            depth_out = self.bridge.cv2_to_imgmsg(cropped, encoding="16UC1")
             depth_out.header = msg.header
             if self.pub_depth_image is not None:
                 self.pub_depth_image.publish(depth_out)
+                if not self._depth_ready_logged:
+                    self._depth_ready_logged = True
+                    self.get_logger().info(
+                        f"Depth crop stream connected: {msg.width}x{msg.height} {msg.encoding} -> 16UC1"
+                    )
 
             if self.pub_pointcloud is not None:
                 pc_tick = self._depth_frame_count // self._depth_rate_divisor

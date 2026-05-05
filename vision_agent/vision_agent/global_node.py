@@ -56,14 +56,27 @@ class GlobalVisionNode(Node):
 
         self.frame_global = None
         self.frame_depth_meters = None
+        self._depth_ready_logged = False
         self.intrinsics = None
         self.frame_counter = 0
         self.last_scout_results = []
         self.scout_future = None
+        self._scout_submit_time = 0.0
+        self._scout_timeout_sec = 30.0
         self.pool = ThreadPoolExecutor(max_workers=1)
 
         self._perf_time = time.time()
         self._perf_stats = {"scout_ms": [0.0, 0]}
+
+        try:
+            import torch
+            cuda_ok = torch.cuda.is_available()
+            self.get_logger().info(
+                f"Torch CUDA available: {cuda_ok}"
+                + (f" | device: {torch.cuda.get_device_name(0)}" if cuda_ok else " — inference will be slow on CPU")
+            )
+        except Exception:
+            pass
 
         self.create_subscription(
             Image,
@@ -100,14 +113,27 @@ class GlobalVisionNode(Node):
 
     def cb_global(self, msg):
         try:
-            self.frame_global = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-        except Exception:
-            pass
+            frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            if self.frame_global is None:
+                self.get_logger().info(
+                    f"Global color stream connected: {msg.width}x{msg.height}"
+                )
+            self.frame_global = frame
+        except Exception as e:
+            self.get_logger().error(f"Color decode error: {e}", throttle_duration_sec=5.0)
 
     def cb_depth(self, msg):
         try:
-            raw_depth = self.bridge.imgmsg_to_cv2(msg, "16UC1")
+            desired_encoding = "16UC1" if msg.encoding == "16UC1" else "passthrough"
+            raw_depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding)
+            if raw_depth.dtype != np.uint16:
+                raw_depth = raw_depth.astype(np.uint16, copy=False)
             self.frame_depth_meters = raw_depth.astype(np.float32) / 1000.0
+            if not self._depth_ready_logged:
+                self._depth_ready_logged = True
+                self.get_logger().info(
+                    f"Global depth stream connected: {msg.width}x{msg.height} {msg.encoding}"
+                )
         except Exception as e:
             self.get_logger().error(f"Depth Error: {e}")
 
@@ -138,25 +164,46 @@ class GlobalVisionNode(Node):
     def get_3d_coordinates(self, cx, cy, segments_pts=None):
         if self.frame_depth_meters is None or self.intrinsics is None:
             return None
+
+        dh, dw = self.frame_depth_meters.shape
+        # Detections are in inference (color) image coordinates.
+        # When depth and color are different resolutions, scale to depth space.
+        if self.frame_global is not None:
+            ch, cw = self.frame_global.shape[:2]
+            sx = dw / float(cw) if cw > 0 else 1.0
+            sy = dh / float(ch) if ch > 0 else 1.0
+        else:
+            sx, sy = 1.0, 1.0
+
         if segments_pts is not None:
+            if sx != 1.0 or sy != 1.0:
+                scaled_pts = (segments_pts.astype(np.float32) * np.array([sx, sy])).astype(np.int32)
+            else:
+                scaled_pts = segments_pts
             mask = np.zeros(self.frame_depth_meters.shape, dtype=np.uint8)
-            cv2.fillPoly(mask, [segments_pts], 255)
+            cv2.fillPoly(mask, [scaled_pts], 255)
             valid_depths = self.frame_depth_meters[mask == 255]
             valid_depths = valid_depths[valid_depths > 0.001]
             if len(valid_depths) == 0:
                 return None
             depth_val_m = float(np.median(valid_depths))
+            # Use scaled centroid for XY projection
+            cx_d = int(np.clip(cx * sx, 0, dw - 1))
+            cy_d = int(np.clip(cy * sy, 0, dh - 1))
         else:
-            h, w = self.frame_depth_meters.shape
-            cx = max(0, min(w - 1, cx))
-            cy = max(0, min(h - 1, cy))
-            depth_val_m = float(self.frame_depth_meters[cy, cx])
+            cx_d = int(np.clip(cx * sx, 0, dw - 1))
+            cy_d = int(np.clip(cy * sy, 0, dh - 1))
+            depth_val_m = float(self.frame_depth_meters[cy_d, cx_d])
             if depth_val_m < 0.001:
                 return None
 
         z_m = depth_val_m
-        x_m = (cx - self.intrinsics["cx"]) * z_m / self.intrinsics["fx"]
-        y_m = (cy - self.intrinsics["cy"]) * z_m / self.intrinsics["fy"]
+        # Use color-space cx/cy with depth intrinsics (valid when depth is SW-aligned to color).
+        # If depth is at native resolution, the intrinsics are in depth-image space, so use scaled coords.
+        proj_cx = cx_d if sx != 1.0 else cx
+        proj_cy = cy_d if sy != 1.0 else cy
+        x_m = (proj_cx - self.intrinsics["cx"]) * z_m / self.intrinsics["fx"]
+        y_m = (proj_cy - self.intrinsics["cy"]) * z_m / self.intrinsics["fy"]
         return (round(x_m, 4), round(y_m, 4), round(z_m, 4))
 
     def _record_stage_time(self, key, elapsed_s):
@@ -184,12 +231,20 @@ class GlobalVisionNode(Node):
         return detections, time.perf_counter() - t0
 
     def _poll_future(self):
-        if self.scout_future and self.scout_future.done():
+        if self.scout_future is None:
+            return
+        if self.scout_future.done():
             try:
                 self.last_scout_results, elapsed = self.scout_future.result()
                 self._record_stage_time("scout_ms", elapsed)
             except Exception as e:
                 self.get_logger().error(f"Scout Error: {e}")
+            self.scout_future = None
+        elif (time.time() - self._scout_submit_time) > self._scout_timeout_sec:
+            self.get_logger().error(
+                f"Scout inference hung for >{self._scout_timeout_sec:.0f}s — "
+                "check GPU/CUDA. Inference image size may be wrong. Resetting future."
+            )
             self.scout_future = None
 
     def processing_loop(self):
@@ -197,6 +252,10 @@ class GlobalVisionNode(Node):
         self._maybe_log_perf()
 
         if self.frame_global is None:
+            self.get_logger().warn(
+                f"Waiting for color frames on {GLOBAL_COLOR_INFERENCE_TOPIC} ...",
+                throttle_duration_sec=5.0,
+            )
             return
         if self.intrinsics is None:
             self.get_logger().warn("Waiting for camera intrinsics...", throttle_duration_sec=2.0)
@@ -205,6 +264,10 @@ class GlobalVisionNode(Node):
 
         if self.frame_counter % GLOBAL_SCOUT_EVERY_N_FRAMES == 0 and self.scout_future is None:
             self.scout_future = self.pool.submit(self._run_scout, self.frame_global.copy())
+            self._scout_submit_time = time.time()
+            if self.frame_counter == 0:
+                h, w = self.frame_global.shape[:2]
+                self.get_logger().info(f"Scout first submission — inference image {w}x{h}")
 
         detections = list(self.last_scout_results)
         timestamp = self.get_clock().now().nanoseconds
