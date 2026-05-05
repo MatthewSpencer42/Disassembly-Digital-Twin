@@ -7,17 +7,18 @@ from disassembly_skill.device_config import DeviceConfig
 
 
 FIXTURE = (
-    Path(__file__).resolve().parents[1] / "config" / "device_configs" / "device_config_example_hdd.yaml"
+    Path(__file__).resolve().parents[1] / "config" / "device_configs" / "hdd.yaml"
 )
 
 
 def test_device_config_loads_example():
     config = DeviceConfig.load(FIXTURE)
 
-    assert config.device.device_model == "hdd_generic_3_5"
+    assert config.device.device_model == "hdd"
     assert len(config.components) == 3
-    assert len(config.screw_zones) == 1
-    assert config.step("remove_top_cover_screws").type == "unscrew"
+    assert len(config.screw_zones) == 2
+    assert config.step("Remove PCB screws").type == "unscrew"
+    assert config.step("Extract PCB").type == "pickup"
     assert any("active hold" in item.lower() for item in config.warnings)
 
 
@@ -26,10 +27,10 @@ def test_to_llm_context_exposes_sequence_summary():
 
     llm_context = config.to_llm_context()
 
-    assert llm_context["device_model"] == "hdd_generic_3_5"
+    assert llm_context["device_model"] == "hdd"
     first_step = llm_context["sequence_overview"][0]
     assert first_step.get("type", first_step["action"]) == "hold"
-    assert any(item["zone_name"] == "top_cover_screws" for item in llm_context["screw_zones"])
+    assert any(item["zone_name"] == "pcb_screw" for item in llm_context["screw_zones"])
 
 
 def test_validation_rejects_unscrew_without_hold():
@@ -63,3 +64,24 @@ def test_validation_rejects_invalid_ft300_arm():
 
     with pytest.raises(ValueError):
         DeviceConfig.from_dict(bad)
+
+
+def test_hdd_config_matches_pcb_first_hdd_flow():
+    config = DeviceConfig.load(FIXTURE)
+
+    assert config.device.device_model == "hdd"
+    assert [step.action for step in config.disassembly_sequence] == [
+        "hold",
+        "unscrew",
+        "pickup",
+        "hold",
+        "flip",
+        "hold",
+        "unscrew",
+        "flip_drop",
+    ]
+    assert config.disassembly_sequence[0].target == "case"
+    assert config.disassembly_sequence[1].target == "pcb_screw"
+    assert config.disassembly_sequence[2].target == "pcb"
+    assert config.disassembly_sequence[6].target == "lid_screw"
+    assert config.disassembly_sequence[7].target == "lid"

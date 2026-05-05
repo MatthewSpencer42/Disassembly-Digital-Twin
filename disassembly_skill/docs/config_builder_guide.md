@@ -259,12 +259,12 @@ Point the master agent to your config file via the ROS 2 parameter:
 
 ```bash
 ros2 launch disassembly_skill disassembly_system.launch.py \
-    device_config:=config/device_configs/hdd_generic.yaml
+    device_config:=config/device_configs/hdd.yaml
 ```
 
 Or load it programmatically:
 
 ```python
 from disassembly_skill.device_config import DeviceConfig
-cfg = DeviceConfig.load("config/device_configs/hdd_generic.yaml")
+cfg = DeviceConfig.load("config/device_configs/hdd.yaml")
 ```

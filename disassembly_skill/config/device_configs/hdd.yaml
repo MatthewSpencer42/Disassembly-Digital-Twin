@@ -1,0 +1,197 @@
+device:
+  class: hdd
+  model: hdd
+  dimensions_mm:
+    length: 147.0
+    width: 101.6
+    height: 26.1
+  material: mixed
+  fixturing: gripper_only
+  notes: "Single working HDD config aligned with the fine-tuned HDD disassembly skills from dev_ws."
+
+components:
+  case:
+    label: case
+    type: chassis
+    removable: false
+    notes: "Main structural base. Always secure this before unscrewing, pickup, flip, or flip_drop."
+  pcb:
+    label: pcb
+    type: board
+    removable: true
+    notes: "Logic board on the first accessible side. This is the only part intended for pickup."
+  lid:
+    label: lid
+    type: lid
+    removable: true
+    notes: "Detach after lid screws are removed. Clear it with flip_drop, not pickup."
+
+screw_zones:
+  pcb_screw:
+    parent_component: pcb
+    screw_count: 4
+    screw_type: torx
+    depends_on_removal_of: []
+    notes: "Initial screw zone on the PCB side."
+  lid_screw:
+    parent_component: lid
+    screw_count: 6
+    screw_type: torx
+    depends_on_removal_of:
+      - pcb
+    notes: "Second screw zone exposed after the HDD is flipped."
+
+disassembly_sequence:
+  - step: 1
+    action: hold
+    label: "Clamp HDD sideways for PCB side"
+    target: case
+    depends_on_steps: []
+    reveals:
+      - pcb_screw
+      - pcb
+    parameters:
+      strategy: lateral_clamp
+      grip_width_mm: 101.6
+      approach_axis: "+y"
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_close_force_n: 100.0
+      torque_threshold_nm: 3.0
+      descent_speed_mps: 0.09
+      tilt_deg: 7.0
+      hover_x_offset_m: -0.01
+      hover_y_offset_m: -0.005
+    notes: "Matches the sideways HDD hold behavior used in the older dev_ws skills."
+
+  - step: 2
+    action: unscrew
+    label: "Remove PCB screws"
+    target: pcb_screw
+    depends_on_steps: [1]
+    reveals: []
+    parameters:
+      screw_type: torx
+      screw_count: 4
+      engagement_depth_mm: 3.0
+      initial_torque_nm: 0.5
+      max_torque_nm: 1.5
+      rotation_speed_rpm: 60
+      force_threshold_n: 5.0
+      align_tolerance_px: 4.0
+      spiral_timeout_s: 15.0
+    notes: "Unscrew remains generic; this zone ordering makes it HDD-specific."
+
+  - step: 3
+    action: pickup
+    label: "Extract PCB"
+    target: pcb
+    depends_on_steps: [2]
+    reveals:
+      - lid_screw
+      - lid
+    parameters:
+      grasp_type: precision
+      grip_width_mm: 80.0
+      gripper_close_force_n: 40.0
+      approach_axis: "+z"
+      lift_height_mm: 50.0
+      lift_speed_mps: 0.01
+      approach_x_offset_m: -0.02
+      approach_y_offset_m: 0.019
+      drop_x: 0.92
+      drop_y: -0.36
+      drop_z: 1.25
+    notes: "Pickup is reserved for the PCB only."
+
+  - step: 4
+    action: hold
+    label: "Re-secure chassis after PCB pickup"
+    target: case
+    depends_on_steps: [3]
+    reveals: []
+    parameters:
+      strategy: lateral_clamp
+      grip_width_mm: 101.6
+      approach_axis: "+y"
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_close_force_n: 100.0
+      torque_threshold_nm: 3.0
+      descent_speed_mps: 0.09
+      tilt_deg: 7.0
+      hover_x_offset_m: -0.01
+      hover_y_offset_m: -0.005
+    notes: "Pickup releases the chassis, so hold must be restored before the flip."
+
+  - step: 5
+    action: flip
+    label: "Flip HDD to lid side"
+    target: case
+    depends_on_steps: [4]
+    reveals:
+      - lid_screw
+    parameters:
+      retract_height_m: 0.10
+      gripper_close_force_n: 100.0
+      torque_threshold_nm: 3.0
+      rotation_deg: 180
+    notes: "Matches the HDD-specific flip assumption from dev_ws."
+
+  - step: 6
+    action: hold
+    label: "Re-secure chassis after flip"
+    target: case
+    depends_on_steps: [5]
+    reveals: []
+    parameters:
+      strategy: lateral_clamp
+      grip_width_mm: 101.6
+      approach_axis: "+y"
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_close_force_n: 100.0
+      torque_threshold_nm: 3.0
+      descent_speed_mps: 0.09
+      tilt_deg: 7.0
+      hover_x_offset_m: -0.01
+      hover_y_offset_m: -0.005
+    notes: "The React agent rules expect re-holding after a flip."
+
+  - step: 7
+    action: unscrew
+    label: "Remove lid screws"
+    target: lid_screw
+    depends_on_steps: [6]
+    reveals: []
+    parameters:
+      screw_type: torx
+      screw_count: 6
+      engagement_depth_mm: 3.0
+      initial_torque_nm: 0.5
+      max_torque_nm: 1.5
+      rotation_speed_rpm: 60
+      force_threshold_n: 5.0
+      align_tolerance_px: 4.0
+      spiral_timeout_s: 15.0
+    notes: "Run on the lid-facing side after the PCB is gone and the HDD has been flipped."
+
+  - step: 8
+    action: flip_drop
+    label: "Flip-drop loose top lid"
+    target: lid
+    depends_on_steps: [7]
+    reveals: []
+    parameters:
+      retract_height_m: 0.15
+      gripper_close_force_n: 100.0
+      intermediate_x: 0.929872
+      intermediate_y: -0.633943
+      intermediate_z: 1.0977
+    notes: "The lid is a non-delicate module, so clear it with flip_drop."
+
+metadata:
+  version: 1
+  author: adip
+  created_with: disassembly_skill.device_config_builder
+  notes: "Single HDD config for this workspace, intentionally aligned to the old dev_ws HDD disassembly behavior."

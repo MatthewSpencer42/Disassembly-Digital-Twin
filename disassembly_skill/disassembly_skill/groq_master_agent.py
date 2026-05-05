@@ -205,7 +205,7 @@ class GroqMasterAgentNode(Node):
         cfg_path = self.get_parameter('device_config_path').get_parameter_value().string_value
         if not cfg_path:
             # Try default location
-            default_path = Path(__file__).parent.parent / 'config' / 'device_configs' / 'hdd_wd_blue.yaml'
+            default_path = Path(__file__).parent.parent / 'config' / 'device_configs' / 'hdd.yaml'
             if default_path.exists():
                 cfg_path = str(default_path)
         if cfg_path and _DEVICE_CONFIG_AVAILABLE:

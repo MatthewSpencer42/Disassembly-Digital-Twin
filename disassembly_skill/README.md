@@ -105,8 +105,8 @@ Added pieces:
   - [config_builder_app.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/config_builder/config_builder_app.py)
 - typed loader:
   - [device_config.py](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py)
-- example config:
-  - [device_config_example_hdd.yaml](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/config/device_configs/device_config_example_hdd.yaml)
+- default and only device config:
+  - [hdd.yaml](/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/config/device_configs/hdd.yaml)
 
 The builder is intentionally offline. It does not subscribe to ROS topics or command hardware. Its role is:
 
@@ -138,6 +138,6 @@ Implemented validation rules include:
 
 Current scope:
 
-- the config system is implemented and tested inside `disassembly_skill`
-- existing skill nodes are still using their current hard-coded parameters at runtime
-- the new middleware is ready for the next refactor step where those nodes consume a selected device YAML instead of embedded constants
+- the config system is implemented and used by `master_agent.py` and `groq_master_agent.py`
+- those agents pass the loaded device config into the hold, unscrew, pickup, flip, and flip_drop skill nodes
+- the single supported device config in this workspace is the HDD flow in `config/device_configs/hdd.yaml`
