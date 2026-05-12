@@ -512,6 +512,9 @@ class ExoticaSingleArmPosePlanner:
     }
     # Tolerance beyond URDF limits before an IK solution is hard-rejected (rad).
     _LIMIT_TOLERANCE = 0.05
+    # Pose IK must be tight.  A 50 mm residual was enough for fine visual-servo
+    # requests to return a distant local minimum and make the xArm jump.
+    _POSE_SUCCESS_TOLERANCE_M = 0.005
 
     def __init__(self, node, group_name: str, hardware_type: str = "fake"):
         self.node = node
@@ -802,6 +805,41 @@ class ExoticaSingleArmPosePlanner:
             self.last_error = f"EXOTica single-arm trajectory generation failed: {exc}"
             return None
 
+    def _fk_tool_rzz(self, fk_frame) -> float | None:
+        """Return the R_zz component of the EE rotation (world-z dot tool-z).
+
+        Negative → tool z-axis points down in world frame (tool-down).
+        Positive → tool z-axis points up (tool-up).
+        Returns None when the format cannot be determined.
+        """
+        np = self._np
+        try:
+            if hasattr(fk_frame, 'get_translation'):
+                # KDL Frame-like object: .M is the 3x3 rotation matrix.
+                if hasattr(fk_frame, 'M'):
+                    M = fk_frame.M
+                    return float(M[2, 2])
+                # Some bindings expose get_rotation_matrix() instead.
+                if hasattr(fk_frame, 'get_rotation_matrix'):
+                    R = np.asarray(fk_frame.get_rotation_matrix())
+                    return float(R[2, 2])
+            else:
+                arr = np.asarray(fk_frame, dtype=float).flatten()
+                if arr.size >= 7:
+                    # [x, y, z, qx, qy, qz, qw] — standard EXOTica pose vector.
+                    qx, qy = float(arr[3]), float(arr[4])
+                    # R_zz from quaternion: 1 - 2*(qx² + qy²)
+                    return 1.0 - 2.0 * (qx * qx + qy * qy)
+                if arr.size == 16:
+                    # Row-major 4×4 homogeneous matrix.
+                    return float(arr.reshape(4, 4)[2, 2])
+                if arr.size == 12:
+                    # Row-major 3×4 [R | t] matrix.
+                    return float(arr.reshape(3, 4)[2, 2])
+        except Exception:
+            pass
+        return None
+
     def solve_pose_goal_joint_positions(
         self,
         current_positions: dict[str, float],
@@ -818,8 +856,24 @@ class ExoticaSingleArmPosePlanner:
 
         self._problem.set_goal(self.task_name, target_np)
 
-        best_solution = None
-        best_error = float('inf')
+        # Determine if the target requires a specific tool-z direction.
+        # For the xArm5 screwdriver_tcp frame: R_zz=+1 means the frame Z-axis points world-UP,
+        # so the TCP tip (at [0,0,-0.173] from the frame) physically points DOWN — correct for screwing.
+        # roll=0  → target R_zz=+1 → physical tip DOWN  → require rzz > +0.3
+        # roll=±π → target R_zz=-1 → physical tip UP    → require rzz < -0.3
+        target_tool_z_sign = None  # None = no orientation check
+        if len(target_np) >= 4:
+            req_roll = float(target_np[3])
+            if abs(req_roll) < 1.0:                          # roll≈0 → tip physically DOWN
+                target_tool_z_sign = +1
+            elif abs(abs(req_roll) - self._np.pi) < 1.0:    # roll≈±π → tip physically UP
+                target_tool_z_sign = -1
+
+        # Track position+orientation correct solution separately from position-only.
+        best_full_solution = None   # position AND orientation correct
+        best_full_error = float('inf')
+        best_pos_solution = None    # position correct, orientation wrong
+        best_pos_error = float('inf')
 
         for attempt in range(max_retries):
             if attempt == 0:
@@ -830,17 +884,17 @@ class ExoticaSingleArmPosePlanner:
 
             self._problem.start_state = seed
             solution = self._solver.solve()
-            
+
             if solution is not None:
                 matrix = self._np.asarray(solution, dtype=float)
                 if matrix.size > 0:
                     cand_state = matrix[0] if matrix.ndim > 1 else matrix
                     cand_state = self._np.asarray(cand_state, dtype=float)
                     cand_state = self._project_goal_state_near_reference(base_start_state, cand_state)
-                    
+
                     if self._check_joint_limits(cand_state):
                         continue
-                    
+
                     try:
                         if hasattr(self._scene, "update"):
                             self._scene.update(cand_state)
@@ -849,44 +903,75 @@ class ExoticaSingleArmPosePlanner:
                                 continue
                     except Exception:
                         pass
-                    
-                    # Verify FK error
+
+                    # Verify FK position error
                     fk_frame = self._scene.fk(self.link_name)
                     if hasattr(fk_frame, 'get_translation'):
                         achieved_pos = fk_frame.get_translation()
                     else:
                         achieved_pos = fk_frame.flatten()[:3]
-                        
+
                     err = self._np.linalg.norm(self._np.asarray(achieved_pos[:3]) - target_np[:3])
-                    
-                    if err < best_error:
-                        best_error = err
-                        best_solution = cand_state
 
-                    if err < 0.05:
-                        break
+                    if err < best_pos_error:
+                        best_pos_error = err
+                        best_pos_solution = cand_state
 
-        if best_solution is None:
+                    if err < self._POSE_SUCCESS_TOLERANCE_M:
+                        # Check tool orientation when a direction is required.
+                        # Always break on position-OK so the server responds quickly.
+                        # Orientation is verified here; the caller decides whether to retry.
+                        rzz = self._fk_tool_rzz(fk_frame)
+                        orientation_ok = True
+                        if target_tool_z_sign is not None and rzz is not None:
+                            # target_tool_z_sign=+1 → need rzz > 0.3 (tip physically DOWN)
+                            # target_tool_z_sign=-1 → need rzz < -0.3 (tip physically UP)
+                            orientation_ok = (rzz * target_tool_z_sign) > 0.3
+
+                        if orientation_ok:
+                            best_full_solution = cand_state
+                            best_full_error = err
+
+                        break  # always exit after first position-OK (fast response)
+
+        # Prefer position+orientation correct solution.
+        if best_full_solution is not None:
+            solve_duration = _time.time() - t0
+            log_message = (
+                f"[EXOTica/{self.group_name}] IK solved in {solve_duration:.3f}s "
+                f"with error {best_full_error:.4f}m"
+            )
+            if solve_duration >= 0.2:
+                self.node.get_logger().warning(log_message)
+            else:
+                self.node.get_logger().debug(log_message)
+            return {
+                joint_name: float(best_full_solution[index])
+                for index, joint_name in enumerate(self.controlled_joint_names)
+            }
+
+        # Position was achievable but orientation was always wrong → report as failure so
+        # the caller can try a different target yaw perturbation.
+        if (
+            best_pos_solution is not None
+            and best_pos_error < self._POSE_SUCCESS_TOLERANCE_M
+            and target_tool_z_sign is not None
+        ):
+            self.last_error = (
+                f"EXOTica IK: position OK ({best_pos_error:.3f}m) but tool orientation wrong "
+                f"after {max_retries} seeds — will retry with yaw perturbation"
+            )
+            self.node.get_logger().warning(f"[EXOTica/{self.group_name}] {self.last_error}")
+            return None
+
+        if best_pos_solution is None:
             self.last_error = "EXOTica returned no pose solution after retries."
             self.node.get_logger().error(f"[EXOTica/{self.group_name}] {self.last_error}")
             return None
 
-        if best_error >= 0.05:
-            self.last_error = f"EXOTica IK residual error {best_error:.3f}m is too large"
-            self.node.get_logger().error(f"[EXOTica/{self.group_name}] {self.last_error}")
-            return None
-            
-        solve_duration = _time.time() - t0
-        log_message = f"[EXOTica/{self.group_name}] IK solved in {solve_duration:.3f}s with error {best_error:.4f}m"
-        if solve_duration >= 0.2:
-            self.node.get_logger().warning(log_message)
-        else:
-            self.node.get_logger().debug(log_message)
-
-        return {
-            joint_name: float(best_solution[index])
-            for index, joint_name in enumerate(self.controlled_joint_names)
-        }
+        self.last_error = f"EXOTica IK residual error {best_pos_error:.3f}m is too large"
+        self.node.get_logger().error(f"[EXOTica/{self.group_name}] {self.last_error}")
+        return None
 
 
 class RemoteExoticaIKClient:
@@ -906,6 +991,7 @@ class RemoteExoticaIKClient:
     _CONTINUOUS_JOINTS = ExoticaSingleArmPosePlanner._CONTINUOUS_JOINTS
     _URDF_JOINT_POSITION_LIMITS = ExoticaSingleArmPosePlanner._URDF_JOINT_POSITION_LIMITS
     _LIMIT_TOLERANCE = ExoticaSingleArmPosePlanner._LIMIT_TOLERANCE
+    _POSE_SUCCESS_TOLERANCE_M = ExoticaSingleArmPosePlanner._POSE_SUCCESS_TOLERANCE_M
 
     def __init__(
         self,
@@ -969,6 +1055,7 @@ class RemoteExoticaIKClient:
     def _wait_for_server(self, timeout_s: float) -> bool:
         """Block until /exotica/ready publishes True or the timeout expires."""
         import time as _time
+        import rclpy as _rclpy
 
         from rclpy.qos import DurabilityPolicy, QoSProfile
         from std_msgs.msg import Bool
@@ -986,8 +1073,15 @@ class RemoteExoticaIKClient:
 
         deadline = _time.monotonic() + timeout_s
         while _time.monotonic() < deadline:
-            ready_event.wait(timeout=0.1)
-            if ready_event.is_set():
+            # Drive callbacks ourselves when no executor is attached yet (e.g. during
+            # node __init__ before the MultiThreadedExecutor starts spinning).
+            # If an executor IS already spinning this node, spin_once raises RuntimeError;
+            # fall back to waiting on the event set by the callback thread instead.
+            try:
+                _rclpy.spin_once(self.node, timeout_sec=0.05)
+            except RuntimeError:
+                ready_event.wait(timeout=0.05)
+            if ready_flag[0]:
                 break
 
         self.node.destroy_subscription(sub)

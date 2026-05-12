@@ -275,9 +275,10 @@ class MotionBackend:
             return False
         if self._in_servo_mode:
             return True
-        if not self._switch_controller_mode("servo", timeout_sec=timeout_sec):
-            self.node.get_logger().warning("Failed to switch ros2_control into servo mode.")
-            return False
+        # MoveIt Servo is configured to publish JointTrajectory commands into the
+        # normal trajectory controllers. Do not switch to the separate
+        # JointGroupPositionController path; that path drops motion on the real
+        # TopicBasedSystem bridge.
         if self._servo_stop_client is not None:
             self._call_trigger_sync(self._servo_stop_client, 1.0, "stop_servo")
             time.sleep(0.1)
@@ -292,10 +293,9 @@ class MotionBackend:
     def _ensure_trajectory_mode(self, timeout_sec: float = 5.0) -> bool:
         self._publish_zero_twist()
         if not self._in_servo_mode:
-            return self._switch_controller_mode("trajectory", timeout_sec=timeout_sec)
+            return True
         if self._servo_stop_client is not None:
             self._call_trigger_sync(self._servo_stop_client, timeout_sec, "stop_servo")
-        self._switch_controller_mode("trajectory", timeout_sec=timeout_sec)
         self._in_servo_mode = False
         return True
 
@@ -392,6 +392,19 @@ class MotionBackend:
             traj.points = [pt]
             self._joint_traj_stream_pub.publish(traj)
 
+    def _publish_raw_joint_command(self, target_joints: dict[str, float]):
+        """Publish directly to the topic-based hardware bridge command topic.
+
+        This bypasses MoveIt's execute_trajectory action. Use only for verified,
+        single-arm, small-step streaming where the caller is not also executing a
+        JTC trajectory.
+        """
+        msg = JointState()
+        msg.header.stamp = self.node.get_clock().now().to_msg()
+        msg.name = list(target_joints.keys())
+        msg.position = [float(target_joints[name]) for name in msg.name]
+        self._joint_command_pub.publish(msg)
+
     def _hold_current_arm_position(self):
         hold_joints = {
             name: float(self.current_joint_positions[name])
@@ -400,6 +413,80 @@ class MotionBackend:
         }
         if hold_joints:
             self._publish_direct_joint_command(hold_joints)
+
+    def _execute_raw_joint_interpolation(
+        self,
+        target_joints: dict[str, float],
+        velocity: float = 0.15,
+        rate_hz: float = 30.0,
+        max_joint_step_rad: float = 0.025,
+        settle_tolerance_rad: float = 0.025,
+    ) -> bool:
+        """Stream a joint target directly to /robot_joint_commands in safe increments."""
+        controlled = [
+            name for name in target_joints
+            if name in self.current_joint_positions and name.startswith(self.joint_prefixes)
+        ]
+        if not controlled:
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] Raw joint interpolation has no controlled joints "
+                f"(target={list(target_joints.keys())}, prefixes={self.joint_prefixes})"
+            )
+            return False
+
+        start_joints = {name: float(self.current_joint_positions[name]) for name in controlled}
+        target = {name: float(target_joints[name]) for name in controlled}
+        max_delta = max(abs(target[name] - start_joints[name]) for name in controlled)
+        if max_delta < 1e-5:
+            self._publish_raw_joint_command(target)
+            return True
+
+        rad_per_sec = max(0.05, min(0.30, float(velocity)))
+        dt = 1.0 / max(float(rate_hz), 1.0)
+        step_from_speed = rad_per_sec * dt
+        step = max(0.002, min(abs(max_joint_step_rad), step_from_speed))
+        steps = max(1, int(math.ceil(max_delta / step)))
+
+        self.node.get_logger().info(
+            f"[{self.backend_kind}] Raw joint interpolation: {len(controlled)} joints, "
+            f"max_delta={max_delta:.3f}rad, steps={steps}, rate={rate_hz:.1f}Hz"
+        )
+        for i in range(1, steps + 1):
+            ratio = i / float(steps)
+            command = {
+                name: start_joints[name] + (target[name] - start_joints[name]) * ratio
+                for name in controlled
+            }
+            self._publish_raw_joint_command(command)
+            time.sleep(dt)
+
+        for _ in range(8):
+            self._publish_raw_joint_command(target)
+            time.sleep(dt)
+
+        deadline = time.time() + max(2.0, (max_delta / rad_per_sec) + 2.0)
+        while rclpy.ok() and time.time() < deadline:
+            joint_err = max(
+                abs(float(self.current_joint_positions.get(name, start_joints[name])) - target[name])
+                for name in controlled
+            )
+            if joint_err <= settle_tolerance_rad:
+                self.node.get_logger().info(
+                    f"[{self.backend_kind}] Raw joint interpolation settled, max_joint_err={joint_err:.4f}rad"
+                )
+                return True
+            self._publish_raw_joint_command(target)
+            time.sleep(0.05)
+
+        joint_err = max(
+            abs(float(self.current_joint_positions.get(name, start_joints[name])) - target[name])
+            for name in controlled
+        )
+        self.node.get_logger().error(
+            f"[{self.backend_kind}] Raw joint interpolation did not settle; "
+            f"max_joint_err={joint_err:.4f}rad"
+        )
+        return False
 
     def _rpy_to_quaternion(self, roll: float, pitch: float, yaw: float) -> Quaternion:
         cy = math.cos(yaw * 0.5)
@@ -644,7 +731,8 @@ class MotionBackend:
                 x=q_dict["qx"], y=q_dict["qy"], z=q_dict["qz"], w=q_dict["qw"]
             )
         else:
-            pose_stamped.pose.orientation = self._rpy_to_quaternion(math.pi, 0.0, 0.0)
+            default_roll = 0.0 if self.is_xarm5 else math.pi
+            pose_stamped.pose.orientation = self._rpy_to_quaternion(default_roll, 0.0, 0.0)
         request.ik_request.pose_stamped = pose_stamped
 
         future = self._ik_client.call_async(request)
@@ -663,7 +751,7 @@ class MotionBackend:
         )
         if self.is_xarm5:
             for yaw_deg in (15, -15, 30, -30, 45, -45, 90, -90, 180):
-                pose_stamped.pose.orientation = self._rpy_to_quaternion(math.pi, 0.0, math.radians(yaw_deg))
+                pose_stamped.pose.orientation = self._rpy_to_quaternion(0.0, 0.0, math.radians(yaw_deg))
                 request.ik_request.pose_stamped = pose_stamped
                 request.ik_request.robot_state = self._get_full_robot_state()
                 retry_future = self._ik_client.call_async(request)
@@ -728,7 +816,10 @@ class MotionBackend:
                 float(q_dict["qw"]),
             )
         else:
-            roll, pitch, yaw = math.pi, 0.0, 0.0
+            # xArm5 screwdriver_tcp: HOME=roll=0 has R_zz=+1 (tip physically DOWN).
+            # roll=π would flip the frame (R_zz=-1, tip UP) which is wrong for screwing.
+            # UF850 rg6_tcp uses a different frame convention where roll=π is correct.
+            roll, pitch, yaw = (0.0, 0.0, 0.0) if self.is_xarm5 else (math.pi, 0.0, 0.0)
 
         self.node.get_logger().info(
             f"[{self.backend_kind}] EXOTica IK solving for "
@@ -751,9 +842,98 @@ class MotionBackend:
 
         self.node.get_logger().warning(
             f"[{self.backend_kind}] move_to_pose_exotica: EXOTica IK FAILED after {time.time()-t0:.3f}s "
-            f"({self._single_arm_exotica_planner.last_error}). Falling back to MoveIt IK."
+            f"({self._single_arm_exotica_planner.last_error})."
+            + (" Trying yaw perturbations (5-DOF xArm5)." if self.is_xarm5 else " Falling back to MoveIt IK.")
         )
+        if self.is_xarm5:
+            for yaw_deg in (15, -15, 30, -30, 45, -45, 90, -90, 180):
+                yaw_p = math.radians(yaw_deg)
+                t1 = time.time()
+                traj_p = self._single_arm_exotica_planner.plan_pose_trajectory(
+                    self.current_joint_positions,
+                    [float(x), float(y), float(z), float(roll), float(pitch), yaw_p],
+                    velocity_scaling=velocity,
+                )
+                if traj_p is not None:
+                    pts = len(traj_p.joint_trajectory.points)
+                    self.node.get_logger().info(
+                        f"[{self.backend_kind}] EXOTica IK solved with yaw_offset={yaw_deg}° "
+                        f"in {time.time()-t1:.3f}s, generated {pts}-point quintic trajectory"
+                    )
+                    return self._execute_robot_trajectory(traj_p)
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] move_to_pose_exotica: all yaw perturbations failed. "
+                "Falling back to MoveIt IK."
+            )
         return self.move_to_pose_robust(x, y, z, q_dict=q_dict, velocity=velocity, frame_id=frame_id)
+
+    def move_to_pose_direct_exotica(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        q_dict=None,
+        velocity: float = 0.15,
+        frame_id: str = "base_link",
+    ) -> bool:
+        """Solve pose IK with EXOTica, then stream joints directly to hardware bridge.
+
+        This is intended for real hardware cases where MoveIt's trajectory action
+        can report success while the physical arm did not move. Callers must still
+        verify the final TCP pose after this method returns.
+        """
+        self.node.get_logger().info(
+            f"[{self.backend_kind}] move_to_pose_direct_exotica: target=({x:.3f},{y:.3f},{z:.3f}) "
+            f"frame={frame_id} velocity={velocity}"
+        )
+        if frame_id != "base_link":
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] direct EXOTica pose streaming requires base_link targets"
+            )
+            return False
+        if self._single_arm_exotica_planner is None or not self._single_arm_exotica_planner.available:
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] direct EXOTica pose streaming unavailable: "
+                f"{getattr(self._single_arm_exotica_planner, 'last_error', 'planner missing')}"
+            )
+            return False
+        if not self.state_received.wait(timeout=2.0):
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] direct EXOTica pose streaming timed out waiting for joint states"
+            )
+            return False
+
+        x = self._clamp_target_x(x, "move_to_pose_direct_exotica")
+        z = self._clamp_target_z(z, "move_to_pose_direct_exotica")
+        if q_dict:
+            roll, pitch, yaw = self._quaternion_to_rpy(
+                float(q_dict["qx"]),
+                float(q_dict["qy"]),
+                float(q_dict["qz"]),
+                float(q_dict["qw"]),
+            )
+        else:
+            roll, pitch, yaw = (0.0, 0.0, 0.0) if self.is_xarm5 else (math.pi, 0.0, 0.0)
+
+        target_joints = self._single_arm_exotica_planner.solve_pose_goal_joint_positions(
+            self.current_joint_positions,
+            [float(x), float(y), float(z), float(roll), float(pitch), float(yaw)],
+            max_retries=10,
+        )
+        if not target_joints:
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] direct EXOTica IK failed: "
+                f"{self._single_arm_exotica_planner.last_error}"
+            )
+            return False
+
+        return self._execute_raw_joint_interpolation(
+            target_joints,
+            velocity=velocity,
+            rate_hz=30.0,
+            max_joint_step_rad=0.018 if self.is_xarm5 else 0.025,
+            settle_tolerance_rad=0.03 if self.is_xarm5 else 0.025,
+        )
 
     def move_cartesian_to_pose(
         self,
@@ -790,7 +970,8 @@ class MotionBackend:
                 x=q_dict["qx"], y=q_dict["qy"], z=q_dict["qz"], w=q_dict["qw"]
             )
         else:
-            target.orientation = self._rpy_to_quaternion(math.pi, 0.0, 0.0)
+            default_roll = 0.0 if self.is_xarm5 else math.pi
+            target.orientation = self._rpy_to_quaternion(default_roll, 0.0, 0.0)
         request.waypoints = [target]
 
         future = self._cartesian_client.call_async(request)
@@ -907,6 +1088,8 @@ class MotionBackend:
         command_alpha: float = 0.5,
         max_joint_step_rad: float = 0.03,
         max_solver_failures: int = 8,
+        target_x: float | None = None,
+        target_y: float | None = None,
     ) -> bool:
         self.node.get_logger().info(
             f"[{self.backend_kind}] move_linear_z_with_effort_stop_exotica: "
@@ -970,8 +1153,10 @@ class MotionBackend:
             time.sleep(0.01)
         baseline = (sum(samples) / len(samples)) if samples else 0.0
 
-        start_x = float(start_tf.transform.translation.x)
-        start_y = float(start_tf.transform.translation.y)
+        actual_start_x = float(start_tf.transform.translation.x)
+        actual_start_y = float(start_tf.transform.translation.y)
+        start_x = float(target_x) if target_x is not None else actual_start_x
+        start_y = float(target_y) if target_y is not None else actual_start_y
         start_z = float(start_tf.transform.translation.z)
         target_depth = abs(float(descent_distance_m))
         if self.min_tcp_z is not None:
@@ -986,7 +1171,8 @@ class MotionBackend:
         step_m = max(abs(float(step_m)), 0.00025)
         loop_dt = 1.0 / max(float(rate_hz), 1.0)
         self.node.get_logger().info(
-            f"[{self.backend_kind}] Tactile descent start: EE=({start_x:.3f},{start_y:.3f},{start_z:.3f}), "
+            f"[{self.backend_kind}] Tactile descent start: actual_EE=({actual_start_x:.3f},{actual_start_y:.3f},{start_z:.3f}), "
+            f"command_xy=({start_x:.3f},{start_y:.3f}), "
             f"target_depth={target_depth*1000:.1f}mm, baseline_effort={baseline:.3f}Nm on {joint_name}"
         )
         commanded_positions = {
@@ -1089,6 +1275,194 @@ class MotionBackend:
             )
         except Exception:
             pass
+        return False
+
+    def move_linear_axis_with_effort_stop_exotica(
+        self,
+        axis: str,
+        distance_m: float,
+        step_m: float,
+        threshold_nm: float,
+        joint_index: int = 4,
+        q_dict=None,
+        rate_hz: float = 50.0,
+        settling_cycles: int = 3,
+        command_alpha: float = 0.5,
+        max_joint_step_rad: float = 0.03,
+        max_solver_failures: int = 8,
+    ) -> bool:
+        """Tactile approach along any Cartesian axis with EXOTica IK streaming.
+
+        axis     : 'x', 'y', or 'z'
+        distance_m: signed travel distance (positive = +axis, negative = -axis)
+        All other params mirror move_linear_z_with_effort_stop_exotica.
+        """
+        axis = axis.lower().strip('+-')
+        if axis not in ('x', 'y', 'z'):
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] move_linear_axis_with_effort_stop_exotica: "
+                f"invalid axis '{axis}'"
+            )
+            return False
+        sign = 1.0 if float(distance_m) >= 0.0 else -1.0
+        target_depth = abs(float(distance_m))
+        step_m = max(abs(float(step_m)), 0.00025)
+
+        self.node.get_logger().info(
+            f"[{self.backend_kind}] move_linear_axis_with_effort_stop_exotica: "
+            f"axis={axis} dist={distance_m*1000:.1f}mm step={step_m*1000:.2f}mm "
+            f"threshold={threshold_nm:.2f}Nm joint_index={joint_index}"
+        )
+
+        if self._single_arm_exotica_planner is None or not self._single_arm_exotica_planner.available:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] EXOTica lateral approach unavailable — no fallback for axis motion."
+            )
+            return False
+
+        if not self.state_received.wait(timeout=2.0):
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] move_linear_axis_with_effort_stop_exotica: "
+                "timed out waiting for /joint_states"
+            )
+            return False
+
+        joint_prefix = "xarm5_joint" if self.is_xarm5 else "uf850_joint"
+        joint_name = f"{joint_prefix}{joint_index + 1}"
+        effort_available = joint_name in self.current_joint_efforts
+        if not effort_available:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] No effort data for '{joint_name}'. "
+                "Contact detection DISABLED — will traverse full distance."
+            )
+
+        try:
+            start_tf = self.tf_buffer.lookup_transform("base_link", self.default_ik_link, rclpy.time.Time())
+        except Exception as exc:
+            self.node.get_logger().error(
+                f"Unable to read start pose for lateral approach: {exc}"
+            )
+            return False
+
+        if q_dict:
+            roll, pitch, yaw = self._quaternion_to_rpy(
+                float(q_dict["qx"]), float(q_dict["qy"]),
+                float(q_dict["qz"]), float(q_dict["qw"]),
+            )
+        else:
+            q = start_tf.transform.rotation
+            roll, pitch, yaw = self._quaternion_to_rpy(q.x, q.y, q.z, q.w)
+
+        # Sample baseline effort
+        samples = []
+        sample_deadline = time.time() + 0.15
+        while time.time() < sample_deadline:
+            samples.append(self.current_joint_efforts.get(joint_name, 0.0))
+            time.sleep(0.01)
+        baseline = (sum(samples) / len(samples)) if samples else 0.0
+
+        start_x = float(start_tf.transform.translation.x)
+        start_y = float(start_tf.transform.translation.y)
+        start_z = float(start_tf.transform.translation.z)
+
+        loop_dt = 1.0 / max(float(rate_hz), 1.0)
+        self.node.get_logger().info(
+            f"[{self.backend_kind}] Lateral approach start: "
+            f"EE=({start_x:.3f},{start_y:.3f},{start_z:.3f}), "
+            f"axis={axis} travel={target_depth*1000:.1f}mm sign={sign:+.0f}, "
+            f"baseline_effort={baseline:.3f}Nm on {joint_name}"
+        )
+
+        commanded_positions = {
+            name: float(self.current_joint_positions[name])
+            for name in self.current_joint_positions
+            if name in self._single_arm_exotica_planner.controlled_joint_names
+        }
+        seed_positions = dict(commanded_positions)
+        commanded_x, commanded_y, commanded_z = start_x, start_y, start_z
+        travelled = 0.0
+        consecutive_solver_failures = 0
+        stable_contact_cycles = 0
+        started_at = time.time()
+        _last_progress_log = time.time()
+
+        while rclpy.ok():
+            effort = self.current_joint_efforts.get(joint_name, baseline) if effort_available else baseline
+            spike = abs(effort - baseline)
+            if effort_available and spike > threshold_nm:
+                stable_contact_cycles += 1
+                self.node.get_logger().info(
+                    f"[{self.backend_kind}] Lateral contact spike: {spike:.3f}Nm > {threshold_nm}Nm "
+                    f"(cycle {stable_contact_cycles}/{settling_cycles})"
+                )
+                if stable_contact_cycles >= max(1, int(settling_cycles)):
+                    self._hold_current_arm_position()
+                    self.node.get_logger().info(
+                        f"[{self.backend_kind}] Lateral CONTACT confirmed: "
+                        f"spike={spike:.3f}Nm, travelled={travelled*1000:.1f}mm, "
+                        f"time={time.time()-started_at:.2f}s"
+                    )
+                    return True
+            else:
+                stable_contact_cycles = 0
+
+            now = time.time()
+            if now - _last_progress_log >= 0.5:
+                self.node.get_logger().info(
+                    f"[{self.backend_kind}] Lateral approach: "
+                    f"travelled={travelled*1000:.1f}/{target_depth*1000:.1f}mm "
+                    f"effort={effort:.3f}Nm baseline={baseline:.3f}Nm spike={spike:.3f}Nm"
+                )
+                _last_progress_log = now
+
+            if travelled >= target_depth - 1e-4:
+                break
+
+            next_step = min(step_m, target_depth - travelled)
+            if axis == 'x':
+                commanded_x += sign * next_step
+            elif axis == 'y':
+                commanded_y += sign * next_step
+            else:
+                commanded_z += sign * next_step
+
+            travelled += next_step
+
+            target_joints = self._single_arm_exotica_planner.solve_pose_goal_joint_positions(
+                seed_positions,
+                [commanded_x, commanded_y, commanded_z, roll, pitch, yaw],
+            )
+            if not target_joints:
+                consecutive_solver_failures += 1
+                if consecutive_solver_failures >= max(1, int(max_solver_failures)):
+                    self.node.get_logger().warning(
+                        f"EXOTica lateral approach failed repeatedly: "
+                        f"{self._single_arm_exotica_planner.last_error}"
+                    )
+                    self._hold_current_arm_position()
+                    return False
+                time.sleep(loop_dt)
+                continue
+
+            consecutive_solver_failures = 0
+            filtered_command = {}
+            for jname, solved_pos in target_joints.items():
+                prev = float(commanded_positions.get(jname, solved_pos))
+                delta = float(solved_pos) - prev
+                delta *= float(command_alpha)
+                delta = max(-abs(max_joint_step_rad), min(abs(max_joint_step_rad), delta))
+                filtered_command[jname] = prev + delta
+
+            self._publish_direct_joint_command(filtered_command)
+            commanded_positions = dict(filtered_command)
+            seed_positions = dict(filtered_command)
+            time.sleep(loop_dt)
+
+        self._hold_current_arm_position()
+        elapsed = time.time() - started_at
+        self.node.get_logger().warning(
+            f"[{self.backend_kind}] Lateral approach finished max travel without contact after {elapsed:.2f}s."
+        )
         return False
 
     def move_cartesian_realtime_exotica(
@@ -1303,7 +1677,15 @@ class MotionBackend:
         return False
 
     def move_servo_xy_closed_loop(
-        self, dx: float, dy: float, speed_mps: float = 0.03, timeout: float = 30.0, stop_check=None
+        self,
+        dx: float,
+        dy: float,
+        speed_mps: float = 0.03,
+        timeout: float = 30.0,
+        stop_check=None,
+        z_lock_m: float = None,
+        z_gain: float = 1.2,
+        z_speed_cap: float = 0.003,
     ):
         if not self._ensure_servo_mode():
             return False
@@ -1316,6 +1698,7 @@ class MotionBackend:
             return False
         start_x = start.transform.translation.x
         start_y = start.transform.translation.y
+        last_travelled = 0.0
         twist = TwistStamped()
         twist.header.frame_id = "base_link"
         twist.twist.linear.x = dx / target_distance * speed_mps
@@ -1327,17 +1710,21 @@ class MotionBackend:
                 return "STOPPED"
             try:
                 current = self.tf_buffer.lookup_transform("base_link", self.default_ik_link, rclpy.time.Time())
+                if z_lock_m is not None:
+                    z_error = float(z_lock_m) - float(current.transform.translation.z)
+                    twist.twist.linear.z = max(min(z_error * z_gain, z_speed_cap), -z_speed_cap)
                 travelled = math.hypot(
                     current.transform.translation.x - start_x,
                     current.transform.translation.y - start_y,
                 )
+                last_travelled = travelled
                 if travelled >= target_distance - 0.002:
                     self._publish_zero_twist()
-                    return True
+                    return {"status": "DONE", "travelled_m": travelled, "target_m": target_distance}
             except Exception:
                 pass
             twist.header.stamp = self.node.get_clock().now().to_msg()
             self.servo_pub.publish(twist)
             time.sleep(0.033)
         self._publish_zero_twist()
-        return False
+        return {"status": "TIMEOUT", "travelled_m": last_travelled, "target_m": target_distance}

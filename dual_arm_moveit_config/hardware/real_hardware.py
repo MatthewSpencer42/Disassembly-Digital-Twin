@@ -46,7 +46,10 @@ SLIDER_COMMAND_ARM_DELAY_S = 8.0
 GRIPPER_COMMAND_ARM_DELAY_S = 6.0
 GRIPPER_WIDTH_EPS_MM = 0.5
 SLIDER_POSITION_EPS_M = 0.0005
-ARM_COMMAND_EPS_RAD = 0.002
+# MoveIt Servo streams small absolute joint-position increments at 100 Hz.
+# A 0.002 rad deadband can drop every micro-step during visual servoing, so
+# keep this threshold low and rely on MAX_RAD_JUMP for safety.
+ARM_COMMAND_EPS_RAD = 0.00005
 ARM_JOINT_LIMIT_MARGIN_RAD = 0.01
 
 STARTUP_STATE_TIMEOUT_S = 5.0
@@ -381,6 +384,16 @@ class ArmBridge:
             self._call_api("motion_enable", True)
             self._call_api("set_mode", desired_mode)
             self._call_api("set_state", 0)
+        current_mode = getattr(self.api, "mode", None)
+        if current_mode != desired_mode:
+            if throttle(self._log_state, "mode_recover", 1.0):
+                self.logger.warning(
+                    f"{self.name}: SDK mode is {current_mode}, switching to required mode {desired_mode}"
+                )
+            self._call_api("motion_enable", True)
+            self._call_api("set_mode", desired_mode)
+            time.sleep(0.05)
+            self._call_api("set_state", 0)
         return True
 
     def read_state(self):
@@ -475,7 +488,7 @@ class ArmBridge:
             # known bad (after a failed command).  This removes 2 blocking
             # SDK round-trips from every 100 Hz command cycle, eliminating
             # the primary source of command-timing jitter.
-            if not self._mode_ok:
+            if not self._mode_ok or getattr(self.api, "mode", None) != 1:
                 self._ensure_ready_for_command(desired_mode=1)
                 self._mode_ok = True
             try:
@@ -512,7 +525,7 @@ class ArmBridge:
                 filtered.append(clamp(float(value), -max_velocity, max_velocity))
             # Velocity mode (4) differs from position mode (1); always recover
             # when switching modes, otherwise only recover on detected fault.
-            if not self._mode_ok or self.stream_mode != 4:
+            if not self._mode_ok or getattr(self.api, "mode", None) != 4:
                 self._ensure_ready_for_command(desired_mode=4)
                 self._mode_ok = True
             try:

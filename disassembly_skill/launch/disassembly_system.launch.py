@@ -33,19 +33,33 @@ def _stage_exit_handlers(process_action, stage_name: str, critical: bool = True)
 
 def generate_launch_description():
     hardware_type = LaunchConfiguration("hardware_type")
+
+    # Clean up stale Orbbec depth-engine lock left by unclean shutdowns.
+    cleanup_orbbec_lock = ExecuteProcess(
+        cmd=["bash", "-c", "rm -f /dev/shm/orbbec_device_lock"],
+        output="screen",
+        name="cleanup_orbbec_lock",
+    )
+
     handeye_calibration_file = (
-        Path(get_package_share_directory("dual_arm_moveit_config")) / "config" / "realsense_handeye.calib"
+        Path(get_package_share_directory("dual_arm_moveit_config")) / "config" / "orbbec_handeye.calib"
     )
 
     moveit_stage = ExecuteProcess(
         cmd=[
-            "ros2",
-            "launch",
-            "dual_arm_moveit_config",
-            "exotica.launch.py",
-            [TextSubstitution(text="hardware_type:="), hardware_type],
-            "enable_servo:=true",
-            "enable_joystick:=false",
+            "bash",
+            "-lc",
+            [
+                TextSubstitution(
+                    text=(
+                        "source /home/adip/workspace/dev_ws/install/moveit_servo/share/moveit_servo/local_setup.bash && "
+                        "source /home/adip/workspace/disassembly_ws/install/setup.bash && "
+                        "exec ros2 launch dual_arm_moveit_config exotica.launch.py hardware_type:="
+                    )
+                ),
+                hardware_type,
+                TextSubstitution(text=" enable_servo:=true enable_joystick:=false"),
+            ],
         ],
         output="screen",
         name="disassembly_moveit_stage",
@@ -58,7 +72,7 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
-                "name": "realsense_handeye",
+                "name": "orbbec_handeye",
                 "calibration_file": str(handeye_calibration_file),
             }
         ],
@@ -198,6 +212,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("hardware_type", default_value="real"),
+            cleanup_orbbec_lock,
             LogInfo(msg="🚀 [1/5] Starting EXOTica MoveIt stack..."),
             moveit_stage,
             start_ft_after_moveit,

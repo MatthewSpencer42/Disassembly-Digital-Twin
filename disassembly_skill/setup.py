@@ -82,6 +82,7 @@ setup(
             "master_agent = disassembly_skill.master_agent:main",
             "groq_master_agent = disassembly_skill.groq_master_agent:main",
             "device_config_builder = disassembly_skill.config_builder.config_builder_app:main",
+            "config_runner = disassembly_skill.config_runner:main",
         ],
     },
     cmdclass={"develop": DevelopCommand},

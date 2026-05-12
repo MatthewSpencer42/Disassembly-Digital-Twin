@@ -46,23 +46,45 @@ class ObjectHoldSkill(Node):
         self.CLOSE_DEG = 35.0
         self.GRIPPER_OPEN_FORCE_N = 40.0
         self.GRIPPER_CLOSE_FORCE_N = 100.0
-        self.APPROACH_VELOCITY = 0.1
+        self.APPROACH_VELOCITY = 0.4
+        self.GRIP_VELOCITY = 0.15
         self.TORQUE_THRESHOLD = 3.0
         self.DESCENT_SPEED_MPS = 0.02
         self.DESCENT_STEP_M = 0.0005
         self.DESCENT_DISTANCE_M = 0.06
         self.DESCENT_RATE_HZ = 30.0
+        self.USE_TACTILE_DESCENT = True
         self.RETRACT_VELOCITY = 0.05
         self.POST_GRASP_RETRACT_SPEED = 0.1
         self.STRATEGY = "fixture_press"
         self.HOVER_X_OFFSET = 0.0
         self.HOVER_Y_OFFSET = 0.0
+        self.FINAL_Z_OFFSET_M = None  # None → grip at hover Z (no separate lowering move)
+        # Lateral-clamp specific fields
+        self.APPROACH_AXIS = "+z"
+        self.TILT_DEG = 0.0
+        self.GRIP_WIDTH_MM = 0.0
+        self.APPROACH_STANDOFF_M = 0.12
+        self.FLIP_APPROACH = False    # add π to v_rad → approach from opposite Y side
+        self.APPROACH_RPY_RAD = None  # None → use default per strategy
 
         if device_cfg is not None:
             self._apply_hold_config(device_cfg)
 
-        self.get_logger().info("Object Hold Skill: Top-Down Cartesian Tactile Mode Active.")
+        self.get_logger().info("Object Hold Skill: Tactile Hold Mode Active.")
         self.publish_state("IDLE")
+
+    @staticmethod
+    def _rpy_to_quat_dict(roll, pitch, yaw):
+        cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+        cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+        cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+        return {
+            'qx': sr * cp * cy - cr * sp * sy,
+            'qy': cr * sp * cy + sr * cp * sy,
+            'qz': cr * cp * sy - sr * sp * cy,
+            'qw': cr * cp * cy + sr * sp * sy,
+        }
 
     def _apply_hold_config(self, cfg):
         hold_steps = [s for s in cfg.disassembly_sequence if s.action == 'hold']
@@ -83,9 +105,33 @@ class ObjectHoldSkill(Node):
         close_deg = p.get('gripper_close_deg', -35.0)
         self.OPEN_DEG = -abs(open_deg)
         self.CLOSE_DEG = abs(close_deg)
+        # Lateral-clamp params
+        self.APPROACH_AXIS = p.get('approach_axis', '+z')
+        self.TILT_DEG = p.get('tilt_deg', 0.0)
+        self.GRIP_WIDTH_MM = p.get('grip_width_mm', 0.0)
+        self.APPROACH_STANDOFF_M = p.get('approach_standoff_m', 0.12)
+        # flip_approach: add π to v_rad so arm approaches from the opposite side
+        self.FLIP_APPROACH = bool(p.get('flip_approach', False))
+        rpy_deg = p.get('approach_rpy_deg', None)
+        if rpy_deg is not None:
+            self.APPROACH_RPY_RAD = [math.radians(d) for d in rpy_deg]
+        else:
+            self.APPROACH_RPY_RAD = None
+        self.DESCENT_DISTANCE_M = p.get('descent_distance_m', self.DESCENT_DISTANCE_M)
+        self.DESCENT_RATE_HZ = p.get('descent_rate_hz', self.DESCENT_RATE_HZ)
+        self.DESCENT_STEP_M = p.get(
+            'descent_step_m',
+            max(self.DESCENT_SPEED_MPS / max(float(self.DESCENT_RATE_HZ), 1.0), 0.00025),
+        )
+        self.USE_TACTILE_DESCENT = bool(p.get('use_tactile_descent', self.USE_TACTILE_DESCENT))
+        self.FINAL_Z_OFFSET_M = p.get('final_z_offset_m', None)
+        self.APPROACH_VELOCITY = p.get('approach_velocity', self.APPROACH_VELOCITY)
+        self.GRIP_VELOCITY = p.get('grip_velocity', self.GRIP_VELOCITY)
 
     def _log_pose_diagnostics(self, target_data, world_xyz, hover_xyz, quaternion_dict):
         raw_xyz = target_data.get("xyz", [None, None, None])
+        raw_px = target_data.get("px", [None, None])
+        print(f"[DIAG] Detection pixel in color image: px=({raw_px[0]}, {raw_px[1]})")
         reach_radius = math.hypot(float(hover_xyz[0]), float(hover_xyz[1]))
         uf_base_msg = "unavailable"
         try:
@@ -241,7 +287,21 @@ class ObjectHoldSkill(Node):
             print(f"ABORT: Vision data for '{target_label}' (ID {part_id}) is missing.")
             return False
 
-        # --- Math & Transforms ---
+        # ── Camera-chain sanity check ──────────────────────────────────────────
+        try:
+            cam_tf = self.uf850.tf_buffer.lookup_transform(
+                self.PLANNING_FRAME, self.CAMERA_FRAME, rclpy.time.Time()
+            )
+            cx = cam_tf.transform.translation.x
+            cy = cam_tf.transform.translation.y
+            cz = cam_tf.transform.translation.z
+            print(f"[DIAG] {self.CAMERA_FRAME} origin in base_link: ({cx:.4f}, {cy:.4f}, {cz:.4f})")
+            print(f"[DIAG] Expected from calib: (~1.058, ~0.074, ~1.480)")
+            q = cam_tf.transform.rotation
+            print(f"[DIAG] Camera orientation quat: x={q.x:.3f} y={q.y:.3f} z={q.z:.3f} w={q.w:.3f}")
+        except Exception as e:
+            print(f"[DIAG] Camera TF lookup FAILED: {e} — check handeye publisher and camera driver TF")
+
         p = Pose()
         p.position.x, p.position.y, p.position.z = target_data["xyz"]
         p.orientation.w = 1.0
@@ -254,38 +314,277 @@ class ObjectHoldSkill(Node):
         wy = t_pose.pose.position.y
         wz = t_pose.pose.position.z
 
-        try:
-            current_tf = self.uf850.tf_buffer.lookup_transform(
-                self.PLANNING_FRAME,
-                self.ROBOT_EE_LINK,
-                rclpy.time.Time(),
-            )
-            qd = {
-                'qx': float(current_tf.transform.rotation.x),
-                'qy': float(current_tf.transform.rotation.y),
-                'qz': float(current_tf.transform.rotation.z),
-                'qw': float(current_tf.transform.rotation.w),
-            }
-        except Exception as exc:
-            self.get_logger().warning(
-                f"Failed to read current {self.ROBOT_EE_LINK} orientation, using neutral fallback: {exc}"
-            )
-            qd = {'qx': 0.0, 'qy': 0.0, 'qz': 0.0, 'qw': 1.0}
+        if self.STRATEGY == 'lateral_clamp':
+            return self._run_lateral_clamp(wx, wy, wz, target_data, target_label, interactive)
+        else:
+            return self._run_top_down(wx, wy, wz, target_data, target_label, interactive)
 
-        hz = wz + self.HOVER_Z_OFFSET
+    def _run_lateral_clamp(self, wx, wy, wz, target_data, target_label, interactive):
+        """Side-clamp the object.
+
+        Direct mode (approach_rpy_deg set): move to the configured hover pose,
+          then descend with joint-5 effort-stop unless explicitly disabled.
+        Legacy mode: warm-start pre-position above HDD, computed v_rad hover with
+          EXOTica+Cartesian fallbacks, then tactile Z-descent for contact detection.
+        """
+        tilt_rad = math.radians(self.TILT_DEG) if self.TILT_DEG else 0.0
+
+        try:
+            target_angle_deg = float(target_data.get("angle", 0.0))
+        except (TypeError, ValueError):
+            target_angle_deg = 0.0
+        v_rad_base = math.radians(-target_angle_deg) + (math.pi / 2.0)
+        if self.FLIP_APPROACH:
+            v_rad_base += math.pi
+
+        roll = math.pi
+        pitch = -math.pi / 2.0 + tilt_rad
+        off = self.TOOL_LENGTH * math.cos(tilt_rad)
+        hover_z = wz + self.HOVER_Z_OFFSET + self.TOOL_LENGTH * math.sin(tilt_rad)
+
+        self.publish_state("MOVING")
+        if interactive:
+            input(f"STEP 1: Open gripper and move to lateral hover for {target_label}? [Enter]")
+
+        print("Ensuring gripper is open...")
+        if not self.gripper.move_to_joint_positions(
+            {self.JOINT_GRIPPER: math.radians(self.OPEN_DEG)},
+            gripper_force_n=self.GRIPPER_OPEN_FORCE_N,
+        ):
+            return False
+        self.wait_for_gripper(self.OPEN_DEG)
+
+        # ── Phase 1: pre-position above HDD (warm-start for legacy v_rad mode only) ──
+        # Direct approach mode skips this: EXOTica solves the configured pose quickly
+        # without a warm-start, so adding a top-down pre-position only wastes ~31s.
+        if self.APPROACH_RPY_RAD is None:
+            try:
+                current_tf = self.uf850.tf_buffer.lookup_transform(
+                    self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+                )
+                qd_current = {
+                    'qx': float(current_tf.transform.rotation.x),
+                    'qy': float(current_tf.transform.rotation.y),
+                    'qz': float(current_tf.transform.rotation.z),
+                    'qw': float(current_tf.transform.rotation.w),
+                }
+            except Exception:
+                qd_current = {'qx': 0.0, 'qy': 0.0, 'qz': 0.0, 'qw': 1.0}
+
+            pre_z = wz + 0.15
+            self.get_logger().info(
+                f"[lateral_clamp] Phase 1 pre-position above HDD: "
+                f"({wx:.3f},{wy:.3f},{pre_z:.3f}) with current TCP orientation"
+            )
+            pre_ok = self.uf850.move_to_pose_exotica(
+                wx, wy, pre_z, qd_current, velocity=self.APPROACH_VELOCITY
+            )
+            if not pre_ok:
+                pre_ok = self.uf850.move_cartesian_to_pose(
+                    wx, wy, pre_z, qd_current, velocity=self.APPROACH_VELOCITY
+                )
+            if pre_ok:
+                self.wait_for_arm_settled()
+            else:
+                self.get_logger().warning(
+                    "[lateral_clamp] Phase 1 pre-position failed; "
+                    "attempting lateral hover without warm-start."
+                )
+
+        # ── Phase 2: lateral hover — EXOTica seeds from warm-started joints ────────
+        if self.APPROACH_RPY_RAD is not None:
+            # Direct approach mode: use the configured RPY and XY offsets directly.
+            # hover_x/y_offset_m are deltas from HDD centre in the world frame.
+            qd = self._rpy_to_quat_dict(*self.APPROACH_RPY_RAD)
+            hover_x = wx + self.HOVER_X_OFFSET
+            hover_y = wy + self.HOVER_Y_OFFSET
+            hover_z = wz + self.HOVER_Z_OFFSET
+            self.get_logger().info(
+                f"[lateral_clamp] Direct approach: hover=({hover_x:.3f},{hover_y:.3f},{hover_z:.3f}) "
+                f"rpy=({math.degrees(self.APPROACH_RPY_RAD[0]):.1f}°,"
+                f"{math.degrees(self.APPROACH_RPY_RAD[1]):.1f}°,"
+                f"{math.degrees(self.APPROACH_RPY_RAD[2]):.1f}°)"
+            )
+            self._log_pose_diagnostics(
+                target_data=target_data,
+                world_xyz=(wx, wy, wz),
+                hover_xyz=(hover_x, hover_y, hover_z),
+                quaternion_dict=qd,
+            )
+            if not self.uf850.move_to_pose_exotica(
+                hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY
+            ):
+                print("[ERROR] EXOTica failed for direct approach hover. Aborting hold.")
+                return False
+            print("Hover reached (direct approach).")
+        else:
+            # Legacy computed approach: try ±Y from v_rad_base
+            for attempt, v_rad in enumerate([v_rad_base, v_rad_base + math.pi]):
+                yaw = v_rad
+                qd = self._rpy_to_quat_dict(roll, pitch, yaw)
+                hover_x = wx - off * math.cos(v_rad) + self.HOVER_X_OFFSET
+                hover_y = wy - off * math.sin(v_rad) + self.HOVER_Y_OFFSET
+
+                side_label = "primary" if attempt == 0 else "opposite-side fallback"
+                self.get_logger().info(
+                    f"lateral_clamp {side_label}: hover=({hover_x:.3f},{hover_y:.3f},{hover_z:.3f}) "
+                    f"pitch={math.degrees(pitch):.1f}° yaw={math.degrees(yaw):.1f}°"
+                )
+                self._log_pose_diagnostics(
+                    target_data=target_data,
+                    world_xyz=(wx, wy, wz),
+                    hover_xyz=(hover_x, hover_y, hover_z),
+                    quaternion_dict=qd,
+                )
+                hover_ok = self.uf850.move_to_pose_exotica(
+                    hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY
+                )
+                if not hover_ok:
+                    print(f"EXOTica failed for {side_label}. Trying Cartesian...")
+                    hover_ok = self.uf850.move_cartesian_to_pose(
+                        hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY
+                    )
+                if hover_ok:
+                    print(f"Hover reached ({side_label}).")
+                    break
+                print(f"Both planners failed for {side_label}.")
+            else:
+                print("[ERROR] All approach sides failed IK. Aborting hold.")
+                return False
+
+        if not self.wait_for_arm_settled():
+            print("[ERROR] Arm did not settle after lateral hover.")
+            return False
+
+        try:
+            tf_check = self.uf850.tf_buffer.lookup_transform(
+                self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+            )
+            ax = tf_check.transform.translation.x
+            ay = tf_check.transform.translation.y
+            az = tf_check.transform.translation.z
+            hover_err = math.sqrt((ax - hover_x) ** 2 + (ay - hover_y) ** 2 + (az - hover_z) ** 2)
+            print(f"[DIAG] {self.ROBOT_EE_LINK} ACTUAL:    ({ax:.4f}, {ay:.4f}, {az:.4f})")
+            print(f"[DIAG] {self.ROBOT_EE_LINK} COMMANDED: ({hover_x:.4f}, {hover_y:.4f}, {hover_z:.4f})")
+            print(f"[DIAG] TCP error: dx={ax-hover_x:.4f} dy={ay-hover_y:.4f} dz={az-hover_z:.4f} m | norm={hover_err:.4f} m")
+            print(f"[DIAG] Object in base_link: ({wx:.4f}, {wy:.4f}, {wz:.4f})")
+            if hover_err > 0.018:
+                self.get_logger().warning(
+                    f"[lateral_clamp] Hover TCP error {hover_err*1000:.1f}mm; "
+                    "running one slow correction before tactile descent."
+                )
+                if not self.uf850.move_to_pose_exotica(
+                    hover_x, hover_y, hover_z, qd, velocity=min(self.GRIP_VELOCITY, 0.08)
+                ):
+                    print("[ERROR] Slow hover correction failed. Aborting hold.")
+                    return False
+                if not self.wait_for_arm_settled():
+                    print("[ERROR] Arm did not settle after slow hover correction.")
+                    return False
+                tf_check = self.uf850.tf_buffer.lookup_transform(
+                    self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+                )
+                ax = tf_check.transform.translation.x
+                ay = tf_check.transform.translation.y
+                az = tf_check.transform.translation.z
+                hover_err = math.sqrt((ax - hover_x) ** 2 + (ay - hover_y) ** 2 + (az - hover_z) ** 2)
+                print(f"[DIAG] corrected {self.ROBOT_EE_LINK}: ({ax:.4f}, {ay:.4f}, {az:.4f}) | err={hover_err:.4f} m")
+                if hover_err > 0.030:
+                    print("[ERROR] Corrected hold hover is still more than 30mm from target. Aborting before descent.")
+                    return False
+        except Exception as e:
+            print(f"[DIAG] TCP TF lookup failed: {e}")
+
+        if self.APPROACH_RPY_RAD is not None:
+            if self.USE_TACTILE_DESCENT:
+                if interactive:
+                    input(f"STEP 2: Tactile descent to joint-5 effort spike for {target_label}? [Enter]")
+                self.get_logger().info(
+                    f"[lateral_clamp] Tactile descent until joint-5 effort spike: "
+                    f"distance={self.DESCENT_DISTANCE_M*1000:.1f}mm "
+                    f"step={self.DESCENT_STEP_M*1000:.2f}mm threshold={self.TORQUE_THRESHOLD:.2f}Nm"
+                )
+                if not self.uf850.move_linear_z_with_effort_stop_exotica(
+                    descent_distance_m=self.DESCENT_DISTANCE_M,
+                    step_m=self.DESCENT_STEP_M,
+                    threshold_nm=self.TORQUE_THRESHOLD,
+                    joint_index=4,
+                    q_dict=qd,
+                    rate_hz=self.DESCENT_RATE_HZ,
+                    command_alpha=0.35,
+                    max_joint_step_rad=0.015,
+                    target_x=hover_x,
+                    target_y=hover_y,
+                ):
+                    print("[ERROR] Tactile descent ended without joint-5 contact spike. Aborting hold.")
+                    return False
+                self.wait_for_arm_settled()
+            else:
+                final_z = wz + (self.FINAL_Z_OFFSET_M if self.FINAL_Z_OFFSET_M is not None else self.HOVER_Z_OFFSET)
+                if abs(final_z - hover_z) <= 0.002:
+                    final_z = None
+            if not self.USE_TACTILE_DESCENT and final_z is not None:
+                self.get_logger().info(
+                    f"[lateral_clamp] Lowering to final grip Z={final_z:.3f} "
+                    f"(delta={hover_z - final_z:.3f}m)"
+                )
+                if interactive:
+                    input(f"STEP 2: Lower to final grip Z for {target_label}? [Enter]")
+                if not self.uf850.move_to_pose_exotica(
+                    hover_x, hover_y, final_z, qd, velocity=self.GRIP_VELOCITY
+                ):
+                    print("[ERROR] EXOTica failed for final grip Z. Aborting hold.")
+                    return False
+                if not self.wait_for_arm_settled():
+                    print("[ERROR] Arm did not settle at final grip position.")
+                    return False
+        else:
+            # Legacy mode: tactile Z-descent with effort-spike contact detection.
+            if interactive:
+                input(f"STEP 2: Tactile Z-descent toward {target_label} side? [Enter]")
+            print(f"Starting tactile Z-descent to contact HDD side face (threshold={self.TORQUE_THRESHOLD}Nm)...")
+            if not self.uf850.move_linear_z_with_effort_stop_exotica(
+                descent_distance_m=self.DESCENT_DISTANCE_M,
+                step_m=self.DESCENT_STEP_M,
+                threshold_nm=self.TORQUE_THRESHOLD,
+                joint_index=4,
+            ):
+                print("[ERROR] Tactile Z-descent failed before side contact.")
+                return False
+            self.wait_for_arm_settled()
+
+        if interactive:
+            input(f"STEP 3: Close gripper on {target_label}? [Enter]")
+        print("Closing gripper...")
+        if not self.gripper.move_to_joint_positions(
+            {self.JOINT_GRIPPER: math.radians(self.CLOSE_DEG)},
+            gripper_force_n=self.GRIPPER_CLOSE_FORCE_N,
+        ):
+            return False
+        self.wait_for_gripper(self.CLOSE_DEG)
+
+        self.publish_state("HOLDING")
+        return True
+
+    def _run_top_down(self, wx, wy, wz, target_data, target_label, interactive):
+        """Standard top-down or fixture-press hold: arm descends in Z with tool pointing down."""
+        # Explicit tool-down orientation (roll=π) instead of reading current TCP quaternion
+        qd = self._rpy_to_quat_dict(math.pi, 0.0, 0.0)
+
         hover_x = wx + self.HOVER_X_OFFSET
         hover_y = wy + self.HOVER_Y_OFFSET
+        hover_z = wz + self.HOVER_Z_OFFSET
 
         self._log_pose_diagnostics(
             target_data=target_data,
             world_xyz=(wx, wy, wz),
-            hover_xyz=(hover_x, hover_y, hz),
+            hover_xyz=(hover_x, hover_y, hover_z),
             quaternion_dict=qd,
         )
 
-        # --- STEP 1: DIRECT HOVER ---
         self.publish_state("MOVING")
-        if interactive: input(f"STEP 1: Hover sideways over {target_label}? [Enter]")
+        if interactive:
+            input(f"STEP 1: Hover over {target_label}? [Enter]")
 
         print("Ensuring gripper is open...")
         if not self.gripper.move_to_joint_positions(
@@ -296,17 +595,17 @@ class ObjectHoldSkill(Node):
         if not self.wait_for_gripper(self.OPEN_DEG):
             self.get_logger().warning("Gripper did not confirm open position before hover move.")
 
-        print(f"Moving to hover pose with EXOTica at X: {hover_x:.3f}, Y: {hover_y:.3f}, Z: {hz:.3f}...")
-        if not self.uf850.move_to_pose_exotica(hover_x, hover_y, hz, qd, velocity=self.APPROACH_VELOCITY):
+        print(f"Moving to hover pose at X:{hover_x:.3f}, Y:{hover_y:.3f}, Z:{hover_z:.3f}...")
+        if not self.uf850.move_to_pose_exotica(hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY):
             print("EXOTica pose planning failed. Attempting Cartesian fallback...")
-            if not self.uf850.move_cartesian_to_pose(hover_x, hover_y, hz, qd, velocity=self.APPROACH_VELOCITY):
+            if not self.uf850.move_cartesian_to_pose(hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY):
                 print("[ERROR] Both EXOTica and Cartesian fallback failed to reach hover pose. Aborting.")
                 return False
         if not self.wait_for_arm_settled():
             print("[ERROR] Arm did not settle after hover move.")
             return False
 
-        print("Starting EXOTica stepped tactile descent with effort spike stop...")
+        print("Starting EXOTica stepped tactile Z-descent with effort spike stop...")
         if not self.uf850.move_linear_z_with_effort_stop_exotica(
             descent_distance_m=self.DESCENT_DISTANCE_M,
             step_m=self.DESCENT_STEP_M,
@@ -317,8 +616,8 @@ class ObjectHoldSkill(Node):
             return False
         self.wait_for_arm_settled()
 
-        if self.STRATEGY in ("top_down_clamp", "lateral_clamp"):
-            print(f"Closing gripper for {self.STRATEGY}...")
+        if self.STRATEGY == "top_down_clamp":
+            print("Closing gripper for top_down_clamp...")
             if not self.gripper.move_to_joint_positions(
                 {self.JOINT_GRIPPER: math.radians(self.CLOSE_DEG)},
                 gripper_force_n=self.GRIPPER_CLOSE_FORCE_N,
@@ -326,7 +625,7 @@ class ObjectHoldSkill(Node):
                 return False
             self.wait_for_gripper(self.CLOSE_DEG)
         else:
-            print(f"Strategy '{self.STRATEGY}': arm pressure applied, gripper open.")
+            print(f"Strategy '{self.STRATEGY}': arm pressure applied, gripper stays open.")
 
         self.publish_state("HOLDING")
         return True

@@ -12,8 +12,9 @@ import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import WrenchStamped
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import CompressedImage, Image
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from rclpy.qos import qos_profile_sensor_data
 
 from vision_agent.common import (
@@ -56,6 +57,12 @@ class DashboardNode(Node):
         self._local_rx_fps = 0.0
         self._perf_time = time.time()
         self._perf_stats = {"debug_ms": [0.0, 0]}
+        self._global_state_time = 0.0
+        self._local_state_time = 0.0
+        self._assembly_state_time = 0.0
+        self._robot_state_time = 0.0
+        self._exotica_ready = False
+        self._system_health = {}
 
         self.create_subscription(
             Image,
@@ -73,6 +80,8 @@ class DashboardNode(Node):
         self.create_subscription(String, "/vision/local_state", self.cb_local_state, 10)
         self.create_subscription(String, "/vision/assembly_state", self.cb_assembly_state, 10)
         self.create_subscription(String, "/robot_states", self.cb_robot_states, 10)
+        ready_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(Bool, "/exotica/ready", self.cb_exotica_ready, ready_qos)
         self.create_subscription(
             WrenchStamped,
             "/robotiq_force_torque_sensor_broadcaster/wrench",
@@ -85,6 +94,7 @@ class DashboardNode(Node):
         self.debug_pub_compressed = self.create_publisher(CompressedImage, "/vision/debug_feed/compressed", 10)
         self.state_timer = self.create_timer(1.0 / PROCESSING_RATE_HZ, self.publish_agent_state)
         self.debug_timer = self.create_timer(1.0 / DEBUG_PUBLISH_RATE_HZ, self.publish_dashboard)
+        self.health_timer = self.create_timer(1.0, self.update_system_health)
 
     def cb_global_image(self, msg):
         try:
@@ -118,26 +128,33 @@ class DashboardNode(Node):
     def cb_global_state(self, msg):
         try:
             self.global_state = json.loads(msg.data)
+            self._global_state_time = time.time()
         except Exception as e:
             self.get_logger().error(f"Global state parse error: {e}")
 
     def cb_local_state(self, msg):
         try:
             self.local_state = json.loads(msg.data)
+            self._local_state_time = time.time()
         except Exception as e:
             self.get_logger().error(f"Local state parse error: {e}")
 
     def cb_assembly_state(self, msg):
         try:
             self.assembly_state = json.loads(msg.data)
+            self._assembly_state_time = time.time()
         except Exception as e:
             self.get_logger().error(f"Assembly state parse error: {e}")
 
     def cb_robot_states(self, msg):
         try:
             self.robot_states = json.loads(msg.data)
+            self._robot_state_time = time.time()
         except Exception as e:
             self.get_logger().error(f"Robot state parse error: {e}")
+
+    def cb_exotica_ready(self, msg):
+        self._exotica_ready = bool(msg.data)
 
     def cb_wrench(self, msg):
         if self.wrench_offset is None:
@@ -197,6 +214,75 @@ class DashboardNode(Node):
         )
         self._perf_stats["debug_ms"] = [0.0, 0]
         self._perf_time = now
+
+    def update_system_health(self):
+        now = time.time()
+        node_names = {name for name, _namespace in self.get_node_names_and_namespaces()}
+        moveit_ready = "move_group" in node_names
+        global_state_ok = (now - self._global_state_time) < 5.0
+        local_state_ok = (now - self._local_state_time) < 5.0
+        global_image_ok = self.frame_global is not None and (now - self._global_rx_time) < 2.5
+        local_image_ok = self.frame_local is not None and (now - self._local_rx_time) < 2.5
+        self._system_health = {
+            "MoveIt": {
+                "ok": moveit_ready,
+                "detail": "move_group online" if moveit_ready else "waiting for move_group",
+            },
+            "EXOTica": {
+                "ok": self._exotica_ready,
+                "detail": "IK server ready" if self._exotica_ready else "waiting for /exotica/ready",
+            },
+            "Global Vision": {
+                "ok": global_state_ok and global_image_ok,
+                "detail": "state ok | frames live" if global_state_ok and global_image_ok else "waiting for global stream",
+            },
+            "Local Vision": {
+                "ok": local_state_ok and local_image_ok,
+                "detail": "state ok | frames live" if local_state_ok and local_image_ok else "waiting for local stream",
+            },
+        }
+
+    @staticmethod
+    def _status_color(ok):
+        return (0, 210, 80) if ok else (0, 165, 255)
+
+    def draw_system_health_panel(self, height):
+        width = 380
+        panel = np.zeros((height, width, 3), dtype=np.uint8)
+        panel[:] = (12, 15, 19)
+
+        def draw_text(text, x, y, size=0.8, color=(245, 245, 245), thickness=2):
+            cv2.putText(panel, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, size, color, thickness, cv2.LINE_AA)
+
+        all_ok = bool(self._system_health) and all(item["ok"] for item in self._system_health.values())
+        header_color = (0, 210, 80) if all_ok else (0, 165, 255)
+        cv2.rectangle(panel, (0, 0), (width, 76), (25, 31, 40), -1)
+        draw_text("STACK HEALTH", 20, 48, 1.0, header_color, 3)
+        draw_text("READY" if all_ok else "LOADING", 250, 48, 0.78, header_color, 2)
+
+        rows = [
+            ("MoveIt", self._system_health.get("MoveIt", {"ok": False, "detail": "waiting"})),
+            ("EXOTica", self._system_health.get("EXOTica", {"ok": False, "detail": "waiting"})),
+            ("Global Vision", self._system_health.get("Global Vision", {"ok": False, "detail": "waiting"})),
+            ("Local Vision", self._system_health.get("Local Vision", {"ok": False, "detail": "waiting"})),
+        ]
+        y = 122
+        for label, item in rows:
+            ok = bool(item["ok"])
+            color = self._status_color(ok)
+            cv2.circle(panel, (34, y - 8), 12, color, -1)
+            cv2.rectangle(panel, (62, y - 42), (width - 18, y + 36), (27, 32, 42), -1)
+            draw_text(label, 78, y - 8, 0.78, (255, 255, 255), 2)
+            draw_text(str(item["detail"])[:32], 78, y + 22, 0.58, (205, 214, 224), 2)
+            y += 92
+
+        y = max(y + 10, height - 155)
+        cv2.line(panel, (18, y - 28), (width - 18, y - 28), (58, 68, 78), 1)
+        draw_text("RUNTIME", 20, y, 0.72, (215, 224, 232), 2)
+        draw_text(f"debug feed {self._fps_display:.1f} fps", 20, y + 34, 0.6, (205, 214, 224), 2)
+        draw_text(f"global objects {len(self.global_state.get('objects', []))}", 20, y + 64, 0.6, (205, 214, 224), 2)
+        draw_text(f"local targets {sum(len(self.local_state.get(k, [])) for k in ('screws', 'screw_heads', 'tool_tips', 'holes'))}", 20, y + 94, 0.6, (205, 214, 224), 2)
+        return panel
 
     def draw_wide_dashboard(self, width):
         objects = self.global_state.get("objects", [])
@@ -400,24 +486,9 @@ class DashboardNode(Node):
         top_row = np.hstack((viz_g, viz_l))
         dashboard = self.draw_wide_dashboard(top_row.shape[1])
         final_frame = np.vstack((top_row, dashboard))
-        cv2.putText(
-            final_frame,
-            f"GLOBAL (RGB+D) {self._global_rx_fps:.1f} FPS",
-            (20, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255, 255, 255),
-            2,
-        )
-        cv2.putText(
-            final_frame,
-            f"TOOL CAMERA {self._local_rx_fps:.1f} FPS",
-            (viz_g.shape[1] + 20, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255, 255, 255),
-            2,
-        )
+
+        health_panel = self.draw_system_health_panel(final_frame.shape[0])
+        final_frame = np.hstack((health_panel, final_frame))
 
         compressed_msg = CompressedImage()
         compressed_msg.header.stamp = self.get_clock().now().to_msg()

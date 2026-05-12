@@ -19,6 +19,7 @@ GLOBAL_COLOR_DISPLAY_TOPIC = "/camera/cropped/color/image_display"
 GLOBAL_COLOR_TOPIC = GLOBAL_COLOR_INFERENCE_TOPIC
 GLOBAL_DEPTH_TOPIC = "/camera/cropped/depth/image_raw"
 GLOBAL_CAMERA_INFO_TOPIC = "/camera/cropped/depth/camera_info"
+GLOBAL_COLOR_CAMERA_INFO_TOPIC = "/camera/cropped/color/camera_info"
 LOCAL_COLOR_TOPIC = "/tool_cam/image_raw/compressed"
 GLOBAL_RELIABLE_QOS = QoSProfile(
     history=QoSHistoryPolicy.KEEP_LAST,

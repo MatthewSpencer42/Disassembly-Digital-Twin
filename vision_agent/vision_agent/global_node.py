@@ -23,6 +23,7 @@ from vision_agent.common import (
     PROCESSING_RATE_HZ,
     SHAPE_CONFIG,
     GLOBAL_CAMERA_INFO_TOPIC,
+    GLOBAL_COLOR_CAMERA_INFO_TOPIC,
     GLOBAL_COLOR_INFERENCE_TOPIC,
     GLOBAL_DEPTH_TOPIC,
     GLOBAL_RELIABLE_QOS,
@@ -57,7 +58,8 @@ class GlobalVisionNode(Node):
         self.frame_global = None
         self.frame_depth_meters = None
         self._depth_ready_logged = False
-        self.intrinsics = None
+        self.intrinsics = None        # depth camera intrinsics (cropped)
+        self.color_intrinsics = None  # color camera intrinsics (cropped)
         self.frame_counter = 0
         self.last_scout_results = []
         self.scout_future = None
@@ -94,6 +96,12 @@ class GlobalVisionNode(Node):
             CameraInfo,
             GLOBAL_CAMERA_INFO_TOPIC,
             self.cb_info,
+            GLOBAL_RELIABLE_QOS,
+        )
+        self.create_subscription(
+            CameraInfo,
+            GLOBAL_COLOR_CAMERA_INFO_TOPIC,
+            self.cb_color_info,
             GLOBAL_RELIABLE_QOS,
         )
         self.create_subscription(String, "/vision/reset_tracker", self.cb_reset_request, 10)
@@ -141,7 +149,24 @@ class GlobalVisionNode(Node):
         if self.intrinsics is None:
             k = msg.k
             self.intrinsics = {"fx": k[0], "fy": k[4], "cx": k[2], "cy": k[5]}
-            self.get_logger().info(f"Global intrinsics loaded: fx={k[0]:.1f}, fy={k[4]:.1f}")
+            self.get_logger().info(f"Global depth intrinsics: fx={k[0]:.1f}, fy={k[4]:.1f}, cx={k[2]:.1f}, cy={k[5]:.1f}")
+
+    def cb_color_info(self, msg):
+        if self.color_intrinsics is None:
+            k = msg.k
+            self.color_intrinsics = {"fx": k[0], "fy": k[4], "cx": k[2], "cy": k[5]}
+            self.get_logger().info(f"Global color intrinsics: fx={k[0]:.1f}, fy={k[4]:.1f}, cx={k[2]:.1f}, cy={k[5]:.1f}")
+            if self.intrinsics is not None:
+                fx_ratio = k[0] / self.intrinsics["fx"] if self.intrinsics["fx"] > 0 else 0
+                if abs(fx_ratio - 1.0) < 0.05:
+                    self.get_logger().info(
+                        "3D projection: depth is SW-aligned to color (same intrinsics) — using depth intrinsics directly"
+                    )
+                else:
+                    self.get_logger().info(
+                        f"3D projection: color fx/depth fx ratio = {fx_ratio:.2f} — "
+                        "will use color intrinsics + angular remapping for correct 3D coords"
+                    )
 
     def get_smoothed_values(self, marker_id, raw_scale, raw_cx, raw_cy):
         if marker_id not in self.buffers:
@@ -166,8 +191,6 @@ class GlobalVisionNode(Node):
             return None
 
         dh, dw = self.frame_depth_meters.shape
-        # Detections are in inference (color) image coordinates.
-        # When depth and color are different resolutions, scale to depth space.
         if self.frame_global is not None:
             ch, cw = self.frame_global.shape[:2]
             sx = dw / float(cw) if cw > 0 else 1.0
@@ -175,8 +198,62 @@ class GlobalVisionNode(Node):
         else:
             sx, sy = 1.0, 1.0
 
+        # One-time diagnostic: log the actual mode being used
+        if not getattr(self, '_proj_mode_logged', False):
+            self._proj_mode_logged = True
+            ci_loaded = self.color_intrinsics is not None
+            di = self.intrinsics
+            ci = self.color_intrinsics or {}
+            self.get_logger().info(
+                f"[3D-DIAG] depth_image={dw}x{dh}  color_image={cw}x{ch}  "
+                f"sx={sx:.3f} sy={sy:.3f}"
+            )
+            self.get_logger().info(
+                f"[3D-DIAG] depth_intrinsics: fx={di['fx']:.1f} fy={di['fy']:.1f} "
+                f"cx={di['cx']:.1f} cy={di['cy']:.1f}"
+            )
+            if ci_loaded:
+                self.get_logger().info(
+                    f"[3D-DIAG] color_intrinsics: fx={ci['fx']:.1f} fy={ci['fy']:.1f} "
+                    f"cx={ci['cx']:.1f} cy={ci['cy']:.1f}"
+                )
+            else:
+                self.get_logger().warning(
+                    "[3D-DIAG] color_intrinsics NOT loaded — "
+                    "/camera/cropped/color/camera_info not received yet. "
+                    "Using depth intrinsics (may give wrong XY if depth is native resolution)."
+                )
+            will_use = "COLOR intrinsics (angular remap)" if (ci_loaded and sx != 1.0) else \
+                       "DEPTH intrinsics (sx=1.0 → depth aligned to color)" if sx == 1.0 else \
+                       "DEPTH intrinsics (color_intrinsics not loaded — FALLBACK)"
+            self.get_logger().info(f"[3D-DIAG] Projection mode: {will_use}")
+
+        # When depth and color are at different resolutions the naive linear
+        # scale (cx * sx) is WRONG: it doesn't account for different camera FOVs
+        # and the crop offset that shifts the principal point.
+        # Fix: remap color pixels → depth pixels via angular projection using
+        # each camera's own intrinsics, then project back using color intrinsics.
+        use_color_proj = (sx != 1.0 or sy != 1.0) and self.color_intrinsics is not None
+        ci = self.color_intrinsics if use_color_proj else None
+        di = self.intrinsics
+
+        def _color_to_depth(px, py):
+            ax = (float(px) - ci["cx"]) / ci["fx"]
+            ay = (float(py) - ci["cy"]) / ci["fy"]
+            return (
+                int(np.clip(ax * di["fx"] + di["cx"], 0, dw - 1)),
+                int(np.clip(ay * di["fy"] + di["cy"], 0, dh - 1)),
+            )
+
         if segments_pts is not None:
-            if sx != 1.0 or sy != 1.0:
+            if use_color_proj:
+                pts_f = segments_pts.reshape(-1, 2).astype(np.float32)
+                ax = (pts_f[:, 0] - ci["cx"]) / ci["fx"]
+                ay = (pts_f[:, 1] - ci["cy"]) / ci["fy"]
+                dx = np.clip((ax * di["fx"] + di["cx"]).astype(np.int32), 0, dw - 1)
+                dy = np.clip((ay * di["fy"] + di["cy"]).astype(np.int32), 0, dh - 1)
+                scaled_pts = np.stack([dx, dy], axis=1).reshape((-1, 1, 2))
+            elif sx != 1.0 or sy != 1.0:
                 scaled_pts = (segments_pts.astype(np.float32) * np.array([sx, sy])).astype(np.int32)
             else:
                 scaled_pts = segments_pts
@@ -187,23 +264,25 @@ class GlobalVisionNode(Node):
             if len(valid_depths) == 0:
                 return None
             depth_val_m = float(np.median(valid_depths))
-            # Use scaled centroid for XY projection
-            cx_d = int(np.clip(cx * sx, 0, dw - 1))
-            cy_d = int(np.clip(cy * sy, 0, dh - 1))
         else:
-            cx_d = int(np.clip(cx * sx, 0, dw - 1))
-            cy_d = int(np.clip(cy * sy, 0, dh - 1))
+            if use_color_proj:
+                cx_d, cy_d = _color_to_depth(cx, cy)
+            else:
+                cx_d = int(np.clip(cx * sx, 0, dw - 1))
+                cy_d = int(np.clip(cy * sy, 0, dh - 1))
             depth_val_m = float(self.frame_depth_meters[cy_d, cx_d])
             if depth_val_m < 0.001:
                 return None
 
         z_m = depth_val_m
-        # Use color-space cx/cy with depth intrinsics (valid when depth is SW-aligned to color).
-        # If depth is at native resolution, the intrinsics are in depth-image space, so use scaled coords.
-        proj_cx = cx_d if sx != 1.0 else cx
-        proj_cy = cy_d if sy != 1.0 else cy
-        x_m = (proj_cx - self.intrinsics["cx"]) * z_m / self.intrinsics["fx"]
-        y_m = (proj_cy - self.intrinsics["cy"]) * z_m / self.intrinsics["fy"]
+        if use_color_proj:
+            # Project from color image space using color intrinsics
+            x_m = (float(cx) - ci["cx"]) * z_m / ci["fx"]
+            y_m = (float(cy) - ci["cy"]) * z_m / ci["fy"]
+        else:
+            # Depth is SW-aligned to color (sx==1.0): depth intrinsics == color intrinsics
+            x_m = (float(cx) - di["cx"]) * z_m / di["fx"]
+            y_m = (float(cy) - di["cy"]) * z_m / di["fy"]
         return (round(x_m, 4), round(y_m, 4), round(z_m, 4))
 
     def _record_stage_time(self, key, elapsed_s):
@@ -355,10 +434,34 @@ class GlobalVisionNode(Node):
                     "label": obj.get("label"),
                     "confidence": obj.get("confidence"),
                     "box": box,
+                    "px": [cx, cy],
                     "xyz": xyz_meters,
                     "angle": angle,
                 }
             )
+
+        # Throttled projection diagnostic — every 30 s
+        now = time.time()
+        if now - getattr(self, "_last_proj_log", 0.0) >= 30.0:
+            self._last_proj_log = now
+            di = self.intrinsics or {}
+            ci = self.color_intrinsics
+            if self.frame_global is not None and self.frame_depth_meters is not None:
+                dh2, dw2 = self.frame_depth_meters.shape
+                ch2, cw2 = self.frame_global.shape[:2]
+                sx2 = dw2 / float(cw2) if cw2 > 0 else 1.0
+                mode = ("COLOR(fx={:.0f},cx={:.0f},cy={:.0f})".format(
+                    ci["fx"], ci["cx"], ci["cy"]) if ci and sx2 != 1.0
+                    else "DEPTH(fx={:.0f},cx={:.0f},cy={:.0f})".format(
+                    di.get("fx",0), di.get("cx",0), di.get("cy",0)))
+                obj_lines = ", ".join(
+                    "[{} px=({},{}) xyz={}]".format(
+                        o["label"], o["px"][0], o["px"][1], o["xyz"])
+                    for o in objects
+                ) or "(none)"
+                self.get_logger().info(
+                    f"[3D-STATUS] mode={mode} | detections: {obj_lines}"
+                )
 
         packet = {
             "timestamp": timestamp,

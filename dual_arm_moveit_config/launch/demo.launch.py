@@ -228,7 +228,7 @@ def launch_setup(context, *_args, **_kwargs):
         "dual_arm_moveit_config/hardware/isaac_state_relay.py",
         "dual_arm_moveit_config/hardware/teleop_bridge.py",
         "dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py",
-        "/opt/ros/humble/lib/moveit_servo/servo_node_main",
+        "moveit_servo/servo_node_main",
         "/opt/ros/humble/lib/joy/joy_node",
         "/opt/ros/humble/lib/controller_manager/ros2_control_node",
         "/moveit_ros_move_group/move_group",
