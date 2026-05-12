@@ -1,0 +1,19 @@
+---
+source_file: "/home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/problems/dynamic_time_indexed_shooting_problem.cpp"
+type: "code"
+community: "Community 1"
+location: "L484"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Community_1
+---
+
+# set_X_star()
+
+## Connections
+- [[ReinitializeVariables()_1]] - `calls` [EXTRACTED]
+- [[dynamic_time_indexed_shooting_problem.cpp]] - `contains` [EXTRACTED]
+- [[get_has_quaternion_floating_base()]] - `calls` [INFERRED]
+
+#graphify/code #graphify/EXTRACTED #community/Community_1

@@ -21,16 +21,19 @@ class UnscrewSkill(Node):
             "MM_PER_PIX": 0.000130,         # m/px (Vision calibration)
             
             # Descent & Alignment
-            "XY_SPEED_ALIGN": 0.015,        # m/s (Increased as requested)
-            "Z_SPEED_DESCENT": 0.015,       # m/s
+            "XY_SPEED_ALIGN": 0.004,        # m/s, bounded by closed-loop TCP safety limits
+            "Z_SPEED_DESCENT": 0.002,       # m/s, slow until bit seating is proven
             "ALIGN_TOLERANCE_PX": 4.0,      # pixels
             "FORCE_THRESHOLD": 5.0,         # N (Contact detection)
+            "MAX_SEARCH_RADIUS": 0.012,     # m from hover; hard abort if exceeded
+            "MAX_DESCENT_DEPTH": 0.012,     # m below hover; hard abort if exceeded
+            "MAX_HOVER_LIFT": 0.006,        # m above hover during search/descent
 
             # Spiral Search
-            "SPIRAL_TIMEOUT": 15.0,         # s (Vision fallback)
-            "SPIRAL_START_DIST_MM": 5.0,   # mm (First side distance)
-            "SPIRAL_GAP_MM": 5.0,           # mm (Increase per 2 sides)
-            "SPIRAL_SPEED": 0.015,          # m/s
+            "SPIRAL_TIMEOUT": 10.0,         # s (Vision fallback)
+            "SPIRAL_START_DIST_MM": 2.0,    # mm (First side distance)
+            "SPIRAL_GAP_MM": 2.0,           # mm (Increase per 2 sides)
+            "SPIRAL_SPEED": 0.003,          # m/s
             
             # Extraction
             "EXTRACTION_MAX_TIME": 20.0,    # s
@@ -114,6 +117,19 @@ class UnscrewSkill(Node):
             time.sleep(0.1)
         return False
 
+    def _current_tcp_quaternion(self):
+        try:
+            tf = self.moveit_backend.tf_buffer.lookup_transform(
+                self.CONFIG["WORLD_FRAME"],
+                "screwdriver_tcp",
+                rclpy.time.Time(),
+            )
+            q = tf.transform.rotation
+            return {"qx": q.x, "qy": q.y, "qz": q.z, "qw": q.w}
+        except Exception as exc:
+            self.get_logger().warning(f"Could not read current screwdriver_tcp orientation: {exc}")
+            return None
+
     # =========================================================================
     # 1. ALIGNMENT & DESCENT (EXOTica real-time IK — no servo mode)
     # =========================================================================
@@ -138,6 +154,29 @@ class UnscrewSkill(Node):
             print(f"[DESCENT] Could not read initial EE orientation: {exc}. Using zero RPY.")
             ref_roll, ref_pitch, ref_yaw = 0.0, 0.0, 0.0
 
+        start_ee = None
+        try:
+            start_ee = (
+                tf0.transform.translation.x,
+                tf0.transform.translation.y,
+                tf0.transform.translation.z,
+            )
+        except Exception:
+            start_ee = _get_ee()
+        if start_ee is None:
+            print("[DESCENT] Could not read starting screwdriver_tcp pose; aborting.")
+            return False
+        start_x, start_y, start_z = start_ee
+        max_radius = float(self.CONFIG["MAX_SEARCH_RADIUS"])
+        min_z = start_z - float(self.CONFIG["MAX_DESCENT_DEPTH"])
+        max_z = start_z + float(self.CONFIG["MAX_HOVER_LIFT"])
+        abort_reason = [None]
+        print(
+            "[DESCENT] Safety envelope: "
+            f"XY radius <= {max_radius*1000:.1f}mm, "
+            f"Z [{min_z:.4f}, {max_z:.4f}]"
+        )
+
         retry_count = 0
         MAX_RETRIES = 3
 
@@ -157,6 +196,43 @@ class UnscrewSkill(Node):
                 return t.transform.translation.x, t.transform.translation.y, t.transform.translation.z
             except Exception:
                 return None
+
+        def _bounded_target(nx, ny, nz, context):
+            actual = _get_ee()
+            if actual is not None:
+                ax, ay, az = actual
+                actual_radius = math.hypot(ax - start_x, ay - start_y)
+                if actual_radius > max_radius + 0.003:
+                    abort_reason[0] = (
+                        f"{context}: actual TCP XY radius {actual_radius*1000:.1f}mm "
+                        f"exceeded {max_radius*1000:.1f}mm limit"
+                    )
+                    print(f"\n[SAFETY] {abort_reason[0]}")
+                    return None
+                if az < min_z - 0.002 or az > max_z + 0.004:
+                    abort_reason[0] = (
+                        f"{context}: actual TCP Z {az:.4f} outside "
+                        f"[{min_z:.4f}, {max_z:.4f}]"
+                    )
+                    print(f"\n[SAFETY] {abort_reason[0]}")
+                    return None
+
+            requested_radius = math.hypot(nx - start_x, ny - start_y)
+            if requested_radius > max_radius:
+                abort_reason[0] = (
+                    f"{context}: requested TCP XY radius {requested_radius*1000:.1f}mm "
+                    f"exceeded {max_radius*1000:.1f}mm limit"
+                )
+                print(f"\n[SAFETY] {abort_reason[0]}")
+                return None
+            if nz < min_z or nz > max_z:
+                abort_reason[0] = (
+                    f"{context}: requested TCP Z {nz:.4f} outside "
+                    f"[{min_z:.4f}, {max_z:.4f}]"
+                )
+                print(f"\n[SAFETY] {abort_reason[0]}")
+                return None
+            return (nx, ny, nz, ref_roll, ref_pitch, ref_yaw)
 
         def target_fn():
             """50 Hz target provider for move_cartesian_realtime_exotica."""
@@ -192,7 +268,7 @@ class UnscrewSkill(Node):
                 elif dist_px > self.CONFIG["ALIGN_TOLERANCE_PX"]:
                     z_step *= self.CONFIG["ALIGN_TOLERANCE_PX"] / dist_px
                 print(f"  [VIS] ErrX={err_x:5.1f} ErrY={err_y:5.1f} Fz={diff_fz:.2f}N Vz={z_step*1000:.1f}mm/s", end="\r")
-                return (ex + dx, ey + dy, ez - z_step, ref_roll, ref_pitch, ref_yaw)
+                return _bounded_target(ex + dx, ey + dy, ez - z_step, "visual descent")
             else:
                 # Square spiral search (XY only, no Z)
                 ss = spiral_state
@@ -209,17 +285,21 @@ class UnscrewSkill(Node):
                     ss["side_idx"] += 1
                     if ss["side_idx"] % 2 == 0:
                         ss["side_len_mm"] += self.CONFIG["SPIRAL_GAP_MM"]
-                return (ex + dx, ey + dy, ez, ref_roll, ref_pitch, ref_yaw)
+                return _bounded_target(ex + dx, ey + dy, ez, "spiral search")
 
         while retry_count <= MAX_RETRIES:
             contact_flag[0] = False
             result = self.moveit_backend.move_cartesian_realtime_exotica(
                 target_fn,
                 rate_hz=50.0,
-                max_step_m=0.003,
-                joint_smooth_alpha=0.7,
+                max_step_m=0.001,
+                joint_smooth_alpha=0.35,
                 timeout_s=self.CONFIG["SPIRAL_TIMEOUT"],
             )
+
+            if abort_reason[0]:
+                print(f"[DESCENT] Aborted by safety envelope: {abort_reason[0]}")
+                return False
 
             if contact_flag[0]:
                 print(f"\n[CONTACT] FT contact detected.")
@@ -248,9 +328,14 @@ class UnscrewSkill(Node):
                         cdx = max(min((al_ey * self.CONFIG["MM_PER_PIX"]) * -2.0 * dt, MAX_XY * dt), -MAX_XY * dt)
                         cdy = max(min((al_ex * self.CONFIG["MM_PER_PIX"]) * -2.0 * dt, MAX_XY * dt), -MAX_XY * dt)
                         ex, ey, ez = ee
+                        target = _bounded_target(ex + cdx, ey + cdy, ez, "surface align")
+                        if target is None:
+                            return False
                         self.moveit_backend.move_cartesian_realtime_exotica(
-                            lambda ex=ex, ey=ey, ez=ez, cdx=cdx, cdy=cdy: (ex + cdx, ey + cdy, ez, ref_roll, ref_pitch, ref_yaw),
+                            lambda target=target: target,
                             timeout_s=0.12, rate_hz=50.0,
+                            max_step_m=0.001,
+                            joint_smooth_alpha=0.35,
                         )
                     time.sleep(0.05)
                 time.sleep(0.2)
@@ -409,8 +494,18 @@ class UnscrewSkill(Node):
         if not world_pose or not base_pose: return False
         
         tx, ty = world_pose.pose.position.x, world_pose.pose.position.y
+        screw_z = world_pose.pose.position.z
         dist_base = math.hypot(base_pose.pose.position.x, base_pose.pose.position.y)
-        hover_z = world_pose.pose.position.z + self.CONFIG["TOOL_LENGTH"] + self.CONFIG["HOVER_DISTANCE"]
+        # The commanded link for xarm5 is screwdriver_tcp, which is already the
+        # physical tool tip. Do not add TOOL_LENGTH here; that drives the tip
+        # ~24 cm above/away from the screw.
+        hover_z = screw_z + self.CONFIG["HOVER_DISTANCE"]
+
+        print(f"[DIAG] Vision raw xyz in {self.CONFIG['CAMERA_FRAME']}: "
+              f"({raw_pose.position.x:.4f}, {raw_pose.position.y:.4f}, {raw_pose.position.z:.4f})")
+        print(f"[DIAG] Screw in {self.CONFIG['WORLD_FRAME']}: ({tx:.4f}, {ty:.4f}, {screw_z:.4f})")
+        print(f"[DIAG] screwdriver_tcp hover_z = {screw_z:.4f} + {self.CONFIG['HOVER_DISTANCE']:.4f} = {hover_z:.4f}")
+        print(f"[DIAG] xarm5 base dist: {dist_base:.3f}m (limit {self.CONFIG['REACH_LIMIT']:.3f}m)")
 
         if dist_base > self.CONFIG["REACH_LIMIT"]:
             print(f"❌ Reach {dist_base:.3f}m exceeds limit.")
@@ -418,12 +513,22 @@ class UnscrewSkill(Node):
 
         if interactive: input(f"👉 GATE 1: Approach Hover ({hover_z:.3f}m) [ENTER]")
         
-        # Safe lift before transit
-        self.moveit_backend.retract_z_exotica(self.CONFIG["TRANSIT_LIFT"], speed_mps=0.2)
-        self.wait_for_arm_settled()
+        # Do not pre-retract here. In this workspace that caused an unlabelled
+        # 30 mm jerk before the actual hover command. The hover target itself is
+        # already above the screw by HOVER_DISTANCE.
+        print("[DIAG] Pre-retract disabled; moving directly to screw hover.")
 
         # Robust Hover
-        if not self.moveit_backend.move_to_pose_exotica(tx, ty, hover_z, velocity=0.1):
+        q_current = self._current_tcp_quaternion()
+        if q_current:
+            print(
+                "[DIAG] Holding current screwdriver_tcp orientation: "
+                f"({q_current['qx']:.4f}, {q_current['qy']:.4f}, "
+                f"{q_current['qz']:.4f}, {q_current['qw']:.4f})"
+            )
+        if not self.moveit_backend.move_to_pose_exotica(
+            tx, ty, hover_z, q_dict=q_current, velocity=0.05
+        ):
             print("❌ Approach failed.")
             return False
         self.wait_for_arm_settled()
@@ -433,10 +538,10 @@ class UnscrewSkill(Node):
         # Stage 1: Descent
         staircase_res = self.perform_staircase_descent()
         if staircase_res == "TIMEOUT" or staircase_res is False:
-            print("⚠️ Descent failed or timed out. Lifting to safety.")
+            print("⚠️ Descent failed or timed out. Lifting to safety; skipping bin drop because no screw was captured.")
+            self.tool_pub.publish(Int8(data=0))
             self.moveit_backend.retract_z_exotica(
                 self.CONFIG["TRANSIT_LIFT"], speed_mps=self.CONFIG["RETRACT_SPEED"])
-            self._navigate_to_bin(bin1_raw)
             return False
 
         # Stage 2: Extraction
@@ -456,7 +561,7 @@ class UnscrewSkill(Node):
         
         if world_bin:
             bx, by = world_bin.pose.position.x, world_bin.pose.position.y
-            bz = world_bin.pose.position.z + self.CONFIG["TOOL_LENGTH"] + 0.030 
+            bz = world_bin.pose.position.z + 0.030
             
             if self.moveit_backend.move_to_pose_exotica(bx, by, bz, velocity=0.1):
                 self.wait_for_arm_settled()
@@ -486,7 +591,12 @@ def main(args=None):
                 node.execute_unscrew_command(target_id, target_label, interactive=False)
                 with node.data_lock: node.latest_targets = []
             time.sleep(0.5)
-    except KeyboardInterrupt: pass
-    finally: rclpy.shutdown()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        executor.shutdown(timeout_sec=2.0)
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__': main()

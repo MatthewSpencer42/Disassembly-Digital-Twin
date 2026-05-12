@@ -33,6 +33,7 @@ def _stage_exit_handlers(process_action, stage_name: str, critical: bool = True)
 
 def generate_launch_description():
     hardware_type = LaunchConfiguration("hardware_type")
+    enable_servo = LaunchConfiguration("enable_servo")
     handeye_calibration_file = (
         Path(get_package_share_directory("dual_arm_moveit_config")) / "config" / "realsense_handeye.calib"
     )
@@ -44,7 +45,7 @@ def generate_launch_description():
             "dual_arm_moveit_config",
             "exotica.launch.py",
             [TextSubstitution(text="hardware_type:="), hardware_type],
-            "enable_servo:=true",
+            [TextSubstitution(text="enable_servo:="), enable_servo],
             "enable_joystick:=false",
         ],
         output="screen",
@@ -82,6 +83,8 @@ def generate_launch_description():
             "launch",
             "vision_agent",
             "system_startup.launch.py",
+            "publish_handeye:=false",
+            "tool_video_device:=/dev/video8",
         ],
         output="screen",
         name="disassembly_vision_stage",
@@ -198,6 +201,14 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("hardware_type", default_value="real"),
+            DeclareLaunchArgument(
+                "enable_servo",
+                default_value="false",
+                description=(
+                    "Start MoveIt Servo nodes. Keep false unless moveit_servo is "
+                    "installed and Servo controllers are intentionally required."
+                ),
+            ),
             LogInfo(msg="🚀 [1/5] Starting EXOTica MoveIt stack..."),
             moveit_stage,
             start_ft_after_moveit,

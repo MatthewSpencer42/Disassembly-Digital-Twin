@@ -1,0 +1,267 @@
+---
+type: community
+cohesion: 0.02
+members: 224
+---
+
+# Community 2
+
+**Cohesion:** 0.02 - loosely connected
+**Members:** 224 nodes
+
+## Members
+- [[.__init__()_41]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_examples/src/exotica_examples_py/target_marker.py
+- [[.addControl()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_examples/src/exotica_examples_py/target_marker.py
+- [[.call_llm_first_line()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.call_llm_full()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.process_feedback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_examples/src/exotica_examples_py/target_marker.py
+- [[CameraParameters()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[Create()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[Eigen()_8]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/tools/finitediff_common.h
+- [[Exception()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools/exception.cpp
+- [[FractalDetector()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractaldetector.cpp
+- [[FractalPoseTracker()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/fractallabelers/fractalposetracker.h
+- [[HomographyHO()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/ippe.h
+- [[IPPE()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/ippe.h
+- [[Marker()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[Marker3DInfo()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[MarkerDetector_Impl()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[MarkerMap()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[MarkerMapPoseTracker()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[OgreGetPoseParameters()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[OgreGetProjectionMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[Otsu()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[ParamstoStream()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector.cpp
+- [[PoseSolverPoseSolver()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolvercomputeObjextSpaceR3Pts()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolvercomputeObjextSpaceRSvD()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolvercomputeRotations()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolvercomputeTranslation()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolverevalReprojError()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolvergenerateSquareObjectCorners2D()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolvergenerateSquareObjectCorners3D()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolverhomographyFromSquarePoints()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolvermakeCanonicalObjectPoints()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolvermeanSceneDepth()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolverrot2vec()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolverrotateVec2ZAxis()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolversolveCanonicalForm()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolversolveGeneric()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolversolveSquare()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[PoseSolversortPosesByReprojError()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[ROI()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[TargetMarker]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_examples/src/exotica_examples_py/target_marker.py
+- [[__OgreGetPoseParameters()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[__aruco_solve_pnp()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[__glGetModelViewMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[__init__.py_15]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_examples/src/exotica_examples_py/__init__.py
+- [[_toStream()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[addToImageHist()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[arParamDecompMat()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[argConvGLcpara2()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[aruco()_16]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/fractallabelers/fractalposetracker.h
+- [[aruco()_14]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/ippe.h
+- [[aruco()_7]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/marker.h
+- [[aruco()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/markermap.h
+- [[arucoMarker2Tf2()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco_ros/src/aruco_ros_utils.cpp
+- [[aruco_ros_utils.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco_ros/src/aruco_ros_utils.cpp
+- [[assignClass()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[bio_ik()_4]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/src/utils.h
+- [[build()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[buildPyramid()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[calculateExtrinsics()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[calculateExtrinsics()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[cameraparameters.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[clear()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[clear()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[computeDictionaryDistance()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[computeInitialDistances()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[configureMat()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[convertToMeters()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[convertToMeters()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[copyTo()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[cornerUpsample()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[create()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerlabeler.cpp
+- [[createMarkerMap()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[cvdrawingutils.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cvdrawingutils.cpp
+- [[detect()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[detect()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractallabeler.cpp
+- [[detect()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[detectMarkers()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco_ros/src/aruco_ros_utils.cpp
+- [[dictionary.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[dictionary_based.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[distortPoints()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[dot()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[draw()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[draw2d()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractaldetector.cpp
+- [[draw3d()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractaldetector.cpp
+- [[draw3dAxis()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cvdrawingutils.cpp
+- [[draw3dCube()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cvdrawingutils.cpp
+- [[draw3dCube()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractaldetector.cpp
+- [[drawAllContours()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[drawApproxCurve()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[drawContour()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[drawKeyPoints()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[drawMarkers()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractaldetector.cpp
+- [[dstMarker()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[dstMarkerToFractalDict()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[dstMarkerToMarker()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[enlargeMarkerCandidate()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[estimatePose()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[filter_ambiguous_query()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[finitediff_common.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/tools/finitediff_common.h
+- [[fractalInnerPose()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[fractalRefinement()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[fractal_solve_ransac()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[fractaldetector.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractaldetector.cpp
+- [[fractallabeler.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractallabeler.cpp
+- [[fractalmarkerset.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[fractalposetracker.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[fractalposetracker.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/fractallabelers/fractalposetracker.h
+- [[fromStream()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[fromStream()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[fromStream()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[fromVector()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[get3DPoints()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[getArea()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[getCameraLocation()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[getCenter()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[getConfigurations()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[getCrossPoint()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[getDetectionMode()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[getDicTypes()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[getFractalMarkerImage()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[getHubberMonoWeight()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[getIdList()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[getImage()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[getIndexOfMarkerId()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[getIndices()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[getInnerCode()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[getInnerCode()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractallabeler.cpp
+- [[getInnerCorners()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[getMarkerImage_id()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[getMarkerWarpSize()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[getMinMarkerSizePix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[getName()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[getName()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractallabeler.cpp
+- [[getPerimeter()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[getRTMatrix()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[getRTMatrix()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[getRTMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[getRadius()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[getThresholdedImage()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[getTransformMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[getTypeFromString()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[getTypeFromString()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[getTypeString()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[getTypeString()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[glGetModelViewMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[glGetProjectionMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[hamm_distance()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[hres()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[hubber()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[hubberMono()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[image_callback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco_ros/src/simple_double.cpp
+- [[impl__aruco_getRTMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[impl__aruco_getRTfromMatrix44()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[impl_assignClass_fast()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[interpolate2Dline()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[ippe.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[ippe.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/ippe.h
+- [[isFractalMarker()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[isPredefinedConfigurationString()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[isPredefinedDictinaryString()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[isValid()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/solvers/exotica_ompl_solver/src/ompl_exo.cpp
+- [[kcornerSubPix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[kfilter()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[list_to_pose()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_examples/src/exotica_examples_py/target_marker.py
+- [[load()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[loadFromFile()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[loadParamsFromFile()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[loadPredefined()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp
+- [[loadPredefined()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[marker.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[marker.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/marker.h
+- [[markerdetector_impl.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[markerlabeler.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerlabeler.cpp
+- [[markermap.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[markermap.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/markermap.h
+- [[norm()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[normalize()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[normalizeDataIsotropic()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[perimeter()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[picoflann()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[picoflann.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[posetracker.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[prefilterCandidates()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[print()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[push()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[readFromFile()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[readFromXMLFile()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[refineCornerWithContourLines()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[relocalization()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[reprj_error()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[rigidBodyTransformation_Horn1987()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[rosCameraInfo2ArucoCamParams()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco_ros/src/aruco_ros_utils.cpp
+- [[rotate()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[rotate()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractallabeler.cpp
+- [[rotateXAxis()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[saveToFile()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[saveToFile()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp
+- [[saveToFile()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[searchExactLevel()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[setConfiguration()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractaldetector.cpp
+- [[setConfiguration()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractallabeler.cpp
+- [[setDetectionMode()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[setDictionary()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[setMarkerLabeler()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[setParameters()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[setParams()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp
+- [[setParams()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[setParams()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp
+- [[setParams()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp
+- [[solvePnP()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp
+- [[target_marker.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_examples/src/exotica_examples_py/target_marker.py
+- [[thresholdAndDetectRectangles()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[thresholdAndDetectRectangles_thread()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[toMat()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[toStream()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp
+- [[toStream()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+- [[toStream()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp
+- [[touulong()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp
+- [[type()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py
+- [[up()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h
+- [[utils.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/src/utils.h
+- [[visMarkerFromPose()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco_ros/src/aruco_ros_utils.cpp
+- [[warp()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp
+
+## Live Query (requires Dataview plugin)
+
+```dataview
+TABLE source_file, type FROM #community/Community_2
+SORT file.name ASC
+```
+
+## Connections to other communities
+- 35 edges to [[_COMMUNITY_Community 1]]
+- 16 edges to [[_COMMUNITY_Community 5]]
+- 15 edges to [[_COMMUNITY_Community 11]]
+- 10 edges to [[_COMMUNITY_Community 4]]
+- 9 edges to [[_COMMUNITY_Community 0]]
+- 6 edges to [[_COMMUNITY_Community 3]]
+- 5 edges to [[_COMMUNITY_Community 20]]
+- 5 edges to [[_COMMUNITY_Community 12]]
+- 3 edges to [[_COMMUNITY_Community 6]]
+- 2 edges to [[_COMMUNITY_Community 21]]
+- 2 edges to [[_COMMUNITY_Community 8]]
+- 2 edges to [[_COMMUNITY_Community 9]]
+- 1 edge to [[_COMMUNITY_Community 19]]
+- 1 edge to [[_COMMUNITY_Community 7]]
+- 1 edge to [[_COMMUNITY_Community 14]]
+
+## Top bridge nodes
+- [[type()]] - degree 51, connects to 9 communities
+- [[image_callback()]] - degree 9, connects to 5 communities
+- [[isValid()_1]] - degree 13, connects to 4 communities
+- [[detectMarkers()]] - degree 6, connects to 4 communities
+- [[Create()]] - degree 30, connects to 3 communities

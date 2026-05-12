@@ -67,14 +67,49 @@ The current controller model is:
 - trajectory controllers are active by default
 - Servo controllers are inactive by default
 - the system launch explicitly starts the MoveIt stack with:
-  - `enable_servo:=true`
+  - `enable_servo:=false` by default
   - `enable_joystick:=false`
 - the skill backend switches to Servo controllers locally when a Servo descent is requested
 - after the Servo motion, the backend returns the system to planning mode
 
 This is required because the arm trajectory controllers and Servo controllers command the same joints and cannot both be active at the same time.
 
-If joystick teleop is needed, use the dedicated Servo/teleop launch in `dual_arm_moveit_config` instead of trying to share the same runtime with RViz interactive planning.
+If joystick teleop or MoveIt Servo is needed, install/source `moveit_servo` and pass
+`enable_servo:=true`. Otherwise keep Servo disabled; the base unscrew skill uses
+the EXOTica realtime IK path and does not require MoveIt Servo.
+
+## Manual launch sequence
+
+From the workspace root:
+
+```bash
+source install/setup.bash
+ros2 launch dual_arm_moveit_config exotica.launch.py hardware_type:=real use_rviz:=true enable_servo:=false
+```
+
+In a second terminal, after MoveIt/EXOTica is up:
+
+```bash
+source install/setup.bash
+ros2 launch vision_agent system_startup.launch.py
+```
+
+This starts Intel RealSense via `realsense2_camera`, then the tool camera, then
+the vision agent. To start only the disassembly skill nodes, use the package
+executables directly, for example:
+
+```bash
+source install/setup.bash
+ros2 run disassembly_skill unscrew_skill
+ros2 run disassembly_skill object_hold_skill
+```
+
+For one-command bringup:
+
+```bash
+source install/setup.bash
+ros2 launch disassembly_skill disassembly_system.launch.py hardware_type:=real
+```
 
 ## Vision assumptions
 

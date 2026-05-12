@@ -27,7 +27,11 @@ setup(
     maintainer_email='adip@todo.todo',
     description='PhD Vision System Agents',
     license='TODO',
-    tests_require=['pytest'],
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
     entry_points={
         'console_scripts': [
             'start_vision = vision_agent.agent_node:main',

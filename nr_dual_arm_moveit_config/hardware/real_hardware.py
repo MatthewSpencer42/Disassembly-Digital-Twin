@@ -306,6 +306,7 @@ class ArmBridge:
         self.has_valid_state = False
         self._log_state = {}
         self.joint_limits = self._resolve_joint_limits()
+        self._last_mode_refresh = 0.0
         # True once the arm is confirmed in the correct mode/state.
         # Reset to False on any non-zero SDK command return so recovery
         # is triggered on the next send without polling on every command.
@@ -365,7 +366,9 @@ class ArmBridge:
                 continue
             if code not in (None, 0):
                 self.logger.warning(f"{self.name}: {action_name}{args} returned SDK code {code}")
-        self._mode_ok = True
+        # Force the mode once more on the first command.  The xArm SDK can
+        # report initialized while the controller is still transitioning.
+        self._mode_ok = False
         self.logger.info(f"{self.name}: SDK bridge initialized for {self.ip}")
 
     def _ensure_ready_for_command(self, desired_mode=None):
@@ -374,20 +377,16 @@ class ArmBridge:
         if desired_mode is None:
             desired_mode = self.stream_mode
 
-        state_code, state_value = self._call_api("get_state")
         err_code, err_warn = self._call_api("get_err_warn_code")
         robot_error = err_warn[0] if isinstance(err_warn, (list, tuple)) and err_warn else 0
         if err_code == 0 and robot_error:
             if throttle(self._log_state, "recover_warn", 1.0):
                 self.logger.warning(f"{self.name}: controller error {robot_error}, attempting recovery")
             self._call_api("clean_error")
-            self._call_api("motion_enable", True)
-            self._call_api("set_mode", desired_mode)
-            self._call_api("set_state", 0)
-        elif state_code == 0 and state_value not in (0, 1):
-            self._call_api("motion_enable", True)
-            self._call_api("set_mode", desired_mode)
-            self._call_api("set_state", 0)
+        self._call_api("motion_enable", True)
+        self._call_api("set_mode", desired_mode)
+        self._call_api("set_state", 0)
+        self._last_mode_refresh = time.time()
         return True
 
     def read_state(self):
@@ -478,11 +477,11 @@ class ArmBridge:
                 self.logger.warning(
                     f"{self.name}: clamped joint command to hardware-safe limits: {filtered}"
                 )
-            # Only run the 2-network-call recovery check when the mode is
-            # known bad (after a failed command).  This removes 2 blocking
-            # SDK round-trips from every 100 Hz command cycle, eliminating
-            # the primary source of command-timing jitter.
-            if not self._mode_ok:
+            # Keep the xArm SDK in servo-joint mode for set_servo_angle_j.
+            # We refresh once per
+            # second because other command paths can leave the controller in a
+            # different mode while the trajectory action still accepts goals.
+            if not self._mode_ok or (time.time() - self._last_mode_refresh) > 1.0:
                 self._ensure_ready_for_command(desired_mode=1)
                 self._mode_ok = True
             try:
@@ -517,7 +516,7 @@ class ArmBridge:
             max_velocity = max(0.01, ARM_JOINT_SPEED_RAD_S * 0.75)
             for value in velocities:
                 filtered.append(clamp(float(value), -max_velocity, max_velocity))
-            # Velocity mode (4) differs from position mode (1); always recover
+            # Velocity mode (4) differs from servo-joint mode (1); always recover
             # when switching modes, otherwise only recover on detected fault.
             if not self._mode_ok or self.stream_mode != 4:
                 self._ensure_ready_for_command(desired_mode=4)

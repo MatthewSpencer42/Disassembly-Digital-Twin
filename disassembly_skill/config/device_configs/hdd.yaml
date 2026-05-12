@@ -1,0 +1,98 @@
+device:
+  class: hdd
+  model: hdd
+  dimensions_mm:
+    length: 147.0
+    width: 101.6
+    height: 26.1
+  material: mixed
+  fixturing: gripper_only
+
+components:
+  case:
+    label: case
+    type: chassis
+    removable: false
+  pcb:
+    label: pcb
+    type: board
+    removable: true
+  lid:
+    label: lid
+    type: lid
+    removable: true
+
+screw_zones:
+  pcb_screw:
+    parent_component: pcb
+    screw_count: 4
+    screw_type: torx
+  lid_screw:
+    parent_component: lid
+    screw_count: 6
+    screw_type: torx
+    depends_on_removal_of:
+      - pcb
+
+disassembly_sequence:
+  - step: 1
+    action: hold
+    label: Clamp HDD sideways for PCB side
+    target: case
+    reveals: [pcb_screw, pcb]
+    parameters:
+      strategy: lateral_clamp
+
+  - step: 2
+    action: unscrew
+    label: Remove PCB screws
+    target: pcb_screw
+    depends_on_steps: [1]
+    parameters:
+      screw_type: torx
+      screw_count: 4
+      align_only_debug: true
+
+  - step: 3
+    action: pickup
+    label: Extract PCB
+    target: pcb
+    depends_on_steps: [2]
+    reveals: [lid_screw, lid]
+    parameters:
+      grasp_type: precision
+
+  - step: 4
+    action: hold
+    label: Re-secure chassis after PCB pickup
+    target: case
+    depends_on_steps: [3]
+
+  - step: 5
+    action: flip
+    label: Flip HDD to lid side
+    target: case
+    depends_on_steps: [4]
+    reveals: [lid_screw]
+
+  - step: 6
+    action: hold
+    label: Re-secure chassis after flip
+    target: case
+    depends_on_steps: [5]
+
+  - step: 7
+    action: unscrew
+    label: Remove lid screws
+    target: lid_screw
+    depends_on_steps: [6]
+    parameters:
+      screw_type: torx
+      screw_count: 6
+      align_only_debug: true
+
+  - step: 8
+    action: flip_drop
+    label: Clear lid
+    target: lid
+    depends_on_steps: [7]

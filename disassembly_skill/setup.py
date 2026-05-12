@@ -4,6 +4,17 @@ from setuptools import find_packages, setup
 
 package_name = "disassembly_skill"
 
+
+def package_files(directory):
+    paths = []
+    for path, _directories, filenames in os.walk(directory):
+        for filename in filenames:
+            paths.append(os.path.join(path, filename))
+    return paths
+
+
+config_files = [path for path in glob("config/*") if os.path.isfile(path)]
+
 setup(
     name=package_name,
     version='0.0.0',
@@ -12,7 +23,11 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
-        (os.path.join("share", package_name, "config"), glob("config/*")),
+        (os.path.join("share", package_name, "config"), config_files),
+        (
+            os.path.join("share", package_name, "config", "device_configs"),
+            package_files("config/device_configs"),
+        ),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -37,6 +52,8 @@ setup(
             "test_exotica_planner = disassembly_skill.test_exotica_planner:main",
             "master_agent = disassembly_skill.master_agent:main",
             "groq_master_agent = disassembly_skill.groq_master_agent:main",
+            "config_runner = disassembly_skill.config_runner:main",
+            "device_config_builder = disassembly_skill.config_builder.config_builder_app:main",
         ],
     },
 )

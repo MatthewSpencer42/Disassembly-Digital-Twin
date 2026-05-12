@@ -1,0 +1,385 @@
+---
+type: community
+cohesion: 0.01
+members: 337
+---
+
+# Community 0
+
+**Cohesion:** 0.01 - loosely connected
+**Members:** 337 nodes
+
+## Members
+- [[NOTE we do NOT also publish to robot_joint_commands here because that would]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.__init__()_60]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[.__init__()_56]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.__init__()_57]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.__init__()_58]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.__init__()_59]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.__init__()_17]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.__init__()_16]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.__init__()_38]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[.__init__()_22]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.__init__()_21]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.__init__()_55]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.__init__()_13]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[.__init__()_14]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[.__init__()_20]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[.__init__()_19]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[.__init__()_9]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_agent/vision_agent/agents/scout_rtdetr.py
+- [[.__init__()_18]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[.__init__()_15]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[._apply_flip_config()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[._apply_flip_drop_config()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[._apply_hold_config()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[._apply_pickup_config()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[._apply_unscrew_config()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[._build_graph()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[._build_graph()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[._call_trigger_sync()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._check_ee_pos()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._check_joint_limits()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._check_joint_limits()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._clamp_target_x()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._clamp_target_z()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._configure_move_group_request()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._current_uf_joint_positions()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[._current_uf_joint_positions()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[._current_uf_joint_positions()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[._current_uf_joint_positions()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[._declare_parameter_safe()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[._declare_parameter_safe()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[._ensure_servo_mode()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._ensure_trajectory_mode()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._estimate_segment_time()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._estimate_segment_time()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._estimate_segment_time()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._execute_joint_goal()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._execute_robot_trajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._execute_spiral()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._fail()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._generate_config()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._get_full_robot_state()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._get_target_by_id()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[._get_target_by_label()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[._gripper_state_callback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._handle_request()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[._hold_current_arm_position()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._init_planners()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[._joint_state_callback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._log_pose_diagnostics()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[._log_tcp_position()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._log_uf850_joints()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._navigate_to_bin()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[._on_request()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[._on_response()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._pass()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._print_summary()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._publish_direct_joint_command()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._publish_zero_twist()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._quaternion_to_rpy()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._rpy_to_quaternion()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._run_async_loop()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[._run_async_loop()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[._run_hold_sequence()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[._run_uf850_tests()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._run_xarm5_tests()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._servo_supported()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._solution_to_robot_trajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._state_vector_from_joint_map()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._state_vector_from_joint_map()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._state_vector_from_joint_map()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._switch_controller_mode()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._t1_uf850_ik_solve()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._t2_uf850_hover()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._t3_uf850_descent()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._t4_xarm5_ik_solve()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._t5_xarm5_hover_and_spiral()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._target_vector()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._trajectory_to_robot_trajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._trajectory_to_robot_trajectory()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._wait_for_exotica_ready()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[._wait_for_future()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[._wait_for_server()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[._wrap_to_nearest()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.act()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.act()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.action_node()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.action_node()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.bin_callback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[.build_action_prompt()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.build_action_prompt()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.build_plan_prompt()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.build_plan_prompt()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.build_think_prompt()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.build_think_prompt()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.call_llm_remote_first_line()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.call_llm_remote_full()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.component()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py
+- [[.execute_flip()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[.execute_flip_drop()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[.execute_hold()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[.execute_pickup()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[.execute_unscrew_command()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[.flip_drop()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.flip_drop()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.flip_object()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.flip_object()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.format_tool_list()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.format_tool_list()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.get_transformed_pose()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/motion_backend.py
+- [[.goal_callback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.goal_callback()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.hold_object()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.hold_object()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.hold_status_callback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[.hold_status_callback()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[.hold_status_callback()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[.jog_cartesian_servo()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.mainloop()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[.move_cartesian_realtime_exotica()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.move_cartesian_to_pose()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.move_gripper()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.move_linear_z_with_effort_stop_exotica()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.move_linear_z_with_torque_stop()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.move_servo_xy_closed_loop()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.move_to_joint_positions()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.move_to_pose_exotica()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.move_to_pose_robust()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.perform_compliant_extraction()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[.perform_staircase_descent()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[.pickup_object()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.pickup_object()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.plan_joint_trajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.plan_node()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.plan_node()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.plan_pose_trajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.plan_pose_trajectory()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.publish_hold_status()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[.publish_hold_status()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[.publish_hold_status()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[.publish_state()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[.publish_state()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[.publish_state()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[.publish_state()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[.quit_button()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[.reset_button()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[.retract_relative_z()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.retract_servo_z_closed_loop()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.retract_z_exotica()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.run_agent()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.run_agent()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.run_all()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[.sanitize_reasoning()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.sanitize_reasoning()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.save_button()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[.scan()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_agent/vision_agent/agents/scout_rtdetr.py
+- [[.screw_zone()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py
+- [[.set_button()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[.set_gripper_force()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.solve_pose_goal_joint_positions()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[.start_servo()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.step()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py
+- [[.stop_immediately()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/motion_backend.py
+- [[.stop_servo()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[.teset_create_mesh_from_vertices_and_triangles()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/test/test_mesh.py
+- [[.test_create_mesh_from_resource_exotica_resource_path()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/test/test_mesh.py
+- [[.test_create_mesh_from_resource_package_path()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/test/test_mesh.py
+- [[.test_create_mesh_from_vertices()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/test/test_mesh.py
+- [[.think()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.think()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.to_dict()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py
+- [[.to_llm_context()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py
+- [[.unscrew()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.unscrew()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.vision_callback()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[.vision_callback()_4]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[.vision_callback()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[.vision_callback()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[.vision_callback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[.wait()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/arm_teleop/arm_teleop/wait_for_exotica_ready.py
+- [[.wait_for_arm_settled()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[.wait_for_arm_settled()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[.wait_for_arm_settled()_4]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[.wait_for_arm_settled()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[.wait_for_arm_settled()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[.wait_for_gripper()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[.wait_for_gripper()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[.wait_for_gripper()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[.wait_for_gripper()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[AgentState]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[AgentState_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[Block until exoticaready publishes True or the timeout expires.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Build a RobotTrajectory from a (N, J) array of joint-position waypoints.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Compatibility wrapper for the updated dual-arm MoveIt backend.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/motion_backend.py
+- [[DeviceConfig]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py
+- [[Drop-in replacement for ExoticaSingleArmPosePlanner that routes IK calls to the]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Dynamically monitors joint states to ensures precision moves.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[EXOTica real-time IK descent — TouchLabteleoperation style, no servo mode.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[EXOTica real-time compliant extraction — force-proportional Z lift, no servo mod]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[ExoticaDualArmPlanner]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[ExoticaIKServerNode]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[ExoticaPlannerTester]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[ExoticaSingleArmPosePlanner]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[FlipDropSkill]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[Generate and execute a smooth Archimedean spiral at the current EE height.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[Get()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/property.cpp
+- [[Goal()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[GroqMasterAgentNode]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[Initialise BOTH backends simultaneously, then run all requested tests.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[Initialize both EXOTica planners sequentially in a background thread.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[InstantiateBase()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/motion_solver.cpp
+- [[Integrate()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver.cpp
+- [[InteractiveCostTuning]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[InverseDynamics()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver_inverse_dynamics.cpp
+- [[Log current UF850 joint positions from the backend's joint state cache.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[Log the current TF position of ee_link in base_link frame (for closed-loop debug]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[MasterAgentNode]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[MotionBackend]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[Move EE straight up by distance_m at speed_mps using EXOTica IK streaming.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[MoveItMotionBackend]] - code
+- [[ObjectFlipSkill]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[ObjectHoldSkill]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[PickupSkill]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[Plays back a trajectory by updating the scene in a problem and publishing the co]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/publish_trajectory.py
+- [[Plots the task cost (task maps) over time given a problem.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/tools.py
+- [[Pre-warms EXOTica IK planners for both arms and serves IK requests over topics.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[Print()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/motion_solver.cpp
+- [[Quits interactive cost tuning.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[Receive a JSON IK request and dispatch it to the thread pool.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[RemoteExoticaIKClient]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Resets entriesexotica to original cost terms as specified in xml.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[Resolve IK via the server, then build a RobotTrajectory locally.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Resolve an IK request and publish the response. Runs in the thread pool.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py
+- [[Return an error string if any joint in goal_state violates URDF position limits,]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Return an error string if any joint violates URDF position limits, else None.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Returns detected objects with bounding boxes and simulated segments for agent_no]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_agent/vision_agent/agents/scout_rtdetr.py
+- [[Runs a battery of EXOTica planner tests and reports results.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[Runs a standalone Tkinter window in a separate process with multi-color highligh]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[Runs a standalone Tkinter window in a separate process with multi-color highligh_1]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[Saves current rho parameters in entries to file in home dir.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[ScoutAgent]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_agent/vision_agent/agents/scout_rtdetr.py
+- [[Send an IK request to the server and block up to 30 s for the response.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Sets rho parameters in entries into Exotica problem.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[SpecifyProblem()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/motion_solver.cpp
+- [[Standard Flip-Drop sequence with fixed 180-degree logic.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[StateDelta()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver.cpp
+- [[Store incoming IK responses for polling by solve_pose_goal_joint_positions.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[Stream EXOTica IK in a real-time loop (TouchLabteleoperation style).          t]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[TColor]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[TColor_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[TF lookup and compare to target. Returns error (m) if  EE_FAIL_M, else None.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[TestPythonMeshCreation]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/test/test_mesh.py
+- [[Tool]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[Tool_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[UnscrewSkill]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[Wait for the EXOTica IK server to be ready, or fall back after timeout.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[__init__.py_8]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/__init__.py
+- [[_const_or_name()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[_const_or_name()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[_ensure_setup_initialized()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[addVariable()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[bio_ik()_5]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[check_trajectory_continuous_time()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/tools.py
+- [[check_whether_trajectory_is_collision_free_by_subsampling()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/tools.py
+- [[dStateDelta()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver.cpp
+- [[dict]] - code
+- [[exotica_planner.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py
+- [[f()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver.cpp
+- [[getProblemLinkFrame()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[getProblemLinkIndex()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[getProblemVariableIndex()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[getProblemVariableInitialGuess()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[getProblemVariablePosition()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[getProblemVariableWeight()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[get_colliding_links()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/tools.py
+- [[goal.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[groq_master_agent.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[interactive_cost_tuning.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py
+- [[jupyter_meshcat.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/jupyter_meshcat.py
+- [[main()_18]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/config_builder/config_builder_app.py
+- [[main()_13]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[main()_8]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/motion_backend.py
+- [[main()_10]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[main()_11]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[main()_16]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[main()_15]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[main()_14]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[main()_12]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[master_agent.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[motion_backend.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/motion_backend.py
+- [[motion_backend.py_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py
+- [[motion_solver.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/motion_solver.cpp
+- [[num_subsamples specifies how many steps are checked between two configurations.]] - rationale - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/tools.py
+- [[object_flip_drop_skill.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[object_flip_skill.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[object_hold_skill.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[object_pickup_skill.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[parse_action()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[parse_action()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[pinocchio_dynamics_solver.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver.cpp
+- [[pinocchio_dynamics_solver_inverse_dynamics.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver_inverse_dynamics.cpp
+- [[plot()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/publish_trajectory.py
+- [[plot_task_cost_over_time()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/tools.py
+- [[print_stage()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[print_stage()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[publish_pose()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/publish_trajectory.py
+- [[publish_time_indexed_trajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/publish_trajectory.py
+- [[publish_trajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/publish_trajectory.py
+- [[publish_trajectory.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/publish_trajectory.py
+- [[read_hold_state()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[read_hold_state()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[read_hold_state()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+- [[run_live_dashboard()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/groq_master_agent.py
+- [[run_live_dashboard()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/master_agent.py
+- [[scout_rtdetr.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_agent/vision_agent/agents/scout_rtdetr.py
+- [[setSecondary()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[setWeight()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/bio_ik/include/bio_ik/goal.h
+- [[show()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/jupyter_meshcat.py
+- [[sig_int_handler()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/publish_trajectory.py
+- [[test_exotica_planner.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/test_exotica_planner.py
+- [[test_mesh.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/test/test_mesh.py
+- [[test_to_llm_context_exposes_sequence_summary()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/test/test_device_config.py
+- [[tools.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica/tools.py
+- [[unscrew_skill.py]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/unscrew_skill.py
+- [[validate_mesh()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/test/test_mesh.py
+- [[write_hold_state()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_drop_skill.py
+- [[write_hold_state()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_flip_skill.py
+- [[write_hold_state()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_hold_skill.py
+- [[write_hold_state()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/object_pickup_skill.py
+
+## Live Query (requires Dataview plugin)
+
+```dataview
+TABLE source_file, type FROM #community/Community_0
+SORT file.name ASC
+```
+
+## Connections to other communities
+- 37 edges to [[_COMMUNITY_Community 7]]
+- 33 edges to [[_COMMUNITY_Community 8]]
+- 29 edges to [[_COMMUNITY_Community 10]]
+- 19 edges to [[_COMMUNITY_Community 6]]
+- 17 edges to [[_COMMUNITY_Community 1]]
+- 16 edges to [[_COMMUNITY_Community 12]]
+- 14 edges to [[_COMMUNITY_Community 4]]
+- 9 edges to [[_COMMUNITY_Community 2]]
+- 8 edges to [[_COMMUNITY_Community 11]]
+- 7 edges to [[_COMMUNITY_Community 23]]
+- 7 edges to [[_COMMUNITY_Community 3]]
+- 6 edges to [[_COMMUNITY_Community 9]]
+- 5 edges to [[_COMMUNITY_Community 15]]
+- 5 edges to [[_COMMUNITY_Community 18]]
+- 4 edges to [[_COMMUNITY_Community 17]]
+- 4 edges to [[_COMMUNITY_Community 13]]
+- 2 edges to [[_COMMUNITY_Community 19]]
+- 1 edge to [[_COMMUNITY_Community 30]]
+- 1 edge to [[_COMMUNITY_Community 5]]
+- 1 edge to [[_COMMUNITY_Community 34]]
+
+## Top bridge nodes
+- [[Get()]] - degree 134, connects to 14 communities
+- [[Print()_1]] - degree 59, connects to 7 communities
+- [[dict]] - degree 14, connects to 5 communities
+- [[ExoticaSingleArmPosePlanner]] - degree 26, connects to 4 communities
+- [[RemoteExoticaIKClient]] - degree 21, connects to 3 communities

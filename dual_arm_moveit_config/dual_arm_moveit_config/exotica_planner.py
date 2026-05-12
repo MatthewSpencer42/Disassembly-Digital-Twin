@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 from tempfile import gettempdir
 
+import rclpy
 import yaml
 import xacro
 from ament_index_python.packages import get_package_share_directory
@@ -912,7 +913,7 @@ class RemoteExoticaIKClient:
         node,
         group_name: str,
         hardware_type: str = "fake",
-        timeout_s: float = 5.0,
+        timeout_s: float = 60.0,
     ):
         import uuid as _uuid
 
@@ -986,7 +987,13 @@ class RemoteExoticaIKClient:
 
         deadline = _time.monotonic() + timeout_s
         while _time.monotonic() < deadline:
-            ready_event.wait(timeout=0.1)
+            # Skills construct MotionBackend before their executor starts
+            # spinning.  Spin this node here so the transient-local ready
+            # message can actually be delivered during construction.
+            try:
+                rclpy.spin_once(self.node, timeout_sec=0.1)
+            except RuntimeError:
+                ready_event.wait(timeout=0.1)
             if ready_event.is_set():
                 break
 

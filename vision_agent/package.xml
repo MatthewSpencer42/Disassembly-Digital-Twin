@@ -13,6 +13,13 @@
   <depend>cv_bridge</depend>
   <depend>opencv-python</depend>
   <depend>numpy</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>tool_camera_pkg</exec_depend>
+  <exec_depend>dual_arm_moveit_config</exec_depend>
+  <exec_depend>easy_handeye2</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

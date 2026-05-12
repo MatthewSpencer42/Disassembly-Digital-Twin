@@ -1,0 +1,18 @@
+---
+source_file: "/home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco_ros/launch/double.launch.py"
+type: "code"
+community: "Community 4"
+location: "L8"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Community_4
+---
+
+# launch_setup()
+
+## Connections
+- [[Node]] - `calls` [INFERRED]
+- [[double.launch.py]] - `contains` [EXTRACTED]
+
+#graphify/code #graphify/EXTRACTED #community/Community_4

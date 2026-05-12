@@ -1,4 +1,6 @@
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -11,14 +13,21 @@ def generate_launch_description():
         'tool_camera_info.yaml'
     )
 
+    video_device = LaunchConfiguration('video_device')
+
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'video_device',
+            default_value='/dev/video8',
+            description='USB video device for the HD tool camera',
+        ),
         Node(
             package='usb_cam',
             executable='usb_cam_node_exe',
             name='tool_camera',
             namespace='tool_cam',
             parameters=[{
-                'video_device': '/dev/video10',  
+                'video_device': video_device,
                 'framerate': 30.0,
                 'image_width': 640,
                 'image_height': 480,

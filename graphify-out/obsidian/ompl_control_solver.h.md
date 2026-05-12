@@ -1,0 +1,17 @@
+---
+source_file: "/home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/solvers/exotica_ompl_control_solver/include/exotica_ompl_control_solver/ompl_control_solver.h"
+type: "code"
+community: "Community 109"
+location: "L1"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Community_109
+---
+
+# ompl_control_solver.h
+
+## Connections
+- [[exotica()_49]] - `contains` [EXTRACTED]
+
+#graphify/code #graphify/EXTRACTED #community/Community_109

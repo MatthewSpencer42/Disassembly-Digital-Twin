@@ -702,12 +702,12 @@ class MotionBackend:
             self.node.get_logger().error(f"[{self.backend_kind}] move_to_pose_exotica: failed to enter trajectory mode")
             return False
         if self._single_arm_exotica_planner is None or not self._single_arm_exotica_planner.available:
-            self.node.get_logger().warning(
+            self.node.get_logger().error(
                 f"[{self.backend_kind}] move_to_pose_exotica: EXOTica planner unavailable "
                 f"({getattr(self._single_arm_exotica_planner, 'last_error', 'not initialized')}). "
-                "Falling back to MoveIt IK — motion will not use smooth quintic trajectories."
+                "Start dual_arm_moveit_config exotica.launch.py and wait for /exotica/ready before running skills."
             )
-            return self.move_to_pose_robust(x, y, z, q_dict=q_dict, velocity=velocity, frame_id=frame_id)
+            return False
         if frame_id != "base_link":
             self.node.get_logger().warning(
                 f"[{self.backend_kind}] move_to_pose_exotica: frame_id={frame_id} is not base_link. "
@@ -751,9 +751,9 @@ class MotionBackend:
 
         self.node.get_logger().warning(
             f"[{self.backend_kind}] move_to_pose_exotica: EXOTica IK FAILED after {time.time()-t0:.3f}s "
-            f"({self._single_arm_exotica_planner.last_error}). Falling back to MoveIt IK."
+            f"({self._single_arm_exotica_planner.last_error})."
         )
-        return self.move_to_pose_robust(x, y, z, q_dict=q_dict, velocity=velocity, frame_id=frame_id)
+        return False
 
     def move_cartesian_to_pose(
         self,
@@ -915,18 +915,12 @@ class MotionBackend:
             f"rate={rate_hz}Hz alpha={command_alpha}"
         )
         if self._single_arm_exotica_planner is None or not self._single_arm_exotica_planner.available:
-            self.node.get_logger().warning(
+            self.node.get_logger().error(
                 f"[{self.backend_kind}] EXOTica stepped tactile descent unavailable "
                 f"({getattr(self._single_arm_exotica_planner, 'last_error', 'not initialized')}). "
-                "Falling back to servo torque stop."
+                "Start dual_arm_moveit_config exotica.launch.py and wait for /exotica/ready before running skills."
             )
-            speed_mps = max(step_m * rate_hz, 0.002)
-            return self.move_linear_z_with_torque_stop(
-                speed_mps=speed_mps,
-                threshold_nm=threshold_nm,
-                joint_index=joint_index,
-                timeout=max(descent_distance_m / max(speed_mps, 1e-3), 10.0),
-            )
+            return False
 
         if not self.state_received.wait(timeout=2.0):
             self.node.get_logger().error(
@@ -1209,11 +1203,11 @@ class MotionBackend:
         Returns True on completion, False on IK failure.
         """
         if self._single_arm_exotica_planner is None or not self._single_arm_exotica_planner.available:
-            self.node.get_logger().warning(
+            self.node.get_logger().error(
                 f"[{self.backend_kind}] retract_z_exotica: EXOTica unavailable — "
-                "falling back to retract_relative_z"
+                "cannot execute EXOTica-only retract"
             )
-            return self.retract_relative_z(distance_m, velocity=float(speed_mps))
+            return False
 
         dt = 1.0 / max(float(rate_hz), 1.0)
         step_m = float(speed_mps) * dt

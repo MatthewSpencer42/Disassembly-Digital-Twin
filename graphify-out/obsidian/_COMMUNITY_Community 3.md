@@ -1,0 +1,228 @@
+---
+type: community
+cohesion: 0.02
+members: 184
+---
+
+# Community 3
+
+**Cohesion:** 0.02 - loosely connected
+**Members:** 184 nodes
+
+## Members
+- [[AddElement()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[AddElementFromSegmentMapIterator()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[AddEnvironmentElement()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[AddInitializers()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[AddObject()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[AddObjectToEnvironment()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[AddTrajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[AddTrajectoryFromFile()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[AssignScene()_4]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_check.cpp
+- [[AssignScene()_17]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_distance.cpp
+- [[AssignScene()_15]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/smooth_collision_distance.cpp
+- [[AssignScene()_12]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/sum_of_penetrations.cpp
+- [[AttachObject()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[AttachObjectLocal()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[BuildTree()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[ChangeParent()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[CheckCollision()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[CleanScene()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[CollisionCallback()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[CollisionCallbackDistance()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[ComputeDistance()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[ComputeH()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[ComputeJ()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[ConstructFclCollisionObject()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[ContinuousCollisionCheck()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[CreateCollisionScene()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/setup.h
+- [[CreateDynamicsSolver()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/setup.h
+- [[CreateInitializer()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[CreateMap()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/setup.h
+- [[CreateProblem()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/setup.h
+- [[CreateScene()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/setup.h
+- [[CreateStringIOObject()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[DetachObject()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[Distance()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/sphere_collision.cpp
+- [[DoesLinkWithNameExist()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[FK()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[FindKinematicElementByName()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetCollisionDistance()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[GetCollisionObjectTypes()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetCollisionRobotLinks()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[GetCollisionWorldLinks()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[GetColor()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/tools.h
+- [[GetControlledJointNames()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetControlledLinkMass()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetControlledLinkNames()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetControlledState()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetFrame()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools/conversions.cpp
+- [[GetFrameFromMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools/conversions.cpp
+- [[GetInitializers()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/setup.cpp
+- [[GetKinematicChain()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetKinematicChainLinks()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetModelBaseType()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetModelLinkNames()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetModelState()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetModelState()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetModelStateMap()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetModelStateMap()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetName()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/server.cpp
+- [[GetNumModelJoints()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[GetPlanningSceneMsg()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetRobotToRobotCollisionDistance()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[GetRobotToWorldCollisionDistance()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[GetRootJointName()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetTrajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetTranslation()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[GetTreeMap()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[GetType()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/property.cpp
+- [[GetTypeName()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[GetUsedJointLimits()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[HasAttachedObject()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[HasModelLink()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[Hessian()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[Initialize()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_check.cpp
+- [[Initialize()_14]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_distance.cpp
+- [[Initialize()_12]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/smooth_collision_distance.cpp
+- [[Initialize()_10]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/sum_of_penetrations.cpp
+- [[Initialize()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/visualization_moveit.cpp
+- [[Instantiate()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[Instantiate()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[IsAllowedToCollide()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[IsAllowedToCollide()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/collision_scene.cpp
+- [[IsCollisionFree()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[IsControlled()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[IsControlledLink()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[IsPyString()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[IsRobotLink()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[IsRobotLink()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/collision_scene.cpp
+- [[IsStateValid()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[Jacobian()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[KDLToTransformStamped()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[KinematicSolution()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/kinematic_tree.h
+- [[KinematicsRequest()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[LoadFile()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[LoadFromXML()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[LoadOBJ()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[LoadOctree()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[LoadOctreeAsShape()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[LoadScene()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[LoadSceneFile()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[LoadSceneFromStringStream()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[PYBIND11_MODULE()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[Paramssave()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector.cpp
+- [[ParsePath()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[PathExists()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[PrintDimensions()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools/printable.cpp
+- [[ProxyToMarker()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[PublishFrames()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[PublishProxies()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[PublishScene()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[PyAsStdString()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[PyInt_AsLong()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[PyInt_Check()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[RemoveExpiredChildren()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/kinematic_element.h
+- [[RemoveObject()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[RemoveTrajectory()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[ResetJointLimits()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[ResetModel()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[SaveMatrix()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[Scene()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[SetJointAccelerationLimits()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[SetJointVelocityLimits()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[SetModelState()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[SetModelState()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[StdStringAsPy()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[TaskSpaceDim()_3]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_check.cpp
+- [[TaskSpaceDim()_24]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_distance.cpp
+- [[TaskSpaceDim()_22]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/smooth_collision_distance.cpp
+- [[TaskSpaceDim()_18]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/sum_of_penetrations.cpp
+- [[ToString()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools/printable.cpp
+- [[Update()_16]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_check.cpp
+- [[Update()_37]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_distance.cpp
+- [[Update()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[Update()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[Update()_35]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/smooth_collision_distance.cpp
+- [[Update()_31]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/sum_of_penetrations.cpp
+- [[UpdateClosestRobotLink()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/kinematic_element.h
+- [[UpdateCollisionObjectTransforms()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[UpdateCollisionObjects()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[UpdateCollisionObjects()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[UpdateFK()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[UpdateH()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[UpdateInternal()_2]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_distance.cpp
+- [[UpdateInternal()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/smooth_collision_distance.cpp
+- [[UpdateInternalFrames()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[UpdateJ()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[UpdateModel()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[UpdateMoveItPlanningScene()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[UpdatePlanningScene()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[UpdatePlanningSceneWorld()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[UpdateSceneFrames()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[UpdateTrajectoryGenerators()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[UpdateTree()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[VisualizationMoveIt()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/visualization_moveit.cpp
+- [[array_hessian()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[collision_check.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_check.cpp
+- [[collision_distance.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/collision_distance.cpp
+- [[collision_scene.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/collision_scene.cpp
+- [[collision_scene_fcl_latest.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[collision_scene_fcl_latest.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/include/exotica_collision_scene_fcl_latest/collision_scene_fcl_latest.h
+- [[exotica()_98]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/include/exotica_collision_scene_fcl_latest/collision_scene_fcl_latest.h
+- [[exotica()_11]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/kinematic_element.h
+- [[exotica()_18]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/scene.h
+- [[get_num_controls()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[get_num_positions()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[get_num_state()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[get_num_state_derivative()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[get_num_velocities()_1]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[hessian_array()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[kinematic_element.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/kinematic_element.h
+- [[kinematic_tree.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/kinematic_tree.cpp
+- [[kinematic_tree.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/kinematic_tree.h
+- [[name()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/disassembly_skill/device_config.py
+- [[printable.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools/printable.cpp
+- [[pyexotica.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_python/src/pyexotica.cpp
+- [[scene.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/scene.cpp
+- [[scene.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/scene.h
+- [[setup.h]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/setup.h
+- [[smooth_collision_distance.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/smooth_collision_distance.cpp
+- [[sum_of_penetrations.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_core_task_maps/src/sum_of_penetrations.cpp
+- [[tools.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/tools.cpp
+- [[transformFCLToKDL()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[transformKDLToFCL()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp
+- [[val()]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/include/exotica_core/tools/conversions.h
+- [[visualization_moveit.cpp]] - code - /home/adip/workspace/disassembly_ws/src/agentic_disassembly/exotica/exotica_core/src/visualization_moveit.cpp
+
+## Live Query (requires Dataview plugin)
+
+```dataview
+TABLE source_file, type FROM #community/Community_3
+SORT file.name ASC
+```
+
+## Connections to other communities
+- 87 edges to [[_COMMUNITY_Community 1]]
+- 32 edges to [[_COMMUNITY_Community 11]]
+- 27 edges to [[_COMMUNITY_Community 5]]
+- 11 edges to [[_COMMUNITY_Community 13]]
+- 7 edges to [[_COMMUNITY_Community 0]]
+- 6 edges to [[_COMMUNITY_Community 2]]
+- 5 edges to [[_COMMUNITY_Community 15]]
+- 4 edges to [[_COMMUNITY_Community 8]]
+- 4 edges to [[_COMMUNITY_Community 9]]
+- 2 edges to [[_COMMUNITY_Community 6]]
+- 2 edges to [[_COMMUNITY_Community 29]]
+- 2 edges to [[_COMMUNITY_Community 12]]
+- 1 edge to [[_COMMUNITY_Community 7]]
+- 1 edge to [[_COMMUNITY_Community 20]]
+- 1 edge to [[_COMMUNITY_Community 24]]
+- 1 edge to [[_COMMUNITY_Community 31]]
+
+## Top bridge nodes
+- [[GetName()]] - degree 45, connects to 6 communities
+- [[Hessian()]] - degree 21, connects to 6 communities
+- [[PYBIND11_MODULE()]] - degree 38, connects to 5 communities
+- [[Distance()]] - degree 15, connects to 5 communities
+- [[PublishFrames()]] - degree 13, connects to 5 communities

@@ -272,10 +272,8 @@ class ObjectHoldSkill(Node):
 
         print(f"Moving to hover pose with EXOTica at X: {hover_x:.3f}, Y: {hover_y:.3f}, Z: {hz:.3f}...")
         if not self.uf850.move_to_pose_exotica(hover_x, hover_y, hz, qd, velocity=self.APPROACH_VELOCITY):
-            print("EXOTica pose planning failed. Attempting Cartesian fallback...")
-            if not self.uf850.move_cartesian_to_pose(hover_x, hover_y, hz, qd, velocity=self.APPROACH_VELOCITY):
-                print("[ERROR] Both EXOTica and Cartesian fallback failed to reach hover pose. Aborting.")
-                return False
+            print("[ERROR] EXOTica pose planning failed. Aborting; no MoveIt Cartesian fallback in EXOTica-only mode.")
+            return False
         if not self.wait_for_arm_settled():
             print("[ERROR] Arm did not settle after hover move.")
             return False

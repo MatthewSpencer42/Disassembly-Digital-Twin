@@ -1,0 +1,87 @@
+---
+source_file: "/home/adip/workspace/disassembly_ws/src/agentic_disassembly/dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py"
+type: "code"
+community: "Community 0"
+location: "L26"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Community_0
+---
+
+# MotionBackend
+
+## Connections
+- [[.__init__()_55]] - `method` [EXTRACTED]
+- [[.__init__()_13]] - `calls` [INFERRED]
+- [[.__init__()_14]] - `calls` [INFERRED]
+- [[.__init__()_15]] - `calls` [INFERRED]
+- [[.__init__()_19]] - `calls` [INFERRED]
+- [[.__init__()_20]] - `calls` [INFERRED]
+- [[.__init__()_43]] - `calls` [INFERRED]
+- [[._call_trigger_sync()]] - `method` [EXTRACTED]
+- [[._clamp_target_x()]] - `method` [EXTRACTED]
+- [[._clamp_target_z()]] - `method` [EXTRACTED]
+- [[._configure_move_group_request()]] - `method` [EXTRACTED]
+- [[._ensure_servo_mode()]] - `method` [EXTRACTED]
+- [[._ensure_trajectory_mode()]] - `method` [EXTRACTED]
+- [[._execute_joint_goal()]] - `method` [EXTRACTED]
+- [[._execute_robot_trajectory()]] - `method` [EXTRACTED]
+- [[._get_full_robot_state()]] - `method` [EXTRACTED]
+- [[._gripper_state_callback()]] - `method` [EXTRACTED]
+- [[._hold_current_arm_position()]] - `method` [EXTRACTED]
+- [[._joint_state_callback()]] - `method` [EXTRACTED]
+- [[._publish_direct_joint_command()]] - `method` [EXTRACTED]
+- [[._publish_zero_twist()_1]] - `method` [EXTRACTED]
+- [[._quaternion_to_rpy()]] - `method` [EXTRACTED]
+- [[._rpy_to_quaternion()]] - `method` [EXTRACTED]
+- [[._servo_supported()]] - `method` [EXTRACTED]
+- [[._switch_controller_mode()]] - `method` [EXTRACTED]
+- [[._wait_for_future()]] - `method` [EXTRACTED]
+- [[.get_transformed_pose()]] - `method` [EXTRACTED]
+- [[.jog_cartesian_servo()]] - `method` [EXTRACTED]
+- [[.move_cartesian_realtime_exotica()]] - `method` [EXTRACTED]
+- [[.move_cartesian_to_pose()]] - `method` [EXTRACTED]
+- [[.move_gripper()]] - `method` [EXTRACTED]
+- [[.move_linear_z_with_effort_stop_exotica()]] - `method` [EXTRACTED]
+- [[.move_linear_z_with_torque_stop()]] - `method` [EXTRACTED]
+- [[.move_servo_xy_closed_loop()]] - `method` [EXTRACTED]
+- [[.move_to_joint_positions()]] - `method` [EXTRACTED]
+- [[.move_to_pose_exotica()]] - `method` [EXTRACTED]
+- [[.move_to_pose_robust()]] - `method` [EXTRACTED]
+- [[.retract_relative_z()]] - `method` [EXTRACTED]
+- [[.retract_servo_z_closed_loop()]] - `method` [EXTRACTED]
+- [[.retract_z_exotica()]] - `method` [EXTRACTED]
+- [[.set_gripper_force()]] - `method` [EXTRACTED]
+- [[.start_servo()]] - `method` [EXTRACTED]
+- [[.stop_immediately()]] - `method` [EXTRACTED]
+- [[.stop_servo()]] - `method` [EXTRACTED]
+- [[Compatibility wrapper for the updated dual-arm MoveIt backend.]] - `uses` [INFERRED]
+- [[Disable teleop, move arms to home pose in background, clear calibration.]] - `uses` [INFERRED]
+- [[Dynamically monitors joint states to ensures precision moves.]] - `uses` [INFERRED]
+- [[EXOTica real-time IK descent — TouchLabteleoperation style, no servo mode.]] - `uses` [INFERRED]
+- [[EXOTica real-time compliant extraction — force-proportional Z lift, no servo mod]] - `uses` [INFERRED]
+- [[ExoticaArmTeleop]] - `uses` [INFERRED]
+- [[ExoticaDualArmPlanner]] - `uses` [INFERRED]
+- [[ExoticaPlannerTester]] - `uses` [INFERRED]
+- [[ExoticaSingleArmPosePlanner]] - `uses` [INFERRED]
+- [[FlipDropSkill]] - `uses` [INFERRED]
+- [[Generate and execute a smooth Archimedean spiral at the current EE height.]] - `uses` [INFERRED]
+- [[Initialise BOTH backends simultaneously, then run all requested tests.]] - `uses` [INFERRED]
+- [[Log current UF850 joint positions from the backend's joint state cache.]] - `uses` [INFERRED]
+- [[Log the current TF position of ee_link in base_link frame (for closed-loop debug]] - `uses` [INFERRED]
+- [[MotionBackend]] - `uses` [INFERRED]
+- [[MoveItMotionBackend]] - `inherits` [EXTRACTED]
+- [[ObjectFlipSkill]] - `uses` [INFERRED]
+- [[ObjectHoldSkill]] - `uses` [INFERRED]
+- [[PickupSkill]] - `uses` [INFERRED]
+- [[RemoteExoticaIKClient]] - `uses` [INFERRED]
+- [[Runs a battery of EXOTica planner tests and reports results.]] - `uses` [INFERRED]
+- [[Standard Flip-Drop sequence with fixed 180-degree logic.]] - `uses` [INFERRED]
+- [[TF lookup and compare to target. Returns error (m) if  EE_FAIL_M, else None.]] - `uses` [INFERRED]
+- [[UnscrewSkill]] - `uses` [INFERRED]
+- [[Wait for the EXOTica IK server to be ready, or fall back after timeout.]] - `uses` [INFERRED]
+- [[motion_backend.py]] - `contains` [EXTRACTED]
+- [[motion_backend.py_1]] - `contains` [EXTRACTED]
+
+#graphify/code #graphify/EXTRACTED #community/Community_0
