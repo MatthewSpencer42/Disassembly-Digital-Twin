@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import math
+import os
 import threading
 import time
 
@@ -24,6 +25,11 @@ from dual_arm_moveit_config.exotica_planner import ExoticaDualArmPlanner, Exotic
 
 
 class MotionBackend:
+    _RG6_RAD_OPEN = -0.625
+    _RG6_RAD_CLOSE = 0.625
+    _RG6_MM_OPEN = 160.0
+    _RG6_MM_CLOSE = 0.0
+
     _MIN_TCP_Z_LIMITS = {
         "rg6_tcp": 0.92962,
         "screwdriver_tcp": 0.91775,
@@ -53,7 +59,7 @@ class MotionBackend:
             self.controller_name = "xarm5_controller"
             self.servo_namespace = "/xarm_servo_node"
             self.default_ik_link = "screwdriver_tcp"
-            self.joint_prefixes = ("xarm5_", "xarm5_", "uf_slide_")
+            self.joint_prefixes = ("xarm5_",)
         elif self.is_gripper:
             self.backend_kind = "rg6_gripper"
             self.controller_name = "rg6_controller"
@@ -83,10 +89,12 @@ class MotionBackend:
         self._joint_command_pub = self.node.create_publisher(
             JointState, "/robot_joint_commands", 10
         )
-        # Publisher for streaming direct joint commands via the JTC topic (works in fake/sim mode).
-        # Used by tactile descent to send position targets at 50 Hz without the action server.
+        # Publisher for streaming direct joint commands via the JTC topic.
+        # Arm streaming uses this path exclusively. RG6 commands also publish
+        # here to overwrite any stale rg6_controller goal that could otherwise
+        # fight the raw hardware command.
         self._joint_traj_stream_pub = None
-        if (self.is_uf850 or self.is_xarm5) and self.controller_name:
+        if (self.is_uf850 or self.is_xarm5 or self.is_gripper) and self.controller_name:
             self._joint_traj_stream_pub = self.node.create_publisher(
                 JointTrajectory, f"/{self.controller_name}/joint_trajectory", 10
             )
@@ -163,6 +171,10 @@ class MotionBackend:
             hardware_type = self.node.get_parameter("hardware_type").value
         except Exception:
             pass
+        # True for real/twin hardware — enables direct trajectory streaming that
+        # bypasses the JTC→TopicBasedSystem→100Hz chain (which causes timing jitter
+        # in the Python hardware bridge).
+        self._is_real_hardware = str(hardware_type) in ("real", "twin")
         if self.is_dual_arms:
             self._exotica_planner = ExoticaDualArmPlanner(self.node, hardware_type=str(hardware_type))
             if not self._exotica_planner.available:
@@ -328,8 +340,12 @@ class MotionBackend:
 
         controller_states = {controller.name: controller.state for controller in response.controller}
         if target_mode == "servo":
-            activate = [servo_controller] if controller_states.get(servo_controller) == "inactive" else []
-            deactivate = [self.controller_name] if controller_states.get(self.controller_name) == "active" else []
+            # MoveIt Servo is configured to output JointTrajectory commands to
+            # the normal trajectory controllers. Keep that controller active and
+            # shut down the auxiliary JointGroupPositionController if it was
+            # manually activated.
+            activate = [self.controller_name] if controller_states.get(self.controller_name) == "inactive" else []
+            deactivate = [servo_controller] if controller_states.get(servo_controller) == "active" else []
         else:
             activate = [self.controller_name] if controller_states.get(self.controller_name) == "inactive" else []
             deactivate = [servo_controller] if controller_states.get(servo_controller) == "active" else []
@@ -366,17 +382,156 @@ class MotionBackend:
             velocity=velocity,
         )
 
+    @classmethod
+    def _rg6_rad_to_width_mm(cls, value_rad: float) -> float:
+        value = max(cls._RG6_RAD_OPEN, min(cls._RG6_RAD_CLOSE, float(value_rad)))
+        normalized = (value - cls._RG6_RAD_CLOSE) / (cls._RG6_RAD_OPEN - cls._RG6_RAD_CLOSE)
+        return cls._RG6_MM_CLOSE + normalized * (cls._RG6_MM_OPEN - cls._RG6_MM_CLOSE)
+
+    def _rg6_target_width_acknowledged(self, target_width_mm: float, tolerance_mm: float = 2.0) -> bool:
+        try:
+            reported = float(self.current_gripper_state.get("target_width_mm"))
+        except Exception:
+            return False
+        return abs(reported - float(target_width_mm)) <= float(tolerance_mm)
+
+    def _publish_gripper_target_until_ack(self, joint_name: str, target: float, timeout_s: float = 1.2) -> bool:
+        target_width_mm = self._rg6_rad_to_width_mm(target)
+        deadline = time.time() + timeout_s
+        while rclpy.ok() and time.time() < deadline:
+            self._publish_gripper_command(joint_name, target)
+            time.sleep(0.08)
+            if self._rg6_target_width_acknowledged(target_width_mm):
+                return True
+        return self._rg6_target_width_acknowledged(target_width_mm)
+
+    def _publish_gripper_command(self, joint_name: str, target: float, lookahead_s: float = 0.25):
+        """Publish a single final RG6 target on both command paths.
+
+        The real hardware bridge listens to /robot_joint_commands, while the
+        active rg6_controller can retain the previous trajectory command. A
+        one-point JTC command replaces that controller target without sending a
+        multi-point gripper trajectory.
+        """
+        target = float(target)
+        self._publish_raw_joint_command({joint_name: target})
+        if self._joint_traj_stream_pub is None:
+            return
+
+        traj = JointTrajectory()
+        traj.header.stamp = self.node.get_clock().now().to_msg()
+        traj.joint_names = [joint_name]
+        pt = JointTrajectoryPoint()
+        pt.positions = [target]
+        pt.velocities = [0.0]
+        pt.accelerations = [0.0]
+        _la = max(0.05, float(lookahead_s))
+        pt.time_from_start = Duration(
+            sec=int(_la),
+            nanosec=int((_la - int(_la)) * 1_000_000_000),
+        )
+        traj.points = [pt]
+        self._joint_traj_stream_pub.publish(traj)
+
+    def _execute_gripper_direct(
+        self,
+        target_joints: dict[str, float],
+        velocity: float = 0.2,
+        gripper_force_n: float = None,
+    ) -> bool:
+        """Command RG6 once through the hardware bridge.
+
+        Sending RG6 as a FollowJointTrajectory creates many intermediate width
+        targets. The Modbus bridge intentionally does not send a new width while
+        the gripper is moving, so those intermediate targets become visible chunks.
+        A single final width command lets the RG6 internal controller move smoothly.
+        """
+        joint_name = "rg6_right_drive_joint"
+        if joint_name not in target_joints:
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] gripper command missing {joint_name}: {target_joints}"
+            )
+            return False
+        if gripper_force_n is not None:
+            self.set_gripper_force(gripper_force_n)
+
+        target = float(target_joints[joint_name])
+        current = float(self.current_joint_positions.get(joint_name, target))
+        start_current = current
+        is_closing = target > current
+        target_width_mm = self._rg6_rad_to_width_mm(target)
+        self.node.get_logger().info(
+            f"[{self.backend_kind}] Direct RG6 command: target={target:.3f}rad "
+            f"width={target_width_mm:.1f}mm force={self.current_gripper_force_n:.1f}N"
+        )
+        acked = self._publish_gripper_target_until_ack(joint_name, target, timeout_s=0.8)
+        if not acked and is_closing:
+            nudge = target + (0.03 if is_closing else -0.03)
+            nudge = max(self._RG6_RAD_OPEN, min(self._RG6_RAD_CLOSE, nudge))
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] RG6 bridge did not acknowledge target width "
+                f"{target_width_mm:.1f}mm; nudging command path before retry"
+            )
+            self._publish_gripper_command(joint_name, nudge)
+            time.sleep(0.12)
+            acked = self._publish_gripper_target_until_ack(joint_name, target, timeout_s=1.2)
+        elif not acked:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] RG6 bridge did not acknowledge open target width "
+                f"{target_width_mm:.1f}mm; retrying exact open command without nudge"
+            )
+            acked = self._publish_gripper_target_until_ack(joint_name, target, timeout_s=1.2)
+        if not acked:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] RG6 bridge target width still not acknowledged; "
+                f"continuing to monitor physical motion. state={self.current_gripper_state}"
+            )
+            if not is_closing:
+                return False
+
+        if not self.state_received.wait(timeout=1.0):
+            return True
+
+        tolerance = 0.08
+        deadline = time.time() + max(4.0, min(12.0, abs(target - current) / max(float(velocity), 0.05) + 2.0))
+        last_resend = time.time()
+        while rclpy.ok() and time.time() < deadline:
+            current = float(self.current_joint_positions.get(joint_name, current))
+            if abs(current - target) <= tolerance:
+                return True
+            if is_closing and bool(self.current_gripper_state.get("object_detected", False)):
+                return True
+            if time.time() - last_resend >= 0.2:
+                if not self._rg6_target_width_acknowledged(target_width_mm):
+                    self._publish_gripper_target_until_ack(joint_name, target, timeout_s=0.25)
+                else:
+                    self._publish_gripper_command(joint_name, target)
+                last_resend = time.time()
+            time.sleep(0.05)
+        self.node.get_logger().warning(
+            f"[{self.backend_kind}] Direct RG6 command timed out before target; "
+            f"current={current:.3f}rad target={target:.3f}rad "
+            f"state={self.current_gripper_state}"
+        )
+        moved_toward_target = (current - start_current) if is_closing else (start_current - current)
+        if is_closing and moved_toward_target >= 0.08:
+            self.node.get_logger().info(
+                f"[{self.backend_kind}] Direct RG6 command accepted after partial motion "
+                f"toward target: moved={moved_toward_target:.3f}rad"
+            )
+            return True
+        return False
+
     def _get_full_robot_state(self) -> RobotState:
         state = RobotState()
         state.joint_state.name = list(self.current_joint_positions.keys())
         state.joint_state.position = [self.current_joint_positions[name] for name in state.joint_state.name]
         return state
 
-    def _publish_direct_joint_command(self, target_joints: dict[str, float]):
-        # JTC topic: single-point trajectory with 100 ms lookahead at 50 Hz creates smooth
-        # streaming position control.  This is the primary mechanism on both fake and real
-        # hardware: on real hardware the JTC (uf850_controller / xarm5_controller) is the
-        # active trajectory controller and commands the hardware through ros2_control.
+    def _publish_direct_joint_command(self, target_joints: dict[str, float], lookahead_s: float = 0.1):
+        # JTC topic: single-point trajectory with adaptive lookahead for smooth streaming.
+        # lookahead_s is set by the caller to slightly exceed the actual IK cycle time so
+        # the controller always has an active trajectory — preventing stop-and-lurch gaps.
         # NOTE: we do NOT also publish to /robot_joint_commands here because that would send
         # competing commands to the real_hardware_bridge simultaneously with the JTC, causing
         # unpredictable motion on real hardware.
@@ -388,7 +543,11 @@ class MotionBackend:
             pt.positions = [float(target_joints[name]) for name in traj.joint_names]
             pt.velocities = [0.0] * len(traj.joint_names)
             pt.accelerations = [0.0] * len(traj.joint_names)
-            pt.time_from_start = Duration(sec=0, nanosec=100_000_000)  # 100 ms lookahead
+            _la = max(0.04, float(lookahead_s))
+            pt.time_from_start = Duration(
+                sec=int(_la),
+                nanosec=int((_la - int(_la)) * 1_000_000_000),
+            )
             traj.points = [pt]
             self._joint_traj_stream_pub.publish(traj)
 
@@ -574,12 +733,13 @@ class MotionBackend:
             f"{len(joints)} joints [{', '.join(joints)}], duration={dur_s:.2f}s"
         )
 
-        display_msg = DisplayTrajectory()
-        display_msg.model_id = "dual_arm_world"
-        display_msg.trajectory_start = self._get_full_robot_state()
-        display_msg.trajectory = [trajectory]
-        self._display_trajectory_pub.publish(display_msg)
-        time.sleep(0.1)
+        if os.environ.get("DISASSEMBLY_PUBLISH_DISPLAY_TRAJECTORY", "0") == "1":
+            display_msg = DisplayTrajectory()
+            display_msg.model_id = "dual_arm_world"
+            display_msg.trajectory_start = self._get_full_robot_state()
+            display_msg.trajectory = [trajectory]
+            self._display_trajectory_pub.publish(display_msg)
+            time.sleep(0.1)
 
         goal = ExecuteTrajectory.Goal()
         goal.trajectory = trajectory
@@ -619,10 +779,67 @@ class MotionBackend:
             )
         return success
 
+    def _execute_trajectory_direct(self, trajectory) -> bool:
+        """Stream a pre-planned trajectory to /robot_joint_commands at the trajectory's own rate.
+
+        Replaces the JTC execute_trajectory action for single-arm real-hardware moves.
+        The JTC path feeds TopicBasedSystem → real_hardware.py at 100Hz; Python timing
+        jitter in set_servo_angle_j TCP calls means commands arrive in bursts → jerky arm.
+        Here we replay each quintic waypoint at its intended wall-clock time (~25Hz for a
+        2s trajectory) so the Python bridge always has ample time per command.
+        """
+        pts = trajectory.joint_trajectory.points
+        names = list(trajectory.joint_trajectory.joint_names)
+        if not pts or not names:
+            return self._execute_robot_trajectory(trajectory)
+
+        arm_names = [n for n in names if n.startswith(self.joint_prefixes)]
+        if not arm_names:
+            return self._execute_robot_trajectory(trajectory)
+        arm_idx = [names.index(n) for n in arm_names]
+
+        dur_s = pts[-1].time_from_start.sec + pts[-1].time_from_start.nanosec * 1e-9
+        self.node.get_logger().info(
+            f"[{self.backend_kind}] Direct trajectory stream: {len(pts)} pts, "
+            f"{len(arm_names)} joints, duration={dur_s:.2f}s"
+        )
+        t0 = time.time()
+        for pt in pts:
+            t_target = t0 + pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9
+            wait_s = t_target - time.time()
+            if wait_s > 0.001:
+                time.sleep(wait_s)
+            self._publish_raw_joint_command(
+                {arm_names[i]: float(pt.positions[arm_idx[i]]) for i in range(len(arm_names))}
+            )
+
+        # Settle: keep sending the final target until the arm arrives.
+        target = {arm_names[i]: float(pts[-1].positions[arm_idx[i]]) for i in range(len(arm_names))}
+        deadline = time.time() + 5.0
+        while rclpy.ok() and time.time() < deadline:
+            err = max(
+                abs(float(self.current_joint_positions.get(n, target[n])) - target[n])
+                for n in arm_names
+            )
+            if err <= 0.03:
+                self.node.get_logger().info(
+                    f"[{self.backend_kind}] Direct trajectory settled (err={err:.4f}rad)"
+                )
+                return True
+            self._publish_raw_joint_command(target)
+            time.sleep(0.05)
+
+        self.node.get_logger().warning(
+            f"[{self.backend_kind}] Direct trajectory settling timeout (non-fatal)"
+        )
+        return True
+
     def move_to_joint_positions(self, target_joints, velocity: float = 0.2, gripper_force_n: float = None) -> bool:
         self.node.get_logger().info(
             f"[{self.backend_kind}] move_to_joint_positions: {len(target_joints)} joints, velocity={velocity}"
         )
+        if self.is_gripper:
+            return self._execute_gripper_direct(target_joints, velocity, gripper_force_n)
         if not self._ensure_trajectory_mode():
             self.node.get_logger().error(f"[{self.backend_kind}] move_to_joint_positions: failed to enter trajectory mode")
             return False
@@ -996,6 +1213,19 @@ class MotionBackend:
             return False
         exec_result = result_future.result()
         return bool(exec_result and exec_result.result.error_code.val == 1)
+
+    def publish_servo_velocity(self, dx: float, dy: float, dz: float) -> bool:
+        """Publish one servo velocity command (non-blocking, no zero-stop after)."""
+        if not self._ensure_servo_mode():
+            return False
+        twist = TwistStamped()
+        twist.header.frame_id = "base_link"
+        twist.header.stamp = self.node.get_clock().now().to_msg()
+        twist.twist.linear.x = dx
+        twist.twist.linear.y = dy
+        twist.twist.linear.z = dz
+        self.servo_pub.publish(twist)
+        return True
 
     def jog_cartesian_servo(self, dx: float, dy: float, dz: float, duration: float = 1.0) -> bool:
         if not self._ensure_servo_mode():
@@ -1473,6 +1703,8 @@ class MotionBackend:
         max_step_m: float = 0.003,
         joint_smooth_alpha: float = 0.7,
         timeout_s: float = 60.0,
+        max_joint_delta_rad: float = None,
+        max_joint_step_rad: float = None,
     ) -> str:
         """Stream EXOTica IK in a real-time loop (TouchLab/teleoperation style).
 
@@ -1486,6 +1718,12 @@ class MotionBackend:
           2. Joint-space smoothing: q_cmd = q_prev*(1-alpha) + q_ik*alpha
              — prevents sudden joint jumps if IK hops between local minima.
           3. Step clamping: target clamped to max_step_m from current EE each cycle.
+          4. max_joint_delta_rad: if set, rejects IK solutions that move any single
+             joint by more than this threshold from the previous command — prevents
+             runaway from wrong IK branch solutions.
+          5. max_joint_step_rad: if set, clamps each published joint command step.
+             This mirrors arm_teleop's final safety filter and prevents a small
+             Cartesian target update from producing a large joint-space jump.
 
         Returns: "DONE" | "STOPPED" | "TIMEOUT" | "IK_FAIL"
         """
@@ -1537,9 +1775,17 @@ class MotionBackend:
                 except Exception:
                     pass
 
+            # Match arm_teleop's IK seeding: keep the full live joint state for
+            # passive/non-controlled joints, then overlay the filtered command seed
+            # for this arm. This keeps EXOTica's scene consistent when the linear
+            # slide or other passive joints are not part of controlled_joint_names.
+            full_seed = dict(self.current_joint_positions)
+            full_seed.update(seed)
+            ik_start = time.time()
             result = planner.solve_pose_goal_joint_positions(
-                seed, [tx, ty, tz, tr, tp, tyaw], max_retries=3
+                full_seed, [tx, ty, tz, tr, tp, tyaw], max_retries=3
             )
+            ik_elapsed = time.time() - ik_start
 
             if result is None:
                 consecutive_ik_failures += 1
@@ -1556,12 +1802,41 @@ class MotionBackend:
 
             consecutive_ik_failures = 0
 
-            # Joint-space smoothing
+            # Joint-space smoothing with time-proportional alpha.
+            # Scale alpha so filtering strength is consistent regardless of IK latency:
+            # at 50 Hz alpha=0.7 ≈ same bandwidth as at 20 Hz alpha=0.92.
             q_new = _np.array([result[n] for n in joint_names], dtype=float)
-            q_cmd = prev_q + float(joint_smooth_alpha) * (q_new - prev_q)
+            actual_dt = max(1e-3, time.time() - loop_start)
+            alpha_t = 1.0 - (1.0 - float(joint_smooth_alpha)) ** (actual_dt / dt)
+
+            # Wrong-branch rejection: if IK solution requires any joint to move more
+            # than max_joint_delta_rad from the previous command, it has likely found
+            # a different IK branch. Skip and hold position instead.
+            if max_joint_delta_rad is not None:
+                max_delta = float(_np.max(_np.abs(q_new - prev_q)))
+                if max_delta > float(max_joint_delta_rad):
+                    self.node.get_logger().warning(
+                        f"[{self.backend_kind}] move_cartesian_realtime_exotica: "
+                        f"IK joint jump {max_delta:.3f}rad > {max_joint_delta_rad:.3f}rad "
+                        "— wrong branch detected, holding position"
+                    )
+                    elapsed = time.time() - loop_start
+                    if dt - elapsed > 0:
+                        time.sleep(dt - elapsed)
+                    continue
+
+            q_target = prev_q + alpha_t * (q_new - prev_q)
+            if max_joint_step_rad is not None:
+                max_step = abs(float(max_joint_step_rad))
+                q_cmd = prev_q + _np.clip(q_target - prev_q, -max_step, max_step)
+            else:
+                q_cmd = q_target
             smoothed = {n: float(q_cmd[i]) for i, n in enumerate(joint_names)}
 
-            self._publish_direct_joint_command(smoothed)
+            # Adaptive lookahead: always slightly longer than the measured IK round-trip
+            # so the JTC always has a pending target — prevents stop-and-lurch gaps.
+            lookahead = max(0.12, ik_elapsed * 1.5)
+            self._publish_direct_joint_command(smoothed, lookahead_s=lookahead)
             seed = smoothed
             prev_q = q_cmd
 

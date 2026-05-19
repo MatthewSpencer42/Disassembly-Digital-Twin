@@ -6,6 +6,8 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import Pose
 import json, time, threading, math, os
+from ament_index_python.packages import get_package_share_directory
+from disassembly_skill.device_config import DeviceConfig
 from disassembly_skill.motion_backend import MotionBackend
 
 HOLD_STATE_FILE = '/tmp/disassembly_hold_state'
@@ -34,7 +36,6 @@ class PickupSkill(Node):
         
         # Interfaces
         self.state_update_pub = self.create_publisher(String, '/robot_state/manip_arm/update', 10)
-        self.vision_reset_pub = self.create_publisher(String, '/vision/reset_tracker', 10)
         self.hold_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.hold_status_pub = self.create_publisher(Bool, '/object_hold_state/is_held', self.hold_qos)
         
@@ -103,6 +104,23 @@ class PickupSkill(Node):
             data = json.loads(msg.data.strip().strip("'").strip('"'))
             with self.data_lock: self.latest_targets = data.get("global_view", {}).get("objects", [])
         except Exception: pass
+
+    @staticmethod
+    def _has_valid_xyz(target):
+        xyz = target.get("xyz")
+        return isinstance(xyz, (list, tuple)) and len(xyz) >= 3 and all(v is not None for v in xyz[:3])
+
+    @staticmethod
+    def _label_contains(target, keywords):
+        label = str(target.get("label", "")).lower()
+        return any(k in label for k in keywords)
+
+    def _select_pickup_target(self):
+        pickup_keywords = ("pcb_main", "pcb", "board", "circuit")
+        with self.data_lock:
+            valid = [t for t in self.latest_targets if self._has_valid_xyz(t)]
+        preferred = [t for t in valid if self._label_contains(t, pickup_keywords)]
+        return preferred[0] if preferred else None
 
     def publish_state(self, s): 
         self.state_update_pub.publish(String(data=s))
@@ -217,23 +235,21 @@ class PickupSkill(Node):
         self.wait_for_arm_settled(self.xarm5)
 
         # --- STEP 2: COORDINATE TRANSFORM ---
-        print(f"🔄 Resetting vision tracker to find {target_label}...")
-        self.vision_reset_pub.publish(String(data='reset'))
-        with self.data_lock: self.latest_targets = [] 
-        time.sleep(2.5) # Increased for stability
+        print(f"🔎 Using current live vision snapshot to find {target_label}...")
+        time.sleep(0.3)
 
         target = None
         with self.data_lock:
             # 1. Try to find by ID first
             target = next((t for t in self.latest_targets if t.get('id') == target_id), None)
             
-            # 2. Fallback: If ID shifted after reset, find by Label
+            # 2. Fallback: If ID is stale, find by label in the current live snapshot.
             if not target:
-                print(f"⚠️ ID {target_id} lost after reset. Searching by label '{target_label}'...")
+                print(f"⚠️ ID {target_id} not present. Searching by label '{target_label}'...")
                 target = next((t for t in self.latest_targets if target_label.lower() in t.get('label', '').lower()), None)
 
         if not target: 
-            print(f"❌ [ERROR] {target_label} not found after vision reset. Aborting.")
+            print(f"❌ [ERROR] {target_label} not found in current vision snapshot. Aborting.")
             return False
         
         print(f"🎯 Targeted {target.get('label')} at {target['xyz']}")
@@ -315,7 +331,17 @@ class PickupSkill(Node):
         return True
 
 def main(args=None):
-    rclpy.init(args=args); node = PickupSkill()
+    rclpy.init(args=args)
+    try:
+        cfg_path = os.path.join(
+            get_package_share_directory('disassembly_skill'),
+            'config', 'device_configs', 'hdd.yaml',
+        )
+        device_cfg = DeviceConfig.load(cfg_path)
+    except Exception as exc:
+        print(f"[WARN] Could not load device config: {exc}. Using defaults.")
+        device_cfg = None
+    node = PickupSkill(device_cfg=device_cfg)
     executor = MultiThreadedExecutor(); executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
     time.sleep(1.0)
@@ -323,14 +349,17 @@ def main(args=None):
     if not node.is_holding_object and read_hold_state():
         print("📦 Hold state detected from file (previous skill). Proceeding...")
         node.is_holding_object = True
-    node.vision_reset_pub.publish(String(data='reset'))
     try:
         while rclpy.ok():
             tid = None
             with node.data_lock:
-                pcbs = [t for t in node.latest_targets if 'pcb_main' in t.get('label', '').lower()]
-                if pcbs: tid = pcbs[0].get('id')
-            if tid and node.execute_pickup(tid, "pcb_main"): break
+                target = node._select_pickup_target()
+                if target:
+                    tid = target.get('id')
+                    label = target.get('label', 'pcb')
+                else:
+                    label = "pcb"
+            if tid and node.execute_pickup(tid, label): break
             time.sleep(0.5)
     except KeyboardInterrupt: pass
     finally: rclpy.shutdown()

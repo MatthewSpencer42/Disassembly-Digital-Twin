@@ -725,7 +725,7 @@
       <parent link="${prefix}uf850_link4"/>
       <child link="${prefix}uf850_link5"/>
       <axis xyz="0 0 -1"/>
-      <limit effort="19.0" velocity="1" lower="-2.1542083" upper="2.1542083"/>
+      <limit effort="19.0" velocity="1" lower="-2.1642083" upper="2.1642083"/>
     </joint>
     <joint name="${prefix}xarm5_joint4" type="revolute">
       <origin xyz="0.07784991 -0.34207971 0.07224863" rpy="0 0 0"/>

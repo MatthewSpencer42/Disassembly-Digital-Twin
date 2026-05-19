@@ -27,7 +27,7 @@ GLOBAL_RELIABLE_QOS = QoSProfile(
     reliability=QoSReliabilityPolicy.RELIABLE,
 )
 
-DASHBOARD_HEIGHT = 550
+DASHBOARD_HEIGHT = 260
 PROCESSING_RATE_HZ = 30.0
 GLOBAL_SCOUT_EVERY_N_FRAMES = 12
 LOCAL_INFERENCE_EVERY_N_FRAMES = 1
@@ -38,6 +38,14 @@ PERF_LOG_INTERVAL_SEC = 0.0
 PUBLISH_RAW_DEBUG = False
 LOCAL_CROSSHAIR_OFFSET_X = -3
 LOCAL_CROSSHAIR_OFFSET_Y = -10
+LOCAL_TOOL_HEAD_AREA_MARGIN_PX = 8
+LOCAL_TOOL_HEAD_CROSSHAIR_RULES = [
+    # Tune these in source-image pixels. area is computed from the tool_head
+    # box after expanding it by LOCAL_TOOL_HEAD_AREA_MARGIN_PX on each side.
+    {"name": "small", "min_area": 0, "max_area": 4500, "offset_x": -3, "offset_y": -6},
+    {"name": "current", "min_area": 4500, "max_area": 12000, "offset_x": -3, "offset_y": -10},
+    {"name": "large", "min_area": 12000, "max_area": None, "offset_x": -3, "offset_y": -18},
+]
 
 def resolve_checkpoint_path(*parts):
     base_path = os.path.join(WS_ROOT, *parts)

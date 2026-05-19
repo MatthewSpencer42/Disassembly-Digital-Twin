@@ -14,6 +14,7 @@ def generate_launch_description():
 
     launch_orbbec = LaunchConfiguration("launch_orbbec")
     launch_tool_cam = LaunchConfiguration("launch_tool_cam")
+    tool_video_device = LaunchConfiguration("tool_video_device")
 
     orbbec_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([agent_pkg, "/launch/orbbec_camera.launch.py"]),
@@ -22,6 +23,9 @@ def generate_launch_description():
 
     tool_cam_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([tool_pkg, "/launch/tool_camera.launch.py"]),
+        launch_arguments={
+            "video_device": tool_video_device,
+        }.items(),
         condition=IfCondition(launch_tool_cam),
     )
 
@@ -47,6 +51,11 @@ def generate_launch_description():
             "launch_tool_cam",
             default_value="true",
             description="Launch the local tool camera driver",
+        ),
+        DeclareLaunchArgument(
+            "tool_video_device",
+            default_value="auto",
+            description="Optional tool camera video device override",
         ),
 
         LogInfo(msg="Starting full vision stack"),

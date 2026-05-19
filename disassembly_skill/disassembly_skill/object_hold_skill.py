@@ -6,6 +6,8 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import Pose
 import threading, json, math, time, os
+from ament_index_python.packages import get_package_share_directory
+from disassembly_skill.device_config import DeviceConfig
 from disassembly_skill.motion_backend import MotionBackend
 
 HOLD_STATE_FILE = '/tmp/disassembly_hold_state'
@@ -33,7 +35,6 @@ class ObjectHoldSkill(Node):
         self.hold_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.hold_status_pub = self.create_publisher(Bool, '/object_hold_state/is_held', self.hold_qos)
         self.state_update_pub = self.create_publisher(String, '/robot_state/manip_arm/update', 10)
-        self.vision_reset_pub = self.create_publisher(String, '/vision/reset_tracker', 10)
 
         # Configuration
         self.CAMERA_FRAME = 'camera_color_optical_frame'
@@ -47,6 +48,7 @@ class ObjectHoldSkill(Node):
         self.GRIPPER_OPEN_FORCE_N = 40.0
         self.GRIPPER_CLOSE_FORCE_N = 100.0
         self.APPROACH_VELOCITY = 0.4
+        self.HOVER_VELOCITY = 0.4
         self.GRIP_VELOCITY = 0.15
         self.TORQUE_THRESHOLD = 3.0
         self.DESCENT_SPEED_MPS = 0.02
@@ -55,6 +57,8 @@ class ObjectHoldSkill(Node):
         self.DESCENT_RATE_HZ = 30.0
         self.USE_TACTILE_DESCENT = True
         self.RETRACT_VELOCITY = 0.05
+        self.CONTACT_RETRACT_M = 0.005
+        self.CONTACT_RETRACT_VELOCITY = 0.02
         self.POST_GRASP_RETRACT_SPEED = 0.1
         self.STRATEGY = "fixture_press"
         self.HOVER_X_OFFSET = 0.0
@@ -64,6 +68,7 @@ class ObjectHoldSkill(Node):
         self.APPROACH_AXIS = "+z"
         self.TILT_DEG = 0.0
         self.GRIP_WIDTH_MM = 0.0
+        self.GRIP_CONTACT_MARGIN_MM = 20.0
         self.APPROACH_STANDOFF_M = 0.12
         self.FLIP_APPROACH = False    # add π to v_rad → approach from opposite Y side
         self.APPROACH_RPY_RAD = None  # None → use default per strategy
@@ -109,6 +114,7 @@ class ObjectHoldSkill(Node):
         self.APPROACH_AXIS = p.get('approach_axis', '+z')
         self.TILT_DEG = p.get('tilt_deg', 0.0)
         self.GRIP_WIDTH_MM = p.get('grip_width_mm', 0.0)
+        self.GRIP_CONTACT_MARGIN_MM = p.get('grip_contact_margin_mm', self.GRIP_CONTACT_MARGIN_MM)
         self.APPROACH_STANDOFF_M = p.get('approach_standoff_m', 0.12)
         # flip_approach: add π to v_rad so arm approaches from the opposite side
         self.FLIP_APPROACH = bool(p.get('flip_approach', False))
@@ -126,7 +132,10 @@ class ObjectHoldSkill(Node):
         self.USE_TACTILE_DESCENT = bool(p.get('use_tactile_descent', self.USE_TACTILE_DESCENT))
         self.FINAL_Z_OFFSET_M = p.get('final_z_offset_m', None)
         self.APPROACH_VELOCITY = p.get('approach_velocity', self.APPROACH_VELOCITY)
+        self.HOVER_VELOCITY = p.get('hover_velocity', self.APPROACH_VELOCITY)
         self.GRIP_VELOCITY = p.get('grip_velocity', self.GRIP_VELOCITY)
+        self.CONTACT_RETRACT_M = p.get('contact_retract_m', self.CONTACT_RETRACT_M)
+        self.CONTACT_RETRACT_VELOCITY = p.get('contact_retract_velocity', self.CONTACT_RETRACT_VELOCITY)
 
     def _log_pose_diagnostics(self, target_data, world_xyz, hover_xyz, quaternion_dict):
         raw_xyz = target_data.get("xyz", [None, None, None])
@@ -183,6 +192,209 @@ class ObjectHoldSkill(Node):
                 f"Computed hover target is near or beyond UF850 practical reach: {uf_reach:.3f} m"
             )
 
+    def _current_tcp_xyz(self):
+        pose = self._current_tcp_pose()
+        if pose is None:
+            return None
+        return pose[:3]
+
+    def _current_tcp_pose(self):
+        try:
+            tf_msg = self.uf850.tf_buffer.lookup_transform(
+                self.PLANNING_FRAME,
+                self.ROBOT_EE_LINK,
+                rclpy.time.Time(),
+            )
+            t = tf_msg.transform.translation
+            q = tf_msg.transform.rotation
+            roll, pitch, yaw = self.uf850._quaternion_to_rpy(q.x, q.y, q.z, q.w)
+            return float(t.x), float(t.y), float(t.z), float(roll), float(pitch), float(yaw)
+        except Exception as exc:
+            self.get_logger().warning(f"[hold] Unable to read current TCP pose: {exc}")
+            return None
+
+    @staticmethod
+    def _angle_delta(target, current):
+        return math.atan2(math.sin(target - current), math.cos(target - current))
+
+    def _move_to_hover_pose(self, hover_x, hover_y, hover_z, qd):
+        """Move to hold hover as one continuous EXOTica trajectory.
+
+        arm_teleop's realtime stream is smooth for small hand deltas, but it
+        publishes many short-horizon single-point commands. For this automated
+        ~0.5 m hover transfer that produced visible step/hold motion. The hold
+        hover should be a single retimed EXOTica trajectory instead.
+        """
+        velocity = min(max(float(self.HOVER_VELOCITY), 0.08), 0.45)
+        self.get_logger().info(
+            f"[hold] EXOTica continuous hover trajectory: "
+            f"target=({hover_x:.3f},{hover_y:.3f},{hover_z:.3f}) velocity={velocity:.2f}"
+        )
+        self.uf850.stop_servo(timeout_sec=2.0)
+        ok = self.uf850.move_to_pose_exotica(
+            hover_x,
+            hover_y,
+            hover_z,
+            qd,
+            velocity=velocity,
+        )
+        if not ok:
+            self.uf850._hold_current_arm_position()
+        return ok
+
+    @staticmethod
+    def _gripper_width_mm_to_rad(width_mm):
+        rad_open = -0.625
+        rad_close = 0.625
+        mm_open = 160.0
+        mm_close = 0.0
+        width = max(mm_close, min(mm_open, float(width_mm)))
+        normalized = (width - mm_close) / (mm_open - mm_close)
+        return rad_close + normalized * (rad_open - rad_close)
+
+    @staticmethod
+    def _gripper_rad_to_width_mm(value_rad):
+        rad_open = -0.625
+        rad_close = 0.625
+        mm_open = 160.0
+        mm_close = 0.0
+        value = max(rad_open, min(rad_close, float(value_rad)))
+        normalized = (value - rad_close) / (rad_open - rad_close)
+        return mm_close + normalized * (mm_open - mm_close)
+
+    def _hold_close_target_width_mm(self):
+        if float(self.GRIP_WIDTH_MM) > 0.0:
+            return max(0.0, float(self.GRIP_WIDTH_MM) - float(self.GRIP_CONTACT_MARGIN_MM))
+        return self._gripper_rad_to_width_mm(math.radians(self.CLOSE_DEG))
+
+    def _hold_close_target_rad(self):
+        return self._gripper_width_mm_to_rad(self._hold_close_target_width_mm())
+
+    def _wait_for_gripper_position(self, target_rad, is_closing, start_rad=None, timeout=5.0):
+        start_t = time.time()
+        last_pos = 999.0
+        stall_timer = 0.0
+        position_tolerance = 0.08
+        motion_acceptance_rad = 0.08
+
+        while rclpy.ok() and (time.time() - start_t) < timeout:
+            curr = self.gripper.current_joint_positions.get(self.JOINT_GRIPPER, 999)
+            if curr == 999:
+                time.sleep(0.1)
+                continue
+            if abs(curr - target_rad) < position_tolerance:
+                return True
+            if is_closing and bool(self.gripper.current_gripper_state.get("object_detected", False)):
+                self.get_logger().info(f"Grasp confirmed (RG6 object_detected) at {curr:.3f} rad.")
+                return True
+            if abs(curr - last_pos) < 0.002:
+                stall_timer += 0.1
+                if stall_timer >= 0.8:
+                    if is_closing:
+                        if start_rad is not None:
+                            moved_toward_close = float(curr) - float(start_rad)
+                            if moved_toward_close >= motion_acceptance_rad:
+                                self.get_logger().info(
+                                    f"Grasp confirmed by closing stall at {curr:.3f} rad "
+                                    f"(moved {moved_toward_close:.3f} rad)."
+                                )
+                                return True
+                        self.get_logger().warning(
+                            f"Gripper close stalled without meaningful closing motion: "
+                            f"current={curr:.3f} target={target_rad:.3f}"
+                        )
+                        return False
+                    self.get_logger().info(
+                        f"Gripper open accepted at mechanical limit {curr:.3f} rad "
+                        f"(target {target_rad:.3f} rad)."
+                    )
+                    return True
+            else:
+                stall_timer = 0.0
+            last_pos = curr
+            time.sleep(0.1)
+        return False
+
+    def _close_gripper_for_hold(self):
+        target_rad = self._hold_close_target_rad()
+        target_width_mm = self._hold_close_target_width_mm()
+        current = self.gripper.current_joint_positions.get(self.JOINT_GRIPPER, None)
+        is_closing = True if current is None else target_rad > float(current)
+        self.get_logger().info(
+            f"[hold] Closing gripper to target={target_rad:.3f}rad "
+            f"(target_width={target_width_mm:.1f}mm, configured_width={float(self.GRIP_WIDTH_MM):.1f}mm, "
+            f"force={self.GRIPPER_CLOSE_FORCE_N:.1f}N)"
+        )
+        if not self.gripper.move_to_joint_positions(
+            {self.JOINT_GRIPPER: target_rad},
+            gripper_force_n=self.GRIPPER_CLOSE_FORCE_N,
+        ):
+            return False
+        return self._wait_for_gripper_position(
+            target_rad,
+            is_closing=is_closing,
+            start_rad=None if current is None else float(current),
+        )
+
+    def _retract_after_contact(self, distance_m=None):
+        distance_m = abs(float(self.CONTACT_RETRACT_M if distance_m is None else distance_m))
+        if distance_m <= 0.0:
+            return True
+
+        self.uf850.stop_servo(timeout_sec=2.0)
+        try:
+            start_tf = self.uf850.tf_buffer.lookup_transform(
+                self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+            )
+            sx = float(start_tf.transform.translation.x)
+            sy = float(start_tf.transform.translation.y)
+            sz = float(start_tf.transform.translation.z)
+            q = start_tf.transform.rotation
+            qd = {"qx": q.x, "qy": q.y, "qz": q.z, "qw": q.w}
+        except Exception as exc:
+            self.get_logger().error(f"[hold] Contact retract TF lookup failed: {exc}")
+            return False
+
+        target_z = sz + distance_m
+        velocity = max(0.005, min(float(self.CONTACT_RETRACT_VELOCITY), 0.05))
+        self.get_logger().info(
+            f"[hold] Contact retract: {self.ROBOT_EE_LINK} z={sz:.4f} -> {target_z:.4f} "
+            f"(+{distance_m*1000:.1f}mm)"
+        )
+
+        ok = self.uf850.move_to_pose_exotica(sx, sy, target_z, qd, velocity=velocity)
+        if not ok:
+            self.get_logger().warning("[hold] Planned contact retract failed; trying EXOTica streaming retract.")
+            ok = self.uf850.retract_z_exotica(distance_m=distance_m, speed_mps=velocity)
+        if not ok:
+            self.uf850._hold_current_arm_position()
+            self.get_logger().error("[hold] Contact retract command failed.")
+            return False
+
+        self.wait_for_arm_settled(timeout=5.0)
+        try:
+            end_tf = self.uf850.tf_buffer.lookup_transform(
+                self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+            )
+            actual_dz = float(end_tf.transform.translation.z) - sz
+        except Exception as exc:
+            self.get_logger().warning(f"[hold] Could not verify contact retract TF: {exc}")
+            return True
+
+        min_expected = max(0.002, min(distance_m * 0.6, distance_m - 0.001))
+        self.get_logger().info(
+            f"[hold] Contact retract actual dz={actual_dz*1000:.1f}mm "
+            f"target={distance_m*1000:.1f}mm"
+        )
+        if actual_dz < min_expected:
+            self.uf850._hold_current_arm_position()
+            self.get_logger().error(
+                f"[hold] Contact retract unsafe/incomplete: actual dz={actual_dz*1000:.1f}mm "
+                f"(minimum {min_expected*1000:.1f}mm)."
+            )
+            return False
+        return True
+
     def publish_state(self, s):
         self.state_update_pub.publish(String(data=s))
 
@@ -198,6 +410,24 @@ class ObjectHoldSkill(Node):
                 self.latest_targets = data.get("global_view", {}).get("objects", [])
         except Exception as exc:
             self.get_logger().warning(f"Failed to parse /vision/agent_state payload: {exc}")
+
+    @staticmethod
+    def _has_valid_xyz(target):
+        xyz = target.get("xyz")
+        return isinstance(xyz, (list, tuple)) and len(xyz) >= 3 and all(v is not None for v in xyz[:3])
+
+    @staticmethod
+    def _label_contains(target, keywords):
+        label = str(target.get("label", "")).lower()
+        return any(k in label for k in keywords)
+
+    def _select_hold_target(self):
+        """Pick the object to hold from the current global vision snapshot."""
+        hold_keywords = ("case", "chassis", "device", "hdd_holder", "holder", "lid")
+        with self.data_lock:
+            valid = [t for t in self.latest_targets if self._has_valid_xyz(t)]
+        preferred = [t for t in valid if self._label_contains(t, hold_keywords)]
+        return (preferred or valid)[0] if (preferred or valid) else None
 
     def _get_target_by_id(self, part_id):
         with self.data_lock:
@@ -243,18 +473,38 @@ class ObjectHoldSkill(Node):
 
     def wait_for_gripper(self, target_deg, timeout=5.0):
         target_rad = math.radians(target_deg)
+        target_width_mm = self._gripper_rad_to_width_mm(target_rad)
         start_t = time.time()
         last_pos = 999.0
         stall_timer = 0.0
         is_closing = target_deg > 0
+        position_tolerance = 0.08
 
         while rclpy.ok() and (time.time() - start_t) < timeout:
             curr = self.gripper.current_joint_positions.get(self.JOINT_GRIPPER, 999)
             if curr == 999:
                 time.sleep(0.1)
                 continue
-            if abs(curr - target_rad) < 0.05:
+            state = self.gripper.current_gripper_state
+            try:
+                bridge_target_width = float(state.get("target_width_mm"))
+            except Exception:
+                bridge_target_width = None
+            target_ack = (
+                bridge_target_width is not None
+                and abs(bridge_target_width - target_width_mm) <= 5.0
+            )
+            if abs(curr - target_rad) < position_tolerance:
                 return True
+            if not is_closing and not target_ack:
+                if time.time() - start_t > 1.0 and not bool(state.get("is_moving", False)):
+                    self.get_logger().warning(
+                        f"Gripper open command not acknowledged: bridge_target={bridge_target_width}mm "
+                        f"expected={target_width_mm:.1f}mm"
+                    )
+                    return False
+                time.sleep(0.1)
+                continue
             if abs(curr - last_pos) < 0.002:
                 stall_timer += 0.1
                 if stall_timer >= 0.8:
@@ -262,12 +512,85 @@ class ObjectHoldSkill(Node):
                         self.get_logger().info(f"Grasp confirmed (Force reached) at {curr:.3f} rad.")
                         return True
                     else:
-                        self.get_logger().warn(f"Gripper STUCK at {curr:.3f} rad while trying to open. Retrying with high force...")
-                        self.gripper.move_to_joint_positions({self.JOINT_GRIPPER: target_rad}, gripper_force_n=100.0)
-                        stall_timer = -2.0
+                        if not target_ack:
+                            self.get_logger().warning(
+                                f"Refusing to accept gripper-open stall while bridge target is stale: "
+                                f"bridge_target={bridge_target_width}mm expected={target_width_mm:.1f}mm"
+                            )
+                            return False
+                        self.get_logger().info(
+                            f"Gripper open accepted at mechanical limit {curr:.3f} rad "
+                            f"(target {target_rad:.3f} rad)."
+                        )
+                        return True
             else:
                 stall_timer = 0.0
             last_pos = curr
+            time.sleep(0.1)
+        return False
+
+    def _open_gripper_verified(self, attempts=3):
+        target_rad = math.radians(self.OPEN_DEG)
+        target_width_mm = self._gripper_rad_to_width_mm(target_rad)
+        for attempt in range(1, attempts + 1):
+            self.get_logger().info(
+                f"[hold] Opening gripper attempt {attempt}/{attempts}: target={target_rad:.3f}rad "
+                f"width={target_width_mm:.1f}mm"
+            )
+            self.gripper.set_gripper_force(self.GRIPPER_OPEN_FORCE_N)
+            self.gripper._publish_gripper_command(self.JOINT_GRIPPER, target_rad)
+            if self._wait_for_gripper_open_physical(target_rad, timeout=7.0):
+                return True
+            time.sleep(0.5)
+        self.get_logger().error("Gripper failed to verify open state; aborting before arm motion.")
+        return False
+
+    def _wait_for_gripper_open_physical(self, target_rad, timeout=7.0):
+        target_width_mm = self._gripper_rad_to_width_mm(target_rad)
+        min_open_width_mm = max(145.0, target_width_mm - 10.0)
+        start_t = time.time()
+        stable_since = None
+        last_republish = 0.0
+        last_width = None
+
+        while rclpy.ok() and (time.time() - start_t) < timeout:
+            state = self.gripper.current_gripper_state
+            try:
+                width_mm = float(state.get("width_mm"))
+            except Exception:
+                width_mm = None
+            is_moving = bool(state.get("is_moving", False))
+
+            now = time.time()
+            if now - last_republish >= 0.35:
+                self.gripper._publish_gripper_command(self.JOINT_GRIPPER, target_rad)
+                last_republish = now
+
+            if width_mm is not None and last_width is not None:
+                if last_width - width_mm > 3.0:
+                    self.get_logger().warning(
+                        f"Gripper started closing during open verification "
+                        f"({last_width:.1f}mm -> {width_mm:.1f}mm); reasserting open command."
+                    )
+                    self.gripper._publish_gripper_command(self.JOINT_GRIPPER, target_rad)
+                    stable_since = None
+
+            if width_mm is not None and width_mm >= min_open_width_mm:
+                if not is_moving:
+                    if stable_since is None:
+                        stable_since = now
+                    elif now - stable_since >= 0.4:
+                        self.get_logger().info(
+                            f"Gripper physically open: width={width_mm:.1f}mm "
+                            f"(target {target_width_mm:.1f}mm)."
+                        )
+                        return True
+                else:
+                    stable_since = None
+            else:
+                stable_since = None
+
+            last_width = width_mm
             time.sleep(0.1)
         return False
 
@@ -278,7 +601,7 @@ class ObjectHoldSkill(Node):
     def _run_hold_sequence(self, part_id, target_label, interactive):
         target_data = self._get_target_by_id(part_id)
 
-        # Fallback: ID may have shifted after vision reset — match by label
+        # Fallback: ID may be stale — match by label in the current live vision snapshot.
         if not target_data or 'xyz' not in target_data:
             print(f"⚠️ ID {part_id} not found. Searching by label '{target_label}'...")
             target_data = self._get_target_by_label(target_label)
@@ -347,12 +670,8 @@ class ObjectHoldSkill(Node):
             input(f"STEP 1: Open gripper and move to lateral hover for {target_label}? [Enter]")
 
         print("Ensuring gripper is open...")
-        if not self.gripper.move_to_joint_positions(
-            {self.JOINT_GRIPPER: math.radians(self.OPEN_DEG)},
-            gripper_force_n=self.GRIPPER_OPEN_FORCE_N,
-        ):
+        if not self._open_gripper_verified():
             return False
-        self.wait_for_gripper(self.OPEN_DEG)
 
         # ── Phase 1: pre-position above HDD (warm-start for legacy v_rad mode only) ──
         # Direct approach mode skips this: EXOTica solves the configured pose quickly
@@ -411,10 +730,8 @@ class ObjectHoldSkill(Node):
                 hover_xyz=(hover_x, hover_y, hover_z),
                 quaternion_dict=qd,
             )
-            if not self.uf850.move_to_pose_exotica(
-                hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY
-            ):
-                print("[ERROR] EXOTica failed for direct approach hover. Aborting hold.")
+            if not self._move_to_hover_pose(hover_x, hover_y, hover_z, qd):
+                print("[ERROR] Failed to reach direct approach hover. Aborting hold.")
                 return False
             print("Hover reached (direct approach).")
         else:
@@ -436,11 +753,9 @@ class ObjectHoldSkill(Node):
                     hover_xyz=(hover_x, hover_y, hover_z),
                     quaternion_dict=qd,
                 )
-                hover_ok = self.uf850.move_to_pose_exotica(
-                    hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY
-                )
+                hover_ok = self._move_to_hover_pose(hover_x, hover_y, hover_z, qd)
                 if not hover_ok:
-                    print(f"EXOTica failed for {side_label}. Trying Cartesian...")
+                    print(f"Hover planner failed for {side_label}. Trying Cartesian...")
                     hover_ok = self.uf850.move_cartesian_to_pose(
                         hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY
                     )
@@ -518,7 +833,10 @@ class ObjectHoldSkill(Node):
                 ):
                     print("[ERROR] Tactile descent ended without joint-5 contact spike. Aborting hold.")
                     return False
-                self.wait_for_arm_settled()
+                print("[lateral_clamp] Contact confirmed — retracting 5mm before gripper close...")
+                if not self._retract_after_contact():
+                    print("[ERROR] Contact retract failed or did not move upward. Aborting hold.")
+                    return False
             else:
                 final_z = wz + (self.FINAL_Z_OFFSET_M if self.FINAL_Z_OFFSET_M is not None else self.HOVER_Z_OFFSET)
                 if abs(final_z - hover_z) <= 0.002:
@@ -551,17 +869,16 @@ class ObjectHoldSkill(Node):
             ):
                 print("[ERROR] Tactile Z-descent failed before side contact.")
                 return False
-            self.wait_for_arm_settled()
+            print("[lateral_clamp] Contact confirmed — retracting 5mm before gripper close...")
+            if not self._retract_after_contact():
+                print("[ERROR] Contact retract failed or did not move upward. Aborting hold.")
+                return False
 
         if interactive:
             input(f"STEP 3: Close gripper on {target_label}? [Enter]")
         print("Closing gripper...")
-        if not self.gripper.move_to_joint_positions(
-            {self.JOINT_GRIPPER: math.radians(self.CLOSE_DEG)},
-            gripper_force_n=self.GRIPPER_CLOSE_FORCE_N,
-        ):
+        if not self._close_gripper_for_hold():
             return False
-        self.wait_for_gripper(self.CLOSE_DEG)
 
         self.publish_state("HOLDING")
         return True
@@ -587,19 +904,14 @@ class ObjectHoldSkill(Node):
             input(f"STEP 1: Hover over {target_label}? [Enter]")
 
         print("Ensuring gripper is open...")
-        if not self.gripper.move_to_joint_positions(
-            {self.JOINT_GRIPPER: math.radians(self.OPEN_DEG)},
-            gripper_force_n=self.GRIPPER_OPEN_FORCE_N,
-        ):
+        if not self._open_gripper_verified():
             return False
-        if not self.wait_for_gripper(self.OPEN_DEG):
-            self.get_logger().warning("Gripper did not confirm open position before hover move.")
 
         print(f"Moving to hover pose at X:{hover_x:.3f}, Y:{hover_y:.3f}, Z:{hover_z:.3f}...")
-        if not self.uf850.move_to_pose_exotica(hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY):
-            print("EXOTica pose planning failed. Attempting Cartesian fallback...")
+        if not self._move_to_hover_pose(hover_x, hover_y, hover_z, qd):
+            print("Hover pose planning failed. Attempting Cartesian fallback...")
             if not self.uf850.move_cartesian_to_pose(hover_x, hover_y, hover_z, qd, velocity=self.APPROACH_VELOCITY):
-                print("[ERROR] Both EXOTica and Cartesian fallback failed to reach hover pose. Aborting.")
+                print("[ERROR] Hover planner and Cartesian fallback failed to reach hover pose. Aborting.")
                 return False
         if not self.wait_for_arm_settled():
             print("[ERROR] Arm did not settle after hover move.")
@@ -614,16 +926,14 @@ class ObjectHoldSkill(Node):
         ):
             print("[ERROR] Tactile descent failed before contact.")
             return False
-        self.wait_for_arm_settled()
-
         if self.STRATEGY == "top_down_clamp":
-            print("Closing gripper for top_down_clamp...")
-            if not self.gripper.move_to_joint_positions(
-                {self.JOINT_GRIPPER: math.radians(self.CLOSE_DEG)},
-                gripper_force_n=self.GRIPPER_CLOSE_FORCE_N,
-            ):
+            print("[top_down_clamp] Contact confirmed — retracting 5mm before gripper close...")
+            if not self._retract_after_contact():
+                print("[ERROR] Contact retract failed or did not move upward. Aborting hold.")
                 return False
-            self.wait_for_gripper(self.CLOSE_DEG)
+            print("Closing gripper for top_down_clamp...")
+            if not self._close_gripper_for_hold():
+                return False
         else:
             print(f"Strategy '{self.STRATEGY}': arm pressure applied, gripper stays open.")
 
@@ -648,7 +958,16 @@ class ObjectHoldSkill(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ObjectHoldSkill()
+    try:
+        cfg_path = os.path.join(
+            get_package_share_directory('disassembly_skill'),
+            'config', 'device_configs', 'hdd.yaml',
+        )
+        device_cfg = DeviceConfig.load(cfg_path)
+    except Exception as exc:
+        print(f"[WARN] Could not load device config: {exc}. Using defaults.")
+        device_cfg = None
+    node = ObjectHoldSkill(device_cfg=device_cfg)
     executor = MultiThreadedExecutor()
     executor.add_node(node)
 
@@ -656,24 +975,26 @@ def main(args=None):
     spin_thread.start()
 
     time.sleep(2.0)
-    print("Single-Shot Mode: Waiting for initial vision data on /vision/agent_state...")
-
-    print("Sending reset command to vision tracker...")
-    node.vision_reset_pub.publish(String(data='reset'))
-    time.sleep(1.0)
+    print("Single-Shot Mode: Waiting for live vision data on /vision/agent_state...")
 
     is_held = False
     try:
         target_id = None
         target_label_to_pass = ""
 
+        last_status_t = 0.0
         while rclpy.ok() and target_id is None:
-            with node.data_lock:
-                chassis_targets = [t for t in node.latest_targets if 'chassis' in t.get('label', '').lower() or 'lid' in t.get('label', '').lower()]
-                if chassis_targets:
-                    target_id = chassis_targets[0].get('id')
-                    target_label_to_pass = chassis_targets[0].get('label', 'chassis')
+            target = node._select_hold_target()
+            if target:
+                target_id = target.get('id')
+                target_label_to_pass = target.get('label', 'case')
             if target_id is None:
+                now = time.time()
+                if now - last_status_t >= 5.0:
+                    with node.data_lock:
+                        labels = [t.get('label', '?') for t in node.latest_targets[:10]]
+                    print(f"Waiting for hold target. Current vision labels: {labels}")
+                    last_status_t = now
                 time.sleep(0.5)
 
         if target_id is not None:

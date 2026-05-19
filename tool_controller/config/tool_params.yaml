@@ -2,4 +2,5 @@ tool_commander:
   ros__parameters:
     port: "/dev/ttyACM0"
     baud: 115200
+    allow_fake: false
     fake_step: 0.2  # Higher number = faster spinning in RViz

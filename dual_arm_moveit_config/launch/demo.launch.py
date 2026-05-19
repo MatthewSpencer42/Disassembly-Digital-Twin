@@ -39,6 +39,7 @@ def launch_setup(context, *_args, **_kwargs):
     use_sim_time_arg = LaunchConfiguration("use_sim_time").perform(context).lower() in {"true", "1", "yes"}
     use_sim_time_val = "true" if use_sim_time_arg else "false"
     use_sim_time = use_sim_time_arg
+    allow_fake_tool = hardware_type not in ("real", "twin")
 
     joint_commands_topic, joint_states_topic = joint_topics_for_hardware(hardware_type)
     xacro_hardware_type = normalize_xacro_hardware_type(hardware_type)
@@ -123,6 +124,7 @@ def launch_setup(context, *_args, **_kwargs):
         ros_arguments=["--log-level", "ERROR"],
         parameters=[moveit_config.to_dict(), {"use_sim_time": use_sim_time_val == "true"}],
         remappings=rviz_remappings,
+        additional_env={"LD_PRELOAD": _RVIZ_PRELOAD},
         condition=IfCondition(use_rviz),
     )
 
@@ -159,7 +161,13 @@ def launch_setup(context, *_args, **_kwargs):
         executable="tool_commander",
         name="tool_commander",
         output="screen",
-        parameters=[str(tool_config_path), {"use_sim_time": use_sim_time_val == "true"}],
+        parameters=[
+            str(tool_config_path),
+            {
+                "use_sim_time": use_sim_time_val == "true",
+                "allow_fake": allow_fake_tool,
+            },
+        ],
     )
 
     with open(pkg_share / "config" / "xarm_servo.yaml", "r", encoding="utf-8") as file:

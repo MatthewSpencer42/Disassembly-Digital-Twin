@@ -670,7 +670,7 @@
     <parent link="uf850_base_link"/>
     <child link="uf850_link1"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="200.0" velocity="1" lower="-0.625" upper="0.625"/>
+    <limit effort="200.0" velocity="1" lower="-6.2831853" upper="6.2831853"/>
   </joint>
   <joint name="xarm5_scene_joint" type="fixed">
     <origin xyz="0.043 0.0565 -0.07545" rpy="1.5707963 0 0"/>
@@ -689,7 +689,7 @@
     <parent link="xarm5_base_link"/>
     <child link="xarm5_link1"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="50" velocity="1" lower="-0.625" upper="0.625"/>
+    <limit effort="50" velocity="1" lower="-6.2831853" upper="6.2831853"/>
   </joint>
   <joint name="uf850_joint3" type="revolute">
     <origin xyz="1.219e-05 -0.38999826 0.045" rpy="3.1415927 0 0"/>
@@ -724,7 +724,7 @@
     <parent link="uf850_link4"/>
     <child link="uf850_link5"/>
     <axis xyz="0 0 -1"/>
-    <limit effort="19.0" velocity="1" lower="-2.1542083" upper="2.1542083"/>
+    <limit effort="19.0" velocity="1" lower="-2.1642083" upper="2.1642083"/>
   </joint>
   <joint name="xarm5_joint4" type="revolute">
     <origin xyz="0.07784991 -0.34207971 0.07224863" rpy="0 0 0"/>

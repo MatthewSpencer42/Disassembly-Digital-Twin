@@ -133,6 +133,8 @@ class ExoticaIKServerNode(Node):
         group = request.get("group", "")
         current = request.get("current", {})
         pose_rpy = request.get("pose_rpy", [])
+        position_tolerance_m = request.get("position_tolerance_m")
+        max_retries = min(int(request.get("max_retries", 10)), 10)
 
         joints: dict | None = None
         error: str | None = None
@@ -152,7 +154,10 @@ class ExoticaIKServerNode(Node):
                 )
             else:
                 result = planner.solve_pose_goal_joint_positions(
-                    current, pose_rpy, max_retries=10
+                    current,
+                    pose_rpy,
+                    max_retries=max_retries,
+                    position_tolerance_m=position_tolerance_m,
                 )
                 if result is None:
                     error = planner.last_error or "IK returned no solution."

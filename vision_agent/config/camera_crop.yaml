@@ -4,10 +4,10 @@ camera_crop_republisher:
     # Set crop_reference_width/height to 0 to use absolute coords (no scaling).
     crop_reference_width: 0
     crop_reference_height: 0
-    crop_x: 900
-    crop_y: 640
-    crop_width: 1735
-    crop_height: 1290
+    crop_x: 1020
+    crop_y: 470
+    crop_width: 1900
+    crop_height: 1020
 
     # /camera/cropped/color/image_raw        — full-res exact crop for geometry/debug
     # /camera/cropped/color/image_inference  — full-res crop for RF-DETR

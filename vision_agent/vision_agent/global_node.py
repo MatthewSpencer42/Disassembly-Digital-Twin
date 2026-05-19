@@ -39,6 +39,8 @@ class GlobalVisionNode(Node):
     def __init__(self):
         super().__init__("vision_global_node")
         self.get_logger().info("Starting global vision node")
+        self.declare_parameter("log_3d_status", False)
+        self.log_3d_status = bool(self.get_parameter("log_3d_status").value)
 
         self.scout = ScoutAgent(PATH_SCOUT)
         self.bridge = CvBridge()
@@ -379,7 +381,6 @@ class GlobalVisionNode(Node):
                     "polygon": poly_arr.reshape(-1, 2).tolist(),
                 }
 
-        workspace_poly = self.active_polygons.get(0)
         detections.sort(key=lambda x: x.get("box", [0])[0])
         valid_objects = []
         rects = []
@@ -391,8 +392,6 @@ class GlobalVisionNode(Node):
                 continue
             raw_cx = int((box[0] + box[2]) / 2)
             raw_cy = int((box[1] + box[3]) / 2)
-            if workspace_poly is not None and cv2.pointPolygonTest(workspace_poly, (raw_cx, raw_cy), False) < 0:
-                continue
             valid_objects.append(obj)
             rects.append(box)
             labels.append(label)
@@ -440,9 +439,10 @@ class GlobalVisionNode(Node):
                 }
             )
 
-        # Throttled projection diagnostic — every 30 s
+        # Optional throttled projection diagnostic — disabled by default because
+        # it is very noisy during normal real-hardware disassembly runs.
         now = time.time()
-        if now - getattr(self, "_last_proj_log", 0.0) >= 30.0:
+        if self.log_3d_status and now - getattr(self, "_last_proj_log", 0.0) >= 30.0:
             self._last_proj_log = now
             di = self.intrinsics or {}
             ci = self.color_intrinsics
@@ -468,6 +468,8 @@ class GlobalVisionNode(Node):
             "objects": objects,
             "bin_locations": bin_locations,
             "image_size": [int(self.frame_global.shape[1]), int(self.frame_global.shape[0])],
+            "raw_detection_count": len(detections),
+            "published_detection_count": len(objects),
         }
         self.state_pub.publish(String(data=json.dumps(packet)))
         if bin_locations:

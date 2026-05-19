@@ -247,18 +247,19 @@ class DashboardNode(Node):
         return (0, 210, 80) if ok else (0, 165, 255)
 
     def draw_system_health_panel(self, height):
-        width = 380
+        width = 300
         panel = np.zeros((height, width, 3), dtype=np.uint8)
-        panel[:] = (12, 15, 19)
+        panel[:] = (14, 17, 23)
 
         def draw_text(text, x, y, size=0.8, color=(245, 245, 245), thickness=2):
             cv2.putText(panel, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, size, color, thickness, cv2.LINE_AA)
 
         all_ok = bool(self._system_health) and all(item["ok"] for item in self._system_health.values())
         header_color = (0, 210, 80) if all_ok else (0, 165, 255)
-        cv2.rectangle(panel, (0, 0), (width, 76), (25, 31, 40), -1)
-        draw_text("STACK HEALTH", 20, 48, 1.0, header_color, 3)
-        draw_text("READY" if all_ok else "LOADING", 250, 48, 0.78, header_color, 2)
+        cv2.rectangle(panel, (16, 16), (width - 16, 82), (28, 34, 45), -1)
+        cv2.rectangle(panel, (16, 16), (width - 16, 82), (58, 68, 84), 1)
+        draw_text("STACK", 32, 46, 0.82, (235, 241, 248), 2)
+        draw_text("READY" if all_ok else "LOADING", 32, 72, 0.62, header_color, 2)
 
         rows = [
             ("MoveIt", self._system_health.get("MoveIt", {"ok": False, "detail": "waiting"})),
@@ -266,22 +267,22 @@ class DashboardNode(Node):
             ("Global Vision", self._system_health.get("Global Vision", {"ok": False, "detail": "waiting"})),
             ("Local Vision", self._system_health.get("Local Vision", {"ok": False, "detail": "waiting"})),
         ]
-        y = 122
+        y = 125
         for label, item in rows:
             ok = bool(item["ok"])
             color = self._status_color(ok)
-            cv2.circle(panel, (34, y - 8), 12, color, -1)
-            cv2.rectangle(panel, (62, y - 42), (width - 18, y + 36), (27, 32, 42), -1)
-            draw_text(label, 78, y - 8, 0.78, (255, 255, 255), 2)
-            draw_text(str(item["detail"])[:32], 78, y + 22, 0.58, (205, 214, 224), 2)
-            y += 92
+            cv2.rectangle(panel, (16, y - 30), (width - 16, y + 34), (26, 31, 42), -1)
+            cv2.circle(panel, (36, y), 8, color, -1)
+            draw_text(label, 54, y - 4, 0.58, (245, 248, 252), 2)
+            draw_text(str(item["detail"])[:28], 54, y + 22, 0.42, (172, 184, 198), 1)
+            y += 76
 
-        y = max(y + 10, height - 155)
-        cv2.line(panel, (18, y - 28), (width - 18, y - 28), (58, 68, 78), 1)
-        draw_text("RUNTIME", 20, y, 0.72, (215, 224, 232), 2)
-        draw_text(f"debug feed {self._fps_display:.1f} fps", 20, y + 34, 0.6, (205, 214, 224), 2)
-        draw_text(f"global objects {len(self.global_state.get('objects', []))}", 20, y + 64, 0.6, (205, 214, 224), 2)
-        draw_text(f"local targets {sum(len(self.local_state.get(k, [])) for k in ('screws', 'screw_heads', 'tool_tips', 'holes'))}", 20, y + 94, 0.6, (205, 214, 224), 2)
+        y = max(y + 8, height - 118)
+        cv2.line(panel, (24, y - 18), (width - 24, y - 18), (58, 68, 84), 1)
+        draw_text("RUNTIME", 24, y + 6, 0.56, (215, 224, 232), 2)
+        draw_text(f"debug {self._fps_display:.1f} fps", 24, y + 36, 0.46, (180, 192, 205), 1)
+        draw_text(f"global objects {len(self.global_state.get('objects', []))}", 24, y + 60, 0.46, (180, 192, 205), 1)
+        draw_text(f"local targets {sum(len(self.local_state.get(k, [])) for k in ('screws', 'screw_heads', 'tool_tips', 'holes'))}", 24, y + 84, 0.46, (180, 192, 205), 1)
         return panel
 
     def draw_wide_dashboard(self, width):
@@ -290,50 +291,66 @@ class DashboardNode(Node):
         status = self.assembly_state
         wrench_data = self.latest_zeroed_wrench
         panel = np.zeros((DASHBOARD_HEIGHT, width, 3), dtype=np.uint8)
+        panel[:] = (10, 13, 18)
 
-        def draw_text(img, text, x, y, size=0.8, color=(255, 255, 255), thickness=2):
-            cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, size, color, thickness)
+        def draw_text(img, text, x, y, size=0.58, color=(232, 238, 246), thickness=1):
+            cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, size, color, thickness, cv2.LINE_AA)
 
-        cv2.rectangle(panel, (0, 0), (width, 45), (40, 40, 40), -1)
-        draw_text(panel, "SYSTEM DASHBOARD", 20, 35, 1.0, (0, 255, 255), 2)
+        def card(x1, y1, x2, y2, title):
+            cv2.rectangle(panel, (x1, y1), (x2, y2), (23, 28, 38), -1)
+            cv2.rectangle(panel, (x1, y1), (x2, y2), (54, 64, 78), 1)
+            draw_text(panel, title, x1 + 14, y1 + 28, 0.55, (174, 186, 202), 1)
+
+        cv2.rectangle(panel, (0, 0), (width, 46), (18, 23, 32), -1)
+        draw_text(panel, "DISASSEMBLY DASHBOARD", 20, 30, 0.72, (245, 248, 252), 2)
         global_fps_color = (0, 255, 0) if self._global_rx_fps >= 15 else (0, 255, 255) if self._global_rx_fps >= 5 else (0, 0, 255)
         local_fps_color = (0, 255, 0) if self._local_rx_fps >= 15 else (0, 255, 255) if self._local_rx_fps >= 5 else (0, 0, 255)
-        draw_text(panel, f"GLOBAL FPS: {self._global_rx_fps:.1f}", width - 420, 35, 0.75, global_fps_color, 2)
-        draw_text(panel, f"LOCAL FPS: {self._local_rx_fps:.1f}", width - 210, 35, 0.75, local_fps_color, 2)
+        draw_text(panel, f"GLOBAL {self._global_rx_fps:.1f} FPS", width - 330, 30, 0.55, global_fps_color, 2)
+        draw_text(panel, f"LOCAL {self._local_rx_fps:.1f} FPS", width - 160, 30, 0.55, local_fps_color, 2)
 
-        col1_x = 20
-        draw_text(panel, "DETECTED PARTS", col1_x, 80, 0.75, (200, 200, 200), 2)
-        y = 120
+        gap = 14
+        col_w = max(190, (width - 5 * gap) // 4)
+        x1 = gap
+        x2 = x1 + col_w
+        x3 = x2 + gap
+        x4 = x3 + col_w
+        x5 = x4 + gap
+        x6 = x5 + col_w
+        x7 = x6 + gap
+        x8 = width - gap
+
+        card(x1, 60, x2, DASHBOARD_HEIGHT - 14, "DETECTED PARTS")
+        y = 104
+        raw_count = self.global_state.get("raw_detection_count")
         if objects:
             for obj in sorted(objects, key=lambda x: x.get("id", 999))[:6]:
                 label = str(obj.get("label", "Unknown"))
                 obj_id = obj.get("id", "?")
                 xyz = obj.get("xyz")
-                display = f"#{obj_id}: {label[:10]}"
+                display = f"#{obj_id} {label[:14]}"
                 display += f" Z:{xyz[2]:.3f}m" if xyz else " No Depth"
-                draw_text(panel, f"> {display}", col1_x, y, 0.8, (0, 255, 0), 2)
-                y += 35
+                draw_text(panel, display, x1 + 16, y, 0.52, (80, 235, 145), 1)
+                y += 24
         else:
-            draw_text(panel, "No parts detected", col1_x, y, 0.85, (100, 100, 100), 2)
+            detail = "No model detections" if not raw_count else f"{raw_count} raw, 0 published"
+            draw_text(panel, detail, x1 + 16, y, 0.55, (135, 145, 158), 1)
 
-        col2_x = width // 2 - 120
-        draw_text(panel, "VISION AI STATE", col2_x, 80, 0.75, (200, 200, 200), 2)
+        card(x3, 60, x4, DASHBOARD_HEIGHT - 14, "VISION STATE")
         state = status.get("state", "unknown").upper()
-        box_color = (50, 50, 50)
+        box_color = (64, 72, 84)
         if state == "UNSCREWED":
             box_color = (0, 200, 0)
         elif state == "SCREWED":
             box_color = (0, 140, 255)
         elif "MISALIGN" in state:
             box_color = (0, 0, 255)
-        cv2.rectangle(panel, (col2_x, 100), (col2_x + 230, 160), box_color, -1)
-        draw_text(panel, state, col2_x + 12, 140, 0.9, (255, 255, 255), 2)
-        draw_text(panel, f"Conf: {status.get('confidence', 0.0):.2f}", col2_x, 200, 0.8, (180, 180, 180), 2)
-        draw_text(panel, "ROBOT STATES", col2_x, 250, 0.75, (200, 200, 200), 2)
-        draw_text(panel, f"Tool Arm: {self.robot_states.get('tool_arm', 'OFFLINE')}", col2_x, 290, 0.8, (180, 180, 180), 2)
-        draw_text(panel, f"Manip Arm: {self.robot_states.get('manip_arm', 'OFFLINE')}", col2_x, 325, 0.8, (180, 180, 180), 2)
+        cv2.rectangle(panel, (x3 + 16, 92), (x4 - 16, 144), box_color, -1)
+        draw_text(panel, state[:18], x3 + 28, 126, 0.68, (255, 255, 255), 2)
+        draw_text(panel, f"Confidence {status.get('confidence', 0.0):.2f}", x3 + 16, 174, 0.52, (190, 202, 216), 1)
+        draw_text(panel, f"Tool arm {self.robot_states.get('tool_arm', 'OFFLINE')}", x3 + 16, 202, 0.52, (190, 202, 216), 1)
+        draw_text(panel, f"Manip arm {self.robot_states.get('manip_arm', 'OFFLINE')}", x3 + 16, 228, 0.52, (190, 202, 216), 1)
 
-        y = 370
+        card(x5, 60, x6, DASHBOARD_HEIGHT - 14, "FORCE/TORQUE")
         if wrench_data:
             fx = wrench_data["force"]["x"]
             fy = wrench_data["force"]["y"]
@@ -341,23 +358,28 @@ class DashboardNode(Node):
             tx = wrench_data["torque"]["x"]
             ty = wrench_data["torque"]["y"]
             tz = wrench_data["torque"]["z"]
-            draw_text(panel, "SENSORS (Zeroed)", col2_x, y, 0.75, (200, 200, 200), 2)
-            y += 35
-            draw_text(panel, f"Force X:  {fx:>7.2f} N", col2_x + 10, y, 0.8, (0, 255, 0), 2)
-            draw_text(panel, f"Force Y:  {fy:>7.2f} N", col2_x + 10, y + 30, 0.8, (0, 255, 0), 2)
-            draw_text(panel, f"Force Z:  {fz:>7.2f} N", col2_x + 10, y + 60, 0.8, (0, 255, 0), 2)
-            draw_text(panel, f"Torque X: {tx:>7.3f} Nm", col2_x + 10, y + 100, 0.8, (180, 180, 180), 2)
-            draw_text(panel, f"Torque Y: {ty:>7.3f} Nm", col2_x + 10, y + 130, 0.8, (180, 180, 180), 2)
-            draw_text(panel, f"Torque Z: {tz:>7.3f} Nm", col2_x + 10, y + 160, 0.8, (180, 180, 180), 2)
+            readings = [
+                f"Fx {fx:>6.2f} N",
+                f"Fy {fy:>6.2f} N",
+                f"Fz {fz:>6.2f} N",
+                f"Tx {tx:>6.3f} Nm",
+                f"Ty {ty:>6.3f} Nm",
+                f"Tz {tz:>6.3f} Nm",
+            ]
+            for idx, line in enumerate(readings):
+                color = (80, 235, 145) if idx < 3 else (190, 202, 216)
+                draw_text(panel, line, x5 + 16, 104 + idx * 22, 0.50, color, 1)
+        else:
+            draw_text(panel, "Waiting for FT300", x5 + 16, 104, 0.55, (135, 145, 158), 1)
 
-        col3_x = width - 350
-        draw_text(panel, "DROP BIN", col3_x, 80, 0.75, (200, 200, 200), 2)
-        y = 120
+        card(x7, 60, x8, DASHBOARD_HEIGHT - 14, "DROP BIN")
         bin1_xyz = bin_locations.get("bin_1", {}).get("xyz")
         if bin1_xyz:
-            draw_text(panel, f"BIN 1: Z:{bin1_xyz[2]:.3f}m", col3_x, y, 0.85, (0, 255, 0), 2)
+            draw_text(panel, f"BIN 1 Z {bin1_xyz[2]:.3f} m", x7 + 16, 108, 0.58, (80, 235, 145), 1)
+            draw_text(panel, f"X {bin1_xyz[0]:.3f}", x7 + 16, 144, 0.50, (190, 202, 216), 1)
+            draw_text(panel, f"Y {bin1_xyz[1]:.3f}", x7 + 16, 170, 0.50, (190, 202, 216), 1)
         else:
-            draw_text(panel, "BIN 1: ...", col3_x, y, 0.85, (0, 255, 255), 2)
+            draw_text(panel, "BIN 1 waiting", x7 + 16, 108, 0.55, (135, 145, 158), 1)
         return panel
 
     @staticmethod
@@ -384,16 +406,6 @@ class DashboardNode(Node):
     def draw_global_overlay(self, frame):
         vis = frame.copy()
         scale_x, scale_y = self._global_scale_factors(vis)
-        bin1_data = self.global_state.get("bin_locations", {}).get("bin_1", {})
-        polygon = bin1_data.get("polygon")
-        if polygon:
-            scaled_poly = np.array(
-                [self._scale_point(pt, scale_x, scale_y) for pt in polygon],
-                dtype=np.int32,
-            ).reshape((-1, 1, 2))
-            cv2.polylines(vis, [scaled_poly], True, (0, 255, 255), 2)
-            label_pt = scaled_poly.reshape(-1, 2)[0]
-            cv2.putText(vis, "BIN 1", (int(label_pt[0]), int(label_pt[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         for obj in self.global_state.get("objects", []):
             box = obj.get("box")
             if not box:
@@ -481,8 +493,8 @@ class DashboardNode(Node):
             scale = target_h / h
             return cv2.resize(img, (int(w * scale), target_h))
 
-        viz_g = resize_h(vis_global, 480)
-        viz_l = resize_h(vis_local, 480)
+        viz_g = resize_h(vis_global, 360)
+        viz_l = resize_h(vis_local, 360)
         top_row = np.hstack((viz_g, viz_l))
         dashboard = self.draw_wide_dashboard(top_row.shape[1])
         final_frame = np.vstack((top_row, dashboard))

@@ -159,6 +159,7 @@ class RGBridge:
         self._log_state = {}
         self.pending_width_mm = None
         self.last_sent_width_mm = None
+        self._last_command_write_t = 0.0
         self._poll_lock = threading.Lock()
         self._stop_poll = threading.Event()
         self._poll_thread = None
@@ -212,7 +213,18 @@ class RGBridge:
         if self.client is None or self.pending_width_mm is None:
             return
         if self.is_moving:
-            return
+            reversing_direction = (
+                self.last_sent_width_mm is not None
+                and (self.pending_width_mm - self.last_width_mm) * (self.last_sent_width_mm - self.last_width_mm) < 0.0
+            )
+            if not reversing_direction or (time.time() - self._last_command_write_t) < 0.25:
+                return
+            if throttle(self._log_state, "reverse_while_moving", 1.0):
+                self.logger.info(
+                    f"RG6: reversing in-flight command from target {self.last_sent_width_mm:.1f}mm "
+                    f"to {self.pending_width_mm:.1f}mm"
+                )
+            self.last_sent_width_mm = None
         if self.last_sent_width_mm is not None and abs(self.pending_width_mm - self.last_sent_width_mm) < GRIPPER_WIDTH_EPS_MM:
             self.pending_width_mm = None
             return
@@ -226,6 +238,7 @@ class RGBridge:
                     self.logger.warning(f"RG6: Modbus write returned error response: {response}")
                 return
             self.last_sent_width_mm = self.pending_width_mm
+            self._last_command_write_t = time.time()
             self.pending_width_mm = None
         except Exception as exc:
             if throttle(self._log_state, "write_warn", 2.0):
@@ -759,8 +772,14 @@ class RealHardware(Node):
                 self.last_gripper_command = float(command_map["rg6_right_drive_joint"])
                 return
             command = float(command_map["rg6_right_drive_joint"])
-            if self.last_gripper_command is None or abs(command - self.last_gripper_command) > 1e-3:
-                self.rg6.set_width_mm(self.rad_to_width_mm(command))
+            target_width_mm = self.rad_to_width_mm(command)
+            target_width_stale = abs(target_width_mm - self.rg6.target_width_mm) > GRIPPER_WIDTH_EPS_MM
+            if (
+                self.last_gripper_command is None
+                or abs(command - self.last_gripper_command) > 1e-3
+                or target_width_stale
+            ):
+                self.rg6.set_width_mm(target_width_mm)
                 self.last_gripper_command = command
 
     def handle_joint_velocity_command(self, msg: JointState):

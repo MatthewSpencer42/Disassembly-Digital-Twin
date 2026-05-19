@@ -483,6 +483,11 @@ class ExoticaSingleArmPosePlanner:
             "group_name": "xarm5_arm_no_slide",
             "task_name": "XARM5_TCP",
             "link_name": "screwdriver_tcp",
+            # uf_slide_joint shifts the xarm5 base by +S along Y in base_link.
+            # The EXOTica group freezes the slide at 0, so we must subtract the
+            # physical slide position from the Y component of the IK target.
+            "slide_joint": "uf_slide_joint",
+            "slide_axis": 1,  # index into [x, y, z, roll, pitch, yaw]
         },
     }
 
@@ -845,6 +850,7 @@ class ExoticaSingleArmPosePlanner:
         current_positions: dict[str, float],
         target_pose_rpy,
         max_retries: int = 10,
+        position_tolerance_m: float | None = None,
     ) -> dict[str, float] | None:
         if not self.available:
             return None
@@ -852,7 +858,29 @@ class ExoticaSingleArmPosePlanner:
         import time as _time
         t0 = _time.time()
         base_start_state = self._state_vector_from_joint_map(current_positions)
-        target_np = self._np.asarray(target_pose_rpy, dtype=float)
+        target_np = self._np.asarray(target_pose_rpy, dtype=float).copy()
+        success_tolerance_m = (
+            float(position_tolerance_m)
+            if position_tolerance_m is not None
+            else float(self._POSE_SUCCESS_TOLERANCE_M)
+        )
+
+        # Slide correction: the xarm5_arm_no_slide EXOTica group models the slide as
+        # frozen at 0.  The physical slide at position S shifts the xarm5 base +S along
+        # Y in base_link, so without correction the TCP lands at y+S instead of y.
+        # We subtract the actual slide value from the target Y before passing to IK.
+        _cfg = self._ARM_CONFIG.get(self.group_name, {})
+        _slide_joint = _cfg.get("slide_joint")
+        _slide_axis = _cfg.get("slide_axis")
+        if _slide_joint is not None and _slide_axis is not None:
+            _slide_value = float(current_positions.get(_slide_joint, 0.0))
+            if abs(_slide_value) > 1e-4:
+                target_np[_slide_axis] -= _slide_value
+                self.node.get_logger().debug(
+                    f"[EXOTica/{self.group_name}] slide correction: "
+                    f"{_slide_joint}={_slide_value:.4f} → "
+                    f"target[{_slide_axis}] adjusted to {target_np[_slide_axis]:.4f}"
+                )
 
         self._problem.set_goal(self.task_name, target_np)
 
@@ -917,7 +945,7 @@ class ExoticaSingleArmPosePlanner:
                         best_pos_error = err
                         best_pos_solution = cand_state
 
-                    if err < self._POSE_SUCCESS_TOLERANCE_M:
+                    if err <= success_tolerance_m:
                         # Check tool orientation when a direction is required.
                         # Always break on position-OK so the server responds quickly.
                         # Orientation is verified here; the caller decides whether to retry.
@@ -954,7 +982,7 @@ class ExoticaSingleArmPosePlanner:
         # the caller can try a different target yaw perturbation.
         if (
             best_pos_solution is not None
-            and best_pos_error < self._POSE_SUCCESS_TOLERANCE_M
+            and best_pos_error <= success_tolerance_m
             and target_tool_z_sign is not None
         ):
             self.last_error = (
@@ -1125,6 +1153,7 @@ class RemoteExoticaIKClient:
         current_positions: dict[str, float],
         target_pose_rpy,
         max_retries: int = 10,  # passed to the server; not used locally
+        position_tolerance_m: float | None = None,
     ) -> dict[str, float] | None:
         """Send an IK request to the server and block up to 30 s for the response."""
         import json as _json
@@ -1140,7 +1169,10 @@ class RemoteExoticaIKClient:
             "group": self.group_name,
             "current": {k: float(v) for k, v in current_positions.items()},
             "pose_rpy": [float(v) for v in target_pose_rpy],
+            "max_retries": int(max_retries),
         }
+        if position_tolerance_m is not None:
+            request["position_tolerance_m"] = float(position_tolerance_m)
 
         from std_msgs.msg import String as _String
 
@@ -1167,7 +1199,7 @@ class RemoteExoticaIKClient:
                     return None
                 self.last_error = None
                 return {k: float(v) for k, v in joints.items()}
-            _time.sleep(0.05)
+            _time.sleep(0.005)
 
         self.last_error = f"Timed out waiting for IK response (id={req_id})"
         self.node.get_logger().error(

@@ -33,6 +33,7 @@ def _stage_exit_handlers(process_action, stage_name: str, critical: bool = True)
 
 def generate_launch_description():
     hardware_type = LaunchConfiguration("hardware_type")
+    tool_video_device = LaunchConfiguration("tool_video_device")
 
     # Clean up stale Orbbec depth-engine lock left by unclean shutdowns.
     cleanup_orbbec_lock = ExecuteProcess(
@@ -42,7 +43,7 @@ def generate_launch_description():
     )
 
     handeye_calibration_file = (
-        Path(get_package_share_directory("dual_arm_moveit_config")) / "config" / "orbbec_handeye.calib"
+        Path(get_package_share_directory("dual_arm_moveit_config")) / "config" / "orbbec_handeye_new.calib"
     )
 
     moveit_stage = ExecuteProcess(
@@ -54,6 +55,7 @@ def generate_launch_description():
                     text=(
                         "source /home/adip/workspace/dev_ws/install/moveit_servo/share/moveit_servo/local_setup.bash && "
                         "source /home/adip/workspace/disassembly_ws/install/setup.bash && "
+                        "export LD_PRELOAD=/opt/ros/humble/lib/librviz_default_plugins.so${LD_PRELOAD:+:$LD_PRELOAD} && "
                         "exec ros2 launch dual_arm_moveit_config exotica.launch.py hardware_type:="
                     )
                 ),
@@ -68,11 +70,11 @@ def generate_launch_description():
     handeye_stage = Node(
         package="easy_handeye2",
         executable="handeye_publisher",
-        name="realsense_handeye_publisher",
+        name="orbbec_handeye_publisher",
         output="screen",
         parameters=[
             {
-                "name": "orbbec_handeye",
+                "name": "orbbec_handeye_new",
                 "calibration_file": str(handeye_calibration_file),
             }
         ],
@@ -96,6 +98,7 @@ def generate_launch_description():
             "launch",
             "vision_agent",
             "system_startup.launch.py",
+            ["tool_video_device:=", tool_video_device],
         ],
         output="screen",
         name="disassembly_vision_stage",
@@ -108,16 +111,16 @@ def generate_launch_description():
         output="screen",
     )
 
-    rqt_stage = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "run",
-            "rqt_image_view",
-            "rqt_image_view",
-            "/vision/debug_feed/compressed",
-        ],
+    dashboard_window_stage = Node(
+        package="vision_agent",
+        executable="dashboard_window",
+        name="disassembly_dashboard_window",
         output="screen",
-        name="disassembly_debug_view",
+        parameters=[
+            {
+                "topic": "/vision/debug_feed/compressed",
+            }
+        ],
     )
 
     start_ft_after_moveit = RegisterEventHandler(
@@ -184,27 +187,27 @@ def generate_launch_description():
         )
     )
 
-    start_rqt_after_republisher = RegisterEventHandler(
+    start_dashboard_after_republisher = RegisterEventHandler(
         OnProcessStart(
             target_action=debug_republisher_stage,
             on_start=[
-                LogInfo(msg="✅ Debug feed republisher launched. Waiting before starting debug viewer..."),
+                LogInfo(msg="✅ Debug feed republisher launched. Waiting before starting dashboard window..."),
                 TimerAction(
                     period=2.0,
                     actions=[
-                        LogInfo(msg="🚀 [6/6] Starting rqt image view for /vision/debug_feed_view..."),
-                        rqt_stage,
+                        LogInfo(msg="🚀 [6/6] Starting Tk dashboard window for /vision/debug_feed/compressed..."),
+                        dashboard_window_stage,
                     ],
                 ),
             ],
         )
     )
 
-    rqt_started_handler = RegisterEventHandler(
+    dashboard_started_handler = RegisterEventHandler(
         OnProcessStart(
-            target_action=rqt_stage,
+            target_action=dashboard_window_stage,
             on_start=[
-                LogInfo(msg="✅ rqt image view launched for /vision/debug_feed_view."),
+                LogInfo(msg="✅ Tk dashboard window launched for /vision/debug_feed/compressed."),
             ],
         )
     )
@@ -212,6 +215,11 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("hardware_type", default_value="real"),
+            DeclareLaunchArgument(
+                "tool_video_device",
+                default_value="auto",
+                description="Optional tool camera video device override",
+            ),
             cleanup_orbbec_lock,
             LogInfo(msg="🚀 [1/5] Starting EXOTica MoveIt stack..."),
             moveit_stage,
@@ -219,8 +227,8 @@ def generate_launch_description():
             start_ft_after_handeye,
             start_vision_after_ft,
             start_republisher_after_vision,
-            start_rqt_after_republisher,
-            rqt_started_handler,
+            start_dashboard_after_republisher,
+            dashboard_started_handler,
             _stage_exit_handlers(moveit_stage, "EXOTica MoveIt stage", critical=True),
             _stage_exit_handlers(handeye_stage, "Hand-eye publisher stage", critical=True),
             _stage_exit_handlers(ft_stage, "FT300 stage", critical=True),

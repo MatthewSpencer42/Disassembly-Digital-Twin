@@ -32,7 +32,7 @@ class ScoutAgent:
         pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         
         # Inference
-        detections = self.model.predict(pil_img, threshold=0.4)
+        detections = self.model.predict(pil_img, threshold=0.25)
         
         processed_detections = []
         debug_frame = frame.copy() if draw_debug else None
