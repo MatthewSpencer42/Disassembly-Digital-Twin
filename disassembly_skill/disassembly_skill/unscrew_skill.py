@@ -15,14 +15,16 @@ class UnscrewSkill(Node):
         # Physical Geometry
         self.CONFIG = {
             "TOOL_LENGTH": 0.240,           # m (Screwdriver length)
-            "HOVER_DISTANCE": 0.015,        # m (15mm above screw tip)
+            "HOVER_DISTANCE": 0.003,        # m (3mm above screw tip)
             "TRANSIT_LIFT": 0.030,          # m (Safe travel height)
             "REACH_LIMIT": 0.680,           # m (xArm reach radius)
             "REACH_SOFT_MARGIN": 0.120,     # m, screwdriver TCP can extend past nominal flange reach
             "MM_PER_PIX": 0.000130,         # m/px (Vision calibration)
-            "COARSE_VELOCITY": 0.20,        # trajectory scaling for coarse pose moves
+            "COARSE_VELOCITY": 0.40,        # trajectory scaling for coarse pose moves
             "COARSE_POSITION_TOLERANCE": 0.010,  # m, abort descent/search if hover TCP is off target
             "COARSE_PLANNER": "exotica",    # EXOTica IK with slide correction — accurate hover position
+            "COARSE_X_OFFSET": -0.01,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
+            "COARSE_Y_OFFSET": -0.02,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
             "COARSE_ONLY_DEBUG": False,      # temporary: verify all screw hover poses before unscrewing
             "ALIGN_ONLY_DEBUG": True,        # current debug path: run XY align only, skip descent/extraction
             "DESCENT_ONLY_DEBUG": False,     # validate conical descent, then stop before extraction/bin
@@ -67,7 +69,7 @@ class UnscrewSkill(Node):
             "ALIGN_MAX_JOINT_STEP_RAD": 0.035,
             "ALIGN_MAX_JOINT_VELOCITY_RAD_S": 0.6,
             "PRE_DESCENT_ALIGN_TOLERANCE_PX": 25.0,
-            "PRE_DESCENT_ALIGN_TIMEOUT": 45.0,
+            "PRE_DESCENT_ALIGN_TIMEOUT": 20.0,
             "PRE_DESCENT_ALIGN_STABLE_CYCLES": 2,
             "FINAL_ALIGN_TOLERANCE_PX": 3.0,
             "FINAL_ALIGN_TIMEOUT": 20.0,
@@ -80,7 +82,8 @@ class UnscrewSkill(Node):
             "EXTRACTION_STABLE_TIME": 3.0,  # s
             "EXTRACTION_Z_SPEED_CAP": 0.03, # m/s max compliant lift speed
             "POST_GRASP_RETRACT": 0.015,     # m (15mm as requested)
-            "RETRACT_SPEED": 0.05,          # m/s
+            "RETRACT_SPEED": 0.06,          # m/s, safety lift after failed unscrew phases
+            "POST_UNSCREW_RETRACT_SPEED": 0.06,  # m/s, closed-loop lift after screw grab
             "UNSCREW_PROBE_DURATION": 0.50,  # s, first short engagement test spin
             "UNSCREW_PROBE_FORCE_INCREASE": 0.05,  # N, axial force change required to trust engagement
             "UNSCREW_MIN_SPIN_TIME": 1.0,    # s, minimum continuous unscrew after probe
@@ -88,10 +91,13 @@ class UnscrewSkill(Node):
             "UNSCREW_RELEASE_FORCE_RATIO": 0.35,  # stable drop below peak ratio indicates loosening
             "UNSCREW_FORCE_IDEAL_DELTA": 0.15,    # N, preferred axial force increase while spinning
             "UNSCREW_FORCE_DEADBAND": 0.04,       # N, no Z relief inside this band
-            "UNSCREW_Z_RELIEF_SPEED_CAP": 0.035,  # m/s, max upward relief while unscrewing
+            "UNSCREW_Z_RELIEF_GAIN": 0.003,       # m/s per N above ideal force while unscrewing
+            "UNSCREW_Z_RELIEF_SPEED_CAP": 0.008,  # m/s, max upward relief while unscrewing
             "UNSCREW_Z_RELIEF_MAX": 0.030,        # m, max relief before gripper close
+            "TOOL_RELEASE_SETTLE": 0.50,      # s, allow tool gripper to open before unscrew
             "TOOL_GRAB_SETTLE": 0.50,        # s, allow tool gripper to close before retract
-            "BIN_RELEASE_HEIGHT": 0.030,     # m, release screw 3 cm above Bin 1
+            "BIN_RELEASE_HEIGHT": 0.020,     # m, release screw 2 cm above Bin 1 reference
+            "BIN_Z_TRIM": -0.050,            # m, source-only trim because bin marker Z is above usable drop height
             "XARM_HOME_JOINTS": {
                 "xarm5_joint1": 0.0,
                 "xarm5_joint2": 0.0,
@@ -141,12 +147,10 @@ class UnscrewSkill(Node):
         if 'spiral_timeout_s' in p:
             self.CONFIG['SPIRAL_TIMEOUT'] = p['spiral_timeout_s']
         key_map = {
-            'hover_distance_m': 'HOVER_DISTANCE',
             'transit_lift_m': 'TRANSIT_LIFT',
             'reach_limit_m': 'REACH_LIMIT',
             'reach_soft_margin_m': 'REACH_SOFT_MARGIN',
             'mm_per_px': 'MM_PER_PIX',
-            'coarse_velocity': 'COARSE_VELOCITY',
             'coarse_position_tolerance_m': 'COARSE_POSITION_TOLERANCE',
             'coarse_only_debug': 'COARSE_ONLY_DEBUG',
             'align_only_debug': 'ALIGN_ONLY_DEBUG',
@@ -184,13 +188,11 @@ class UnscrewSkill(Node):
             'align_max_joint_step_rad': 'ALIGN_MAX_JOINT_STEP_RAD',
             'align_max_joint_velocity_rad_s': 'ALIGN_MAX_JOINT_VELOCITY_RAD_S',
             'pre_descent_align_tolerance_px': 'PRE_DESCENT_ALIGN_TOLERANCE_PX',
-            'pre_descent_align_timeout_s': 'PRE_DESCENT_ALIGN_TIMEOUT',
             'pre_descent_align_stable_cycles': 'PRE_DESCENT_ALIGN_STABLE_CYCLES',
             'final_align_tolerance_px': 'FINAL_ALIGN_TOLERANCE_PX',
             'final_align_timeout_s': 'FINAL_ALIGN_TIMEOUT',
             'final_align_max_radius_m': 'FINAL_ALIGN_MAX_RADIUS',
             'final_align_stable_cycles': 'FINAL_ALIGN_STABLE_CYCLES',
-            'retract_speed_mps': 'RETRACT_SPEED',
             'engagement_depth_mm': 'ENGAGEMENT_DEPTH_MM',
             'unscrew_probe_duration_s': 'UNSCREW_PROBE_DURATION',
             'unscrew_probe_force_increase_n': 'UNSCREW_PROBE_FORCE_INCREASE',
@@ -199,10 +201,11 @@ class UnscrewSkill(Node):
             'unscrew_release_force_ratio': 'UNSCREW_RELEASE_FORCE_RATIO',
             'unscrew_force_ideal_delta_n': 'UNSCREW_FORCE_IDEAL_DELTA',
             'unscrew_force_deadband_n': 'UNSCREW_FORCE_DEADBAND',
+            'unscrew_z_relief_gain_mps_per_n': 'UNSCREW_Z_RELIEF_GAIN',
             'unscrew_z_relief_speed_cap_mps': 'UNSCREW_Z_RELIEF_SPEED_CAP',
             'unscrew_z_relief_max_m': 'UNSCREW_Z_RELIEF_MAX',
+            'tool_release_settle_s': 'TOOL_RELEASE_SETTLE',
             'tool_grab_settle_s': 'TOOL_GRAB_SETTLE',
-            'bin_release_height_m': 'BIN_RELEASE_HEIGHT',
         }
         for param_name, config_name in key_map.items():
             if param_name in p:
@@ -1127,7 +1130,7 @@ class UnscrewSkill(Node):
                 tx,
                 ty,
                 locked_z,
-                velocity=max(0.08, min(float(self.CONFIG["COARSE_VELOCITY"]), 0.20)),
+                velocity=max(0.08, min(float(self.CONFIG["COARSE_VELOCITY"]), 0.60)),
             )
             if not ok:
                 print("\n[ALIGN] Planned spiral step failed.")
@@ -2125,7 +2128,6 @@ class UnscrewSkill(Node):
         self.tool_pub.publish(Int8(data=-1))
         deadline = time.time() + probe_duration
         while rclpy.ok() and time.time() < deadline:
-            self.tool_pub.publish(Int8(data=-1))
             peak_delta = max(peak_delta, abs(self._current_fz() - baseline_fz))
             time.sleep(0.02)
         self.tool_pub.publish(Int8(data=0))
@@ -2147,8 +2149,8 @@ class UnscrewSkill(Node):
         release_ratio = max(0.05, min(0.95, float(self.CONFIG["UNSCREW_RELEASE_FORCE_RATIO"])))
         ideal_delta = max(float(self.CONFIG["UNSCREW_FORCE_IDEAL_DELTA"]), threshold)
         deadband = max(float(self.CONFIG["UNSCREW_FORCE_DEADBAND"]), 0.0)
-        relief_gain = max(float(self.CONFIG["EXTRACTION_COMPLIANCE_K"]), 0.001)
-        relief_cap = max(min(float(self.CONFIG["UNSCREW_Z_RELIEF_SPEED_CAP"]), 0.08), 0.002)
+        relief_gain = max(float(self.CONFIG["UNSCREW_Z_RELIEF_GAIN"]), 0.0)
+        relief_cap = max(min(float(self.CONFIG["UNSCREW_Z_RELIEF_SPEED_CAP"]), 0.020), 0.001)
         relief_max = max(float(self.CONFIG["UNSCREW_Z_RELIEF_MAX"]), 0.0)
         ee_link = "screwdriver_tcp"
 
@@ -2166,7 +2168,7 @@ class UnscrewSkill(Node):
         print(
             f"[UNSCREW] Continuing spin: min={min_time:.1f}s max={max_time:.1f}s "
             f"release_ratio={release_ratio:.2f} idealΔFz={ideal_delta:.2f}N "
-            f"relief_cap={relief_cap*1000:.0f}mm/s."
+            f"relief_gain={relief_gain*1000:.1f}mm/s/N relief_cap={relief_cap*1000:.1f}mm/s."
         )
 
         if not self.moveit_backend.start_servo(timeout_sec=8.0):
@@ -2184,7 +2186,6 @@ class UnscrewSkill(Node):
         try:
             while rclpy.ok() and time.time() - start_t < max_time:
                 elapsed = time.time() - start_t
-                self.tool_pub.publish(Int8(data=-1))
                 delta = abs(self._current_fz() - baseline_fz)
                 peak_delta = max(peak_delta, delta)
 
@@ -2211,7 +2212,6 @@ class UnscrewSkill(Node):
                 force_over = delta - ideal_delta
                 if relief_max > 0.0 and force_over > deadband and z_relief < relief_max:
                     vz_lift = min(relief_cap, relief_gain * force_over)
-                    vz_lift = max(vz_lift, min(0.004, relief_cap))
                     if z_relief + vz_lift * dt > relief_max:
                         vz_lift = max((relief_max - z_relief) / dt, 0.0)
                     # Negative Servo Z increases TCP Z on this xArm setup.
@@ -2257,11 +2257,22 @@ class UnscrewSkill(Node):
             self.tool_pub.publish(Int8(data=0))
             time.sleep(0.1)
 
-    def perform_compliant_extraction(self):
-        """Probe bit engagement, unscrew, close tool gripper, then closed-loop retract."""
+    def perform_compliant_extraction(self) -> tuple:
+        """Probe bit engagement, unscrew, close tool gripper, then closed-loop retract.
+
+        Returns (success: bool, no_force_spike: bool).
+        no_force_spike is True only when the probe detected zero axial engagement —
+        the caller can then retract, realign, and redescend before retrying.
+        """
         print("\n[EXTRACTION] Starting force-gated unscrew and closed-loop retract...")
         if not self._wait_for_tool_controller():
-            return False
+            return False, False
+
+        print("[TOOL] Resetting screwdriver and opening screw gripper before unscrew.")
+        self.tool_pub.publish(Int8(data=0))
+        time.sleep(0.10)
+        self.tool_pub.publish(Int8(data=3))
+        time.sleep(max(float(self.CONFIG["TOOL_RELEASE_SETTLE"]), 0.1))
 
         baseline_fz = self._sample_fz_average(0.15)
         engaged, peak_delta = self._run_unscrew_probe(baseline_fz)
@@ -2274,24 +2285,28 @@ class UnscrewSkill(Node):
             else:
                 print("[UNSCREW] Probe did not show axial force increase. Keeping tool stopped.")
                 self.tool_pub.publish(Int8(data=0))
-                return False
+                return False, True  # retryable: no force spike
 
         if not self._continue_unscrew_until_released(baseline_fz, peak_delta):
             self.tool_pub.publish(Int8(data=0))
-            return False
+            return False, False
 
         print("[GRAB] Closing tool gripper on screw before retract.")
         self.tool_pub.publish(Int8(data=2))
         time.sleep(max(float(self.CONFIG["TOOL_GRAB_SETTLE"]), 0.1))
 
-        lift_dist = max(float(self.CONFIG["TRANSIT_LIFT"]), float(self.CONFIG["POST_GRASP_RETRACT"]))
-        print(f"[RETRACT] Closed-loop Servo retract {lift_dist*1000:.0f}mm with gripper closed.")
-        if not self._safe_servo_lift_z(lift_dist, speed_mps=self.CONFIG["RETRACT_SPEED"]):
+        if not self._post_unscrew_style_retract("[RETRACT] Closed-loop Servo retract with gripper closed"):
             print("[RETRACT] Closed-loop retract failed; not navigating to bin.")
-            return False
+            return False, False
 
         self.wait_for_arm_settled()
-        return True
+        return True, False
+
+    def _post_unscrew_style_retract(self, label: str = "[RETRACT] Closed-loop Servo retract") -> bool:
+        lift_dist = max(float(self.CONFIG["TRANSIT_LIFT"]), float(self.CONFIG["POST_GRASP_RETRACT"]))
+        retract_speed = float(self.CONFIG["POST_UNSCREW_RETRACT_SPEED"])
+        print(f"{label}: {lift_dist*1000:.0f}mm at {retract_speed*1000:.0f}mm/s.")
+        return self._safe_servo_lift_z(lift_dist, speed_mps=retract_speed)
 
     # =========================================================================
     # MAIN SEQUENCE
@@ -2366,12 +2381,18 @@ class UnscrewSkill(Node):
 
         if not world_pose or not base_pose: return False
 
-        tx, ty = world_pose.pose.position.x, world_pose.pose.position.y
+        tx_raw, ty_raw = world_pose.pose.position.x, world_pose.pose.position.y
+        tx = tx_raw + float(self.CONFIG["COARSE_X_OFFSET"])
+        ty = ty_raw + float(self.CONFIG["COARSE_Y_OFFSET"])
         tz_screw = world_pose.pose.position.z
         dist_base = math.hypot(base_pose.pose.position.x, base_pose.pose.position.y)
         hover_z = tz_screw + self.CONFIG["HOVER_DISTANCE"]
 
-        print(f"[DIAG] Screw in base_link: ({tx:.4f}, {ty:.4f}, {tz_screw:.4f})")
+        print(f"[DIAG] Screw in base_link raw: ({tx_raw:.4f}, {ty_raw:.4f}, {tz_screw:.4f})")
+        print(
+            f"[DIAG] Coarse XY offset: dx={self.CONFIG['COARSE_X_OFFSET']*1000:.1f}mm "
+            f"dy={self.CONFIG['COARSE_Y_OFFSET']*1000:.1f}mm -> target=({tx:.4f}, {ty:.4f})"
+        )
         print(f"[DIAG] hover_z = {tz_screw:.4f} + {self.CONFIG['HOVER_DISTANCE']:.3f} = {hover_z:.4f}")
         print(f"[DIAG] xarm5 base dist: {dist_base:.3f}m (limit {self.CONFIG['REACH_LIMIT']:.3f}m)")
 
@@ -2429,8 +2450,8 @@ class UnscrewSkill(Node):
             stable_cycles=self.CONFIG["PRE_DESCENT_ALIGN_STABLE_CYCLES"],
         ):
             print("⚠️ XY alignment failed.")
-            self._safe_servo_lift_z(self.CONFIG["TRANSIT_LIFT"], speed_mps=self.CONFIG["RETRACT_SPEED"])
-            return False
+            self._post_unscrew_style_retract("[RETRACT] XY-align failure lift")
+            return self._finish_failed_run_at_bin(bin1_raw)
 
         if interactive: input("👉 GATE 2: Start conical descent [ENTER]")
 
@@ -2438,16 +2459,16 @@ class UnscrewSkill(Node):
         print("\n[PHASE 2] Servo conical descent to contact...")
         if not self.perform_exotica_descent(hover_z=hover_z, screw_z=tz_screw):
             print("⚠️ Descent failed or timed out. Lifting to safety.")
-            self._safe_servo_lift_z(self.CONFIG["TRANSIT_LIFT"], speed_mps=self.CONFIG["RETRACT_SPEED"])
-            return False
+            self._post_unscrew_style_retract("[RETRACT] Descent failure lift")
+            return self._finish_failed_run_at_bin(bin1_raw)
 
         if bool(self.CONFIG.get("DESCENT_ONLY_DEBUG", False)):
             print("[DEBUG] Descent-only mode active: running final XY align after contact/depth stop; skipping extraction and bin drop.")
             final_ok = self.perform_xy_align_search_only()
             if not final_ok:
                 print("⚠️ Final XY alignment failed after descent. Lifting to safety.")
-                self._safe_servo_lift_z(self.CONFIG["TRANSIT_LIFT"], speed_mps=self.CONFIG["RETRACT_SPEED"])
-                return False
+                self._post_unscrew_style_retract("[RETRACT] Final-align failure lift")
+                return self._finish_failed_run_at_bin(bin1_raw)
             print("[DEBUG] Descent-only validation complete after final XY align.")
             return True
 
@@ -2463,30 +2484,83 @@ class UnscrewSkill(Node):
             stable_cycles=self.CONFIG["FINAL_ALIGN_STABLE_CYCLES"],
         ):
             print("⚠️ Final XY alignment failed.")
-            self._safe_servo_lift_z(self.CONFIG["TRANSIT_LIFT"], speed_mps=self.CONFIG["RETRACT_SPEED"])
-            return False
+            self._post_unscrew_style_retract("[RETRACT] Final-align failure lift")
+            return self._finish_failed_run_at_bin(bin1_raw)
 
         if interactive: input("👉 GATE 3: Start compliant extraction [ENTER]")
 
-        # Phase 4: Compliant extraction (unscrew + lift + bin)
-        if self.perform_compliant_extraction():
-            print("🎉 Screw Extracted.")
-            return self._navigate_to_bin(bin1_raw)
+        # Phase 4: Compliant extraction with up to 3 retries on no-force-spike
+        MAX_PROBE_RETRIES = 3
+        for probe_attempt in range(MAX_PROBE_RETRIES):
+            ok, no_force_spike = self.perform_compliant_extraction()
+            if ok:
+                print("🎉 Screw Extracted.")
+                return self._navigate_to_bin(bin1_raw)
+
+            if not no_force_spike or probe_attempt >= MAX_PROBE_RETRIES - 1:
+                break
+
+            print(
+                f"[RETRY {probe_attempt + 1}/{MAX_PROBE_RETRIES}] No force spike detected. "
+                "Retracting 5 mm, realigning, redescending..."
+            )
+            retract_speed = float(self.CONFIG.get("POST_UNSCREW_RETRACT_SPEED", 0.01))
+            if not self._safe_servo_lift_z(0.005, speed_mps=retract_speed):
+                print("⚠️ Retry retract failed. Aborting.")
+                break
+
+            # Re-run final XY align from the slightly lifted position
+            if not self.perform_xy_align_search_only(
+                tolerance_px=self.CONFIG["FINAL_ALIGN_TOLERANCE_PX"],
+                timeout_s=self.CONFIG["FINAL_ALIGN_TIMEOUT"],
+                max_radius_m=self.CONFIG["FINAL_ALIGN_MAX_RADIUS"],
+                stable_cycles=self.CONFIG["FINAL_ALIGN_STABLE_CYCLES"],
+            ):
+                print("⚠️ Retry XY alignment failed. Aborting.")
+                break
+
+            # Redescend to contact
+            if not self.perform_exotica_descent(hover_z=hover_z, screw_z=tz_screw):
+                print("⚠️ Retry descent failed. Aborting.")
+                break
+
+            time.sleep(0.3)
+
+            # Re-run final XY settle after descent
+            if not self.perform_xy_align_search_only(
+                tolerance_px=self.CONFIG["FINAL_ALIGN_TOLERANCE_PX"],
+                timeout_s=self.CONFIG["FINAL_ALIGN_TIMEOUT"],
+                max_radius_m=self.CONFIG["FINAL_ALIGN_MAX_RADIUS"],
+                stable_cycles=self.CONFIG["FINAL_ALIGN_STABLE_CYCLES"],
+            ):
+                print("⚠️ Retry post-descent XY alignment failed. Aborting.")
+                break
 
         print("⚠️ Extraction failed. Lifting to safety and stopping this run.")
-        self._safe_servo_lift_z(self.CONFIG["TRANSIT_LIFT"], speed_mps=self.CONFIG["RETRACT_SPEED"])
+        self._post_unscrew_style_retract("[RETRACT] Extraction failure lift")
+        return self._finish_failed_run_at_bin(bin1_raw)
+
+    def _finish_failed_run_at_bin(self, bin1_raw) -> bool:
+        print("[FAILURE] Moving to Bin 1 drop position, then home.")
+        self._navigate_to_bin(bin1_raw)
         return False
 
     def _navigate_to_bin(self, bin1_raw):
         release_height = float(self.CONFIG["BIN_RELEASE_HEIGHT"])
-        print(f"🗑️ [DROP-OFF] Navigating to cached Bin 1, stopping {release_height*100:.0f}cm above it...")
+        z_trim = float(self.CONFIG["BIN_Z_TRIM"])
+        print(f"🗑️ [DROP-OFF] Navigating to cached Bin 1, release={release_height*100:.0f}cm trim={z_trim*1000:.0f}mm...")
         bin_pose = Pose()
         bin_pose.position.x, bin_pose.position.y, bin_pose.position.z = bin1_raw
         world_bin = self.moveit_backend.get_transformed_pose(bin_pose, self.CONFIG["CAMERA_FRAME"], self.CONFIG["WORLD_FRAME"])
         
         if world_bin:
             bx, by = world_bin.pose.position.x, world_bin.pose.position.y
-            bz = world_bin.pose.position.z + release_height
+            raw_bz = world_bin.pose.position.z
+            bz = raw_bz + release_height + z_trim
+            print(
+                f"[DROP-OFF] Bin raw camera xyz=({bin1_raw[0]:.4f},{bin1_raw[1]:.4f},{bin1_raw[2]:.4f}) "
+                f"world_z={raw_bz:.4f} + release={release_height:.3f} + trim={z_trim:.3f} -> target_z={bz:.4f}"
+            )
             
             if self.moveit_backend.move_to_pose_exotica(bx, by, bz, velocity=self.CONFIG["COARSE_VELOCITY"]):
                 self.wait_for_arm_settled()

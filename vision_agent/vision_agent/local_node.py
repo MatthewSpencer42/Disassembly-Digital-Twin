@@ -15,12 +15,16 @@ from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import String
 
 from vision_agent.common import (
-    LOCAL_CROSSHAIR_OFFSET_X,
-    LOCAL_CROSSHAIR_OFFSET_Y,
+    LOCAL_CROSSHAIR_SMALL_OFFSET_X,
+    LOCAL_CROSSHAIR_SMALL_OFFSET_Y,
+    LOCAL_CROSSHAIR_SMALL_ARM_PX,
+    LOCAL_CROSSHAIR_LARGE_OFFSET_X,
+    LOCAL_CROSSHAIR_LARGE_OFFSET_Y,
+    LOCAL_CROSSHAIR_LARGE_ARM_PX,
+    LOCAL_CROSSHAIR_LINE_THICKNESS,
+    LOCAL_TOOL_HEAD_AREA_THRESHOLD_PX2,
     LOCAL_INFERENCE_EVERY_N_FRAMES,
     LOCAL_COLOR_TOPIC,
-    LOCAL_TOOL_HEAD_AREA_MARGIN_PX,
-    LOCAL_TOOL_HEAD_CROSSHAIR_RULES,
     PATH_SNIPER,
     PERF_LOG_INTERVAL_SEC,
     PROCESSING_RATE_HZ,
@@ -107,36 +111,49 @@ class LocalVisionNode(Node):
                 self.get_logger().error(f"Sniper Error: {e}")
             self.sniper_future = None
 
-    @staticmethod
-    def _box_area_with_margin(box, margin_px):
-        if not box or len(box) < 4:
-            return 0
-        width = max(0.0, float(box[2]) - float(box[0]) + 2.0 * float(margin_px))
-        height = max(0.0, float(box[3]) - float(box[1]) + 2.0 * float(margin_px))
-        return int(round(width * height))
-
     def _crosshair_for_tool_head_area(self, w_loc, h_loc, tool_tips):
-        best_area = 0
-        for tool in tool_tips or []:
-            best_area = max(best_area, self._box_area_with_margin(tool.get("box"), LOCAL_TOOL_HEAD_AREA_MARGIN_PX))
+        """Return crosshair config or None based on tool_head detection.
 
-        offset_x = LOCAL_CROSSHAIR_OFFSET_X
-        offset_y = LOCAL_CROSSHAIR_OFFSET_Y
-        rule_name = "default"
-        for rule in LOCAL_TOOL_HEAD_CROSSHAIR_RULES:
-            min_area = int(rule.get("min_area", 0) or 0)
-            max_area = rule.get("max_area")
-            if best_area >= min_area and (max_area is None or best_area < int(max_area)):
-                offset_x = int(rule.get("offset_x", offset_x))
-                offset_y = int(rule.get("offset_y", offset_y))
-                rule_name = str(rule.get("name", rule_name))
-                break
+        No detection          → returns None (no crosshair drawn).
+        Small tool head       → SMALL offsets, arm sized from box.
+        Large tool head       → LARGE offsets, arm sized from box.
+
+        Area boundary and per-variant offsets are tuned in common.py:
+          LOCAL_TOOL_HEAD_AREA_THRESHOLD_PX2   separates small from large
+          LOCAL_CROSSHAIR_SMALL_OFFSET_X/Y     offset for small tool head
+          LOCAL_CROSSHAIR_LARGE_OFFSET_X/Y     offset for large tool head
+          LOCAL_TOOL_HEAD_AREA_MARGIN_PX        extra px beyond box half-size
+        """
+        best_raw_area = 0
+
+        for tool in tool_tips or []:
+            box = tool.get("box")
+            if not box or len(box) < 4:
+                continue
+            w = max(0.0, float(box[2]) - float(box[0]))
+            h = max(0.0, float(box[3]) - float(box[1]))
+            best_raw_area = max(best_raw_area, w * h)
+
+        if best_raw_area == 0:
+            return None  # no tool_head detected → no crosshair
+
+        if best_raw_area < LOCAL_TOOL_HEAD_AREA_THRESHOLD_PX2:
+            offset_x = LOCAL_CROSSHAIR_SMALL_OFFSET_X
+            offset_y = LOCAL_CROSSHAIR_SMALL_OFFSET_Y
+            arm_px = LOCAL_CROSSHAIR_SMALL_ARM_PX
+            rule_name = "small"
+        else:
+            offset_x = LOCAL_CROSSHAIR_LARGE_OFFSET_X
+            offset_y = LOCAL_CROSSHAIR_LARGE_OFFSET_Y
+            arm_px = LOCAL_CROSSHAIR_LARGE_ARM_PX
+            rule_name = "large"
 
         return {
             "point": [int((w_loc // 2) + offset_x), int((h_loc // 2) + offset_y)],
             "offset": [int(offset_x), int(offset_y)],
-            "tool_head_area": int(best_area),
-            "tool_head_margin_px": int(LOCAL_TOOL_HEAD_AREA_MARGIN_PX),
+            "tool_head_area": int(best_raw_area),
+            "arm_px": arm_px,
+            "thickness": LOCAL_CROSSHAIR_LINE_THICKNESS,
             "rule": rule_name,
         }
 
@@ -152,7 +169,7 @@ class LocalVisionNode(Node):
         packet = dict(self.last_sniper_data)
         h_loc, w_loc = self.frame_local.shape[:2]
         crosshair = self._crosshair_for_tool_head_area(w_loc, h_loc, packet.get("tool_tips", []))
-        packet["crosshair"] = crosshair["point"]
+        packet["crosshair"] = crosshair["point"] if crosshair else None
         packet["crosshair_config"] = crosshair
         packet["image_size"] = [int(w_loc), int(h_loc)]
         packet["timestamp"] = self.get_clock().now().nanoseconds

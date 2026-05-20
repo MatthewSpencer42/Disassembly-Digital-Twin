@@ -21,8 +21,6 @@ from vision_agent.common import (
     DASHBOARD_HEIGHT,
     DEBUG_JPEG_QUALITY,
     DEBUG_PUBLISH_RATE_HZ,
-    LOCAL_CROSSHAIR_OFFSET_X,
-    LOCAL_CROSSHAIR_OFFSET_Y,
     GLOBAL_COLOR_DISPLAY_TOPIC,
     GLOBAL_RELIABLE_QOS,
     LOCAL_COLOR_TOPIC,
@@ -428,57 +426,70 @@ class DashboardNode(Node):
         else:
             scale_x = 1.0
             scale_y = 1.0
+
+        def _item_point(item, box):
+            point = item.get("centroid") or item.get("center") or item.get("contact_point")
+            if point and len(point) == 2:
+                return int(round(float(point[0]) * scale_x)), int(round(float(point[1]) * scale_y))
+            return int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2)
+
+        def _label_text(item, label, cx, cy):
+            conf = item.get("confidence", item.get("conf"))
+            if conf is None:
+                return f"{label} ({cx},{cy})"
+            return f"{label} {float(conf):.2f} ({cx},{cy})"
+
+        def _draw_label(text, x, y, color):
+            text_y = max(16, y - 7)
+            cv2.putText(vis, text, (x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3)
+            cv2.putText(vis, text, (x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+
         for screw in self.local_state.get("screws", []):
             box = screw.get("box")
             if not box:
                 continue
             box = self._scale_box(box, scale_x, scale_y)
-            cx = int((box[0] + box[2]) / 2)
-            cy = int((box[1] + box[3]) / 2)
+            cx, cy = _item_point(screw, box)
             cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (0, 200, 255), 2)
             cv2.circle(vis, (cx, cy), 4, (0, 200, 255), -1)
-            cv2.putText(vis, "screw", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+            _draw_label(_label_text(screw, "screw", cx, cy), box[0], box[1], (0, 200, 255))
         for screw in self.local_state.get("screw_heads", []):
             box = screw.get("box")
             if not box:
                 continue
             box = self._scale_box(box, scale_x, scale_y)
-            cx = int((box[0] + box[2]) / 2)
-            cy = int((box[1] + box[3]) / 2)
+            cx, cy = _item_point(screw, box)
             cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (255, 255, 0), 2)
             cv2.circle(vis, (cx, cy), 5, (255, 255, 0), -1)
-            cv2.putText(vis, "screw_head", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            _draw_label(_label_text(screw, "screw_head", cx, cy), box[0], box[1], (255, 255, 0))
         for tool in self.local_state.get("tool_tips", []):
             box = tool.get("box")
             if not box:
                 continue
             box = self._scale_box(box, scale_x, scale_y)
-            cx = int((box[0] + box[2]) / 2)
-            cy = int((box[1] + box[3]) / 2)
+            cx, cy = _item_point(tool, box)
             cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (255, 0, 255), 2)
             cv2.circle(vis, (cx, cy), 5, (255, 0, 255), -1)
-            cv2.putText(vis, "tool_head", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
+            _draw_label(_label_text(tool, "tool_head", cx, cy), box[0], box[1], (255, 0, 255))
         for hole in self.local_state.get("holes", []):
             box = hole.get("box")
             if not box:
                 continue
             box = self._scale_box(box, scale_x, scale_y)
-            cx = int((box[0] + box[2]) / 2)
-            cy = int((box[1] + box[3]) / 2)
+            cx, cy = _item_point(hole, box)
             cv2.rectangle(vis, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 2)
             cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
-            cv2.putText(vis, "Hole", (box[0], box[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            _draw_label(_label_text(hole, "hole", cx, cy), box[0], box[1], (0, 0, 255))
         crosshair = self.local_state.get("crosshair")
+        crosshair_cfg = self.local_state.get("crosshair_config") or {}
         if crosshair and len(crosshair) == 2:
             cross_x = int(round(crosshair[0] * scale_x))
             cross_y = int(round(crosshair[1] * scale_y))
-        else:
-            h_loc, w_loc = vis.shape[:2]
-            cross_x = (w_loc // 2) + LOCAL_CROSSHAIR_OFFSET_X
-            cross_y = (h_loc // 2) + LOCAL_CROSSHAIR_OFFSET_Y
-        cv2.line(vis, (cross_x - 20, cross_y), (cross_x + 20, cross_y), (0, 255, 0), 2)
-        cv2.line(vis, (cross_x, cross_y - 20), (cross_x, cross_y + 20), (0, 255, 0), 2)
-        cv2.circle(vis, (cross_x, cross_y), 2, (0, 0, 255), -1)
+            arm = int(crosshair_cfg.get("arm_px", 20))
+            thick = int(crosshair_cfg.get("thickness", 1))
+            cv2.line(vis, (cross_x - arm, cross_y), (cross_x + arm, cross_y), (0, 255, 0), thick)
+            cv2.line(vis, (cross_x, cross_y - arm), (cross_x, cross_y + arm), (0, 255, 0), thick)
+            cv2.circle(vis, (cross_x, cross_y), 1, (0, 0, 255), -1)
         return vis
 
     def publish_dashboard(self):

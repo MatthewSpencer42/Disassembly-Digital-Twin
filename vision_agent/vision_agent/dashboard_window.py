@@ -711,10 +711,27 @@ def local_overlays(state):
         ("holes", "hole", "#ff5d5d"),
     ):
         for item in state.get(key, []):
-            overlays.append({"box": item.get("box"), "label": label, "color": color})
+            box = item.get("box")
+            point = item.get("centroid") or item.get("center") or item.get("contact_point")
+            if (not point or len(point) != 2) and box and len(box) == 4:
+                point = [int((float(box[0]) + float(box[2])) / 2), int((float(box[1]) + float(box[3])) / 2)]
+            overlay_label = label
+            conf = item.get("confidence", item.get("conf"))
+            if conf is not None:
+                overlay_label += f" {float(conf):.2f}"
+            if point and len(point) == 2:
+                overlay_label += f" ({int(point[0])},{int(point[1])})"
+            overlays.append({"box": box, "label": overlay_label, "point": point, "color": color})
     crosshair = state.get("crosshair")
     if crosshair and len(crosshair) == 2:
-        overlays.append({"kind": "crosshair", "point": crosshair, "color": "#48ff70", "radius": 20})
+        cfg = state.get("crosshair_config") or {}
+        overlays.append({
+            "kind": "crosshair",
+            "point": crosshair,
+            "color": "#48ff70",
+            "radius": int(cfg.get("arm_px", 20)),
+            "thickness": int(cfg.get("thickness", 1)),
+        })
     return overlays
 
 
@@ -794,15 +811,16 @@ def render_frame(frame, size, overlays, source_size, theme, fill=False):
             cx = int(ox + float(point[0]) * sx)
             cy = int(oy + float(point[1]) * sy)
             radius = int(item.get("radius", 20))
-            painter.setPen(QPen(QColor("#05070a"), 5))
+            thick = int(item.get("thickness", 1))
+            painter.setPen(QPen(QColor("#05070a"), thick + 1))
             painter.drawLine(cx - radius, cy, cx + radius, cy)
             painter.drawLine(cx, cy - radius, cx, cy + radius)
-            painter.setPen(QPen(QColor(item.get("color", "#48ff70")), 2))
+            painter.setPen(QPen(QColor(item.get("color", "#48ff70")), thick))
             painter.drawLine(cx - radius, cy, cx + radius, cy)
             painter.drawLine(cx, cy - radius, cx, cy + radius)
             painter.setBrush(QColor("#ff355d"))
             painter.setPen(Qt.NoPen)
-            painter.drawEllipse(cx - 3, cy - 3, 6, 6)
+            painter.drawEllipse(cx - 2, cy - 2, 4, 4)
             continue
 
         box = item.get("box")
@@ -817,6 +835,13 @@ def render_frame(frame, size, overlays, source_size, theme, fill=False):
         painter.setPen(QPen(color, 2))
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(x1, y1, x2 - x1, y2 - y1)
+        point = item.get("point")
+        if point and len(point) == 2:
+            px = int(ox + float(point[0]) * sx)
+            py = int(oy + float(point[1]) * sy)
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(px - 4, py - 4, 8, 8)
         label = item.get("label")
         if label:
             painter.setPen(color)

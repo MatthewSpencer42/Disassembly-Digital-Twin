@@ -123,9 +123,15 @@ class ExoticaDualArmPlanner:
         segment_time = 0.05
         safe_scaling = max(float(velocity_scaling), 0.05)
         for joint_name, index in self._joint_index.items():
-            max_velocity = float(self._joint_limits.get(joint_name, {}).get("max_velocity", 1.0))
+            limits = self._joint_limits.get(joint_name, {})
+            max_velocity = float(limits.get("max_velocity", 1.0))
+            max_acceleration = float(limits.get("max_acceleration", 3.0))
             delta = abs(float(current_row[index]) - float(previous_row[index]))
             segment_time = max(segment_time, delta / max(max_velocity * safe_scaling, 1e-3))
+            if delta > 1e-6:
+                # Quintic peak accel = 11.25 * delta / T²; T = segment_time * 1.875
+                # → segment_time ≥ sqrt(11.25 / 1.875² * delta / (max_accel * scaling))
+                segment_time = max(segment_time, (3.2 * delta / max(max_acceleration * safe_scaling, 1e-3)) ** 0.5)
         return segment_time
 
     def _solution_to_robot_trajectory(self, solution, velocity_scaling: float) -> RobotTrajectory:
@@ -704,9 +710,13 @@ class ExoticaSingleArmPosePlanner:
         segment_time = 0.05
         safe_scaling = max(float(velocity_scaling), 0.01)
         for index, joint_name in enumerate(self.controlled_joint_names):
-            max_velocity = float(self._joint_limits.get(joint_name, {}).get("max_velocity", 1.0))
+            limits = self._joint_limits.get(joint_name, {})
+            max_velocity = float(limits.get("max_velocity", 1.0))
+            max_acceleration = float(limits.get("max_acceleration", 3.0))
             delta = abs(float(current_row[index]) - float(previous_row[index]))
             segment_time = max(segment_time, delta / max(max_velocity * safe_scaling, 1e-3))
+            if delta > 1e-6:
+                segment_time = max(segment_time, (3.2 * delta / max(max_acceleration * safe_scaling, 1e-3)) ** 0.5)
         return segment_time
 
     def _trajectory_to_robot_trajectory(self, states, velocity_scaling: float) -> RobotTrajectory:
@@ -1293,11 +1303,13 @@ class RemoteExoticaIKClient:
         segment_time = 0.05
         safe_scaling = max(float(velocity_scaling), 0.01)
         for index, joint_name in enumerate(self.controlled_joint_names):
-            max_velocity = float(
-                self._joint_limits.get(joint_name, {}).get("max_velocity", 1.0)
-            )
+            limits = self._joint_limits.get(joint_name, {})
+            max_velocity = float(limits.get("max_velocity", 1.0))
+            max_acceleration = float(limits.get("max_acceleration", 3.0))
             delta = abs(float(current_row[index]) - float(previous_row[index]))
             segment_time = max(segment_time, delta / max(max_velocity * safe_scaling, 1e-3))
+            if delta > 1e-6:
+                segment_time = max(segment_time, (3.2 * delta / max(max_acceleration * safe_scaling, 1e-3)) ** 0.5)
         return segment_time
 
     def _trajectory_to_robot_trajectory(self, states, velocity_scaling: float):

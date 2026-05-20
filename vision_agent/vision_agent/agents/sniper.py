@@ -27,7 +27,7 @@ class SniperAgent:
             return {"screws": [], "screw_heads": [], "tool_tips": [], "holes": []}
             
         pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        detections = self.model.predict(pil_img, threshold=0.4)
+        detections = self.model.predict(pil_img, threshold=0.6)
         
         data = {
             "screws": [],
@@ -49,7 +49,9 @@ class SniperAgent:
             obj = {
                 "label": label,
                 "conf": round(conf, 3),
-                "box": box
+                "confidence": round(conf, 3),
+                "box": box,
+                "centroid": [cx, cy],
             }
             
             label_key = label.lower()

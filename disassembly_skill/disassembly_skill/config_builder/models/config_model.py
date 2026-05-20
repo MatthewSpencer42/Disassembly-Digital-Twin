@@ -21,6 +21,8 @@ def default_step_params(action: str) -> Dict[str, Any]:
             "tilt_deg": 7.0,
             "hover_x_offset_m": -0.01,
             "hover_y_offset_m": -0.005,
+            "approach_velocity": 0.08,
+            "hover_velocity": 0.08,
         }
     if action == "unscrew":
         return {
@@ -46,7 +48,7 @@ def default_step_params(action: str) -> Dict[str, Any]:
             "approach_y_offset_m": 0.019,
             "drop_x": 0.92,
             "drop_y": -0.36,
-            "drop_z": 1.25,
+            "drop_z": 0.99,
         }
     if action == "flip":
         return {
@@ -56,11 +58,18 @@ def default_step_params(action: str) -> Dict[str, Any]:
         }
     if action == "flip_drop":
         return {
-            "retract_height_m": 0.15,
+            "retract_height_m": 0.05,
+            "retract_velocity": 0.04,
+            "retract_step_m": 0.025,
             "gripper_close_force_n": 100.0,
-            "intermediate_x": 0.929872,
-            "intermediate_y": -0.633943,
-            "intermediate_z": 1.0977,
+            "use_pickup_drop_xyz": True,
+            "pickup_drop_z_offset_m": 0.04,
+            "intermediate_x": 0.92,
+            "intermediate_y": -0.36,
+            "intermediate_z": 0.99,
+            "drop_transfer_velocity": 0.06,
+            "drop_transfer_step_m": 0.050,
+            "wrist_rotation_velocity": 0.15,
             "purpose": "dump_loose_parts",
         }
     if action == "tool_change":

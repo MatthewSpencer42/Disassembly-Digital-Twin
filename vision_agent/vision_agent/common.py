@@ -36,16 +36,23 @@ DEBUG_PUBLISH_RATE_HZ = 8.0
 DEBUG_JPEG_QUALITY = 75
 PERF_LOG_INTERVAL_SEC = 0.0
 PUBLISH_RAW_DEBUG = False
-LOCAL_CROSSHAIR_OFFSET_X = -3
-LOCAL_CROSSHAIR_OFFSET_Y = -10
-LOCAL_TOOL_HEAD_AREA_MARGIN_PX = 8
-LOCAL_TOOL_HEAD_CROSSHAIR_RULES = [
-    # Tune these in source-image pixels. area is computed from the tool_head
-    # box after expanding it by LOCAL_TOOL_HEAD_AREA_MARGIN_PX on each side.
-    {"name": "small", "min_area": 0, "max_area": 4500, "offset_x": -3, "offset_y": -6},
-    {"name": "current", "min_area": 4500, "max_area": 12000, "offset_x": -3, "offset_y": -10},
-    {"name": "large", "min_area": 12000, "max_area": None, "offset_x": -3, "offset_y": -18},
-]
+# No detection → no crosshair drawn at all.
+
+# Small tool head: detected bounding-box area < LOCAL_TOOL_HEAD_AREA_THRESHOLD_PX2
+LOCAL_CROSSHAIR_SMALL_OFFSET_X = -3
+LOCAL_CROSSHAIR_SMALL_OFFSET_Y = -7
+LOCAL_CROSSHAIR_SMALL_ARM_PX = 20
+
+# Large tool head: detected bounding-box area >= LOCAL_TOOL_HEAD_AREA_THRESHOLD_PX2
+LOCAL_CROSSHAIR_LARGE_OFFSET_X = -3
+LOCAL_CROSSHAIR_LARGE_OFFSET_Y = 10
+LOCAL_CROSSHAIR_LARGE_ARM_PX = 40
+
+# Line thickness in pixels for both crosshair variants.
+LOCAL_CROSSHAIR_LINE_THICKNESS = 2
+
+# Pixel² area boundary that separates the two tool head sizes.
+LOCAL_TOOL_HEAD_AREA_THRESHOLD_PX2 = 45000
 
 def resolve_checkpoint_path(*parts):
     base_path = os.path.join(WS_ROOT, *parts)

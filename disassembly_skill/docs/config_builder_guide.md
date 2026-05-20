@@ -142,7 +142,7 @@ Grasps and lifts a component, then moves it to the drop zone.
 | `pinch` | Thin edges |
 | `wide` | Large span components |
 
-**Drop zone** (drop_x / drop_y / drop_z): position in `base_link` frame where the extracted component is placed. Default `[0.92, -0.36, 1.25]` m.
+**Drop zone** (drop_x / drop_y / drop_z): TCP position in `base_link` frame where the extracted component is placed. Default `[0.92, -0.36, 0.99]` m.
 
 ---
 

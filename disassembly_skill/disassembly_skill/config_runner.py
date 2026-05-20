@@ -323,7 +323,7 @@ class ConfigRunner(Node):
 
     def _run_hold(self, step) -> bool:
         return self.hold_skill.execute_hold(
-            part_id=None, target_label=step.target, interactive=False
+            part_id=None, target_label=step.target, interactive=False, hold_step=step
         )
 
     def _run_unscrew(self, step) -> bool:
@@ -391,9 +391,9 @@ class ConfigRunner(Node):
         return True
 
     def _run_pickup(self, step) -> bool:
-        self.pickup_skill._apply_pickup_config(self.cfg, target_label=step.target)
+        self.pickup_skill._apply_pickup_config(self.cfg, target_label=step.target, pickup_step=step)
         return self.pickup_skill.execute_pickup(
-            target_id=None, target_label=step.target, interactive=False
+            target_id=None, target_label=step.target, interactive=False, pickup_step=step
         )
 
     def _run_flip(self, _step) -> bool:

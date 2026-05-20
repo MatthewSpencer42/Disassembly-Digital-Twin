@@ -64,14 +64,14 @@ disassembly_sequence:
       descent_speed_mps: 0.008
       descent_rate_hz: 25.0
       descent_step_m: 0.00035
-      hover_x_offset_m: 0.0
+      hover_x_offset_m: 0.015
       hover_y_offset_m: 0.0
       hover_z_offset: 0.05
       approach_rpy_deg: [12.0, -82.0, 74.0]
       descent_distance_m: 0.12
       final_z_offset_m: 0.0
-      approach_velocity: 0.25
-      hover_velocity: 0.45
+      approach_velocity: 0.50
+      hover_velocity: 0.50
       grip_velocity: 0.03
 
   - step: 2
@@ -91,7 +91,6 @@ disassembly_sequence:
       force_threshold_n: 5.0
       align_tolerance_px: 4.0
       spiral_timeout_s: 30.0
-      coarse_velocity: 0.20
       coarse_planner: exotica
       coarse_only_debug: false
       align_only_debug: false
@@ -113,7 +112,7 @@ disassembly_sequence:
       visual_servo_max_radius_m: 0.025
       align_move_step_m: 0.0005
       align_verify_tolerance_m: 0.015
-      align_error_filter_alpha: 0.35
+      align_error_filter_alpha: 0.25
       align_target_filter_alpha: 0.25
       align_stable_cycles: 3
       align_only_timeout_s: 90.0
@@ -124,18 +123,16 @@ disassembly_sequence:
       align_target_wait_s: 3.0
       align_target_lost_grace_s: 0.6
       enable_spiral_search: true
-      align_rate_hz: 15.0
-      align_joint_alpha: 0.35
-      align_max_joint_step_rad: 0.035
+      align_rate_hz: 30.0
+      align_joint_alpha: 0.20
+      align_max_joint_step_rad: 0.020
       align_max_joint_velocity_rad_s: 0.6
       pre_descent_align_tolerance_px: 25.0
-      pre_descent_align_timeout_s: 45.0
       pre_descent_align_stable_cycles: 2
-      final_align_tolerance_px: 3.0
+      final_align_tolerance_px: 2.0
       final_align_timeout_s: 20.0
       final_align_max_radius_m: 0.012
       final_align_stable_cycles: 3
-      retract_speed_mps: 0.03
       unscrew_probe_duration_s: 0.50
       unscrew_probe_force_increase_n: 0.05
       unscrew_min_spin_s: 1.0
@@ -143,10 +140,11 @@ disassembly_sequence:
       unscrew_release_force_ratio: 0.35
       unscrew_force_ideal_delta_n: 0.15
       unscrew_force_deadband_n: 0.04
-      unscrew_z_relief_speed_cap_mps: 0.035
+      unscrew_z_relief_gain_mps_per_n: 0.003
+      unscrew_z_relief_speed_cap_mps: 0.008
       unscrew_z_relief_max_m: 0.030
+      tool_release_settle_s: 0.50
       tool_grab_settle_s: 0.50
-      bin_release_height_m: 0.030
     notes: "Unscrew remains generic; this zone ordering makes it HDD-specific."
 
   - step: 3
@@ -160,16 +158,32 @@ disassembly_sequence:
     parameters:
       grasp_type: precision
       grip_width_mm: 80.0
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_open_min_width_mm: 120.0
       gripper_close_force_n: 40.0
       approach_axis: "+z"
       lift_height_mm: 50.0
       lift_speed_mps: 0.01
+      precondition_retract_m: 0.10
+      move_xarm5_clearance: false
       approach_x_offset_m: -0.02
-      approach_y_offset_m: 0.019
+      approach_y_offset_m: 0.015
+      approach_z_offset_m: 0.0
+      hover_velocity: 0.50
+      descent_distance_m: 0.080
+      descent_step_m: 0.0005
+      descent_rate_hz: 25.0
+      accept_max_depth_without_contact: true
+      descent_accept_ratio: 0.85
+      torque_threshold_nm: 3.0
+      contact_retract_m: 0.005
+      contact_retract_velocity: 0.02
+      post_grasp_retract_m: 0.030
       drop_x: 0.92
       drop_y: -0.36
-      drop_z: 1.25
-    notes: "Pickup is reserved for the PCB only."
+      drop_z: 0.99
+    notes: "Pickup target and approach offsets are config-driven; current HDD sequence uses it for PCB extraction."
 
   - step: 4
     action: hold
@@ -191,14 +205,14 @@ disassembly_sequence:
       descent_speed_mps: 0.008
       descent_rate_hz: 25.0
       descent_step_m: 0.00035
-      hover_x_offset_m: 0.0
+      hover_x_offset_m: 0.015
       hover_y_offset_m: 0.0
       hover_z_offset: 0.05
       approach_rpy_deg: [12.0, -82.0, 74.0]
       descent_distance_m: 0.12
       final_z_offset_m: 0.0
-      approach_velocity: 0.25
-      hover_velocity: 0.45
+      approach_velocity: 0.50
+      hover_velocity: 0.50
       grip_velocity: 0.03
 
 
@@ -236,14 +250,14 @@ disassembly_sequence:
       descent_speed_mps: 0.008
       descent_rate_hz: 25.0
       descent_step_m: 0.00035
-      hover_x_offset_m: 0.0
+      hover_x_offset_m: 0.015
       hover_y_offset_m: 0.0
       hover_z_offset: 0.05
       approach_rpy_deg: [12.0, -82.0, 74.0]
       descent_distance_m: 0.12
       final_z_offset_m: 0.0
-      approach_velocity: 0.25
-      hover_velocity: 0.45
+      approach_velocity: 0.50
+      hover_velocity: 0.50
       grip_velocity: 0.03
 
   - step: 7
@@ -263,7 +277,6 @@ disassembly_sequence:
       force_threshold_n: 5.0
       align_tolerance_px: 4.0
       spiral_timeout_s: 30.0
-      coarse_velocity: 0.20
       coarse_planner: exotica
       coarse_only_debug: false
       align_only_debug: false
@@ -285,7 +298,7 @@ disassembly_sequence:
       visual_servo_max_radius_m: 0.025
       align_move_step_m: 0.0005
       align_verify_tolerance_m: 0.015
-      align_error_filter_alpha: 0.35
+      align_error_filter_alpha: 0.25
       align_target_filter_alpha: 0.25
       align_stable_cycles: 3
       align_only_timeout_s: 90.0
@@ -296,18 +309,16 @@ disassembly_sequence:
       align_target_wait_s: 3.0
       align_target_lost_grace_s: 0.6
       enable_spiral_search: true
-      align_rate_hz: 15.0
-      align_joint_alpha: 0.35
-      align_max_joint_step_rad: 0.035
+      align_rate_hz: 30.0
+      align_joint_alpha: 0.20
+      align_max_joint_step_rad: 0.020
       align_max_joint_velocity_rad_s: 0.6
       pre_descent_align_tolerance_px: 25.0
-      pre_descent_align_timeout_s: 45.0
       pre_descent_align_stable_cycles: 2
-      final_align_tolerance_px: 3.0
+      final_align_tolerance_px: 2.0
       final_align_timeout_s: 20.0
       final_align_max_radius_m: 0.012
       final_align_stable_cycles: 3
-      retract_speed_mps: 0.03
       unscrew_probe_duration_s: 0.50
       unscrew_probe_force_increase_n: 0.05
       unscrew_min_spin_s: 1.0
@@ -315,10 +326,11 @@ disassembly_sequence:
       unscrew_release_force_ratio: 0.35
       unscrew_force_ideal_delta_n: 0.15
       unscrew_force_deadband_n: 0.04
-      unscrew_z_relief_speed_cap_mps: 0.035
+      unscrew_z_relief_gain_mps_per_n: 0.003
+      unscrew_z_relief_speed_cap_mps: 0.008
       unscrew_z_relief_max_m: 0.030
+      tool_release_settle_s: 0.50
       tool_grab_settle_s: 0.50
-      bin_release_height_m: 0.030
     notes: "Run on the lid-facing side after the PCB is gone and the HDD has been flipped."
 
   - step: 8
@@ -328,16 +340,22 @@ disassembly_sequence:
     depends_on_steps: [7]
     reveals: []
     parameters:
-      retract_height_m: 0.15
+      retract_height_m: 0.05
+      retract_velocity: 0.30
+      retract_step_m: 0.025
       gripper_close_force_n: 100.0
-      intermediate_x: 0.929872
-      intermediate_y: -0.633943
-      intermediate_z: 1.0977
+      use_pickup_drop_xyz: true
+      pickup_drop_z_offset_m: 0.04
+      intermediate_x: 0.92
+      intermediate_y: -0.36
+      intermediate_z: 0.99
+      drop_transfer_velocity: 0.40
+      drop_transfer_step_m: 0.050
       drop_min_reachable_y: -0.54
       drop_accept_x_tolerance_m: 0.05
       drop_accept_y_tolerance_m: 0.06
       drop_accept_z_tolerance_m: 0.08
-      wrist_rotation_velocity: 0.35
+      wrist_rotation_velocity: 0.15
     notes: "The lid is a non-delicate module, so clear it with flip_drop."
 
 metadata:

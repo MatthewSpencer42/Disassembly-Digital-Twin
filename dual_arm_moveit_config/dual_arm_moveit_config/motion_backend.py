@@ -610,6 +610,7 @@ class MotionBackend:
             f"[{self.backend_kind}] Raw joint interpolation: {len(controlled)} joints, "
             f"max_delta={max_delta:.3f}rad, steps={steps}, rate={rate_hz:.1f}Hz"
         )
+
         for i in range(1, steps + 1):
             ratio = i / float(steps)
             command = {
@@ -720,6 +721,23 @@ class MotionBackend:
         result = result_future.result()
         return bool(result and result.result.error_code.val == 1)
 
+    def _rescale_trajectory_velocity(self, trajectory, velocity_scaling: float) -> None:
+        """Scale a MoveIt trajectory's timing so peak velocity = velocity_scaling × joint_limits.
+
+        GetCartesianPath returns trajectories timed at full joint limits (scaling=1.0).
+        This rescales in-place: times ÷ scale, velocities × scale, accelerations × scale².
+        """
+        scale = max(0.01, min(1.0, float(velocity_scaling)))
+        if scale >= 0.99:
+            return
+        for pt in trajectory.joint_trajectory.points:
+            old_t = pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9
+            new_t = old_t / scale
+            pt.time_from_start.sec = int(new_t)
+            pt.time_from_start.nanosec = int((new_t - int(new_t)) * 1_000_000_000)
+            pt.velocities = [v * scale for v in pt.velocities]
+            pt.accelerations = [a * scale * scale for a in pt.accelerations]
+
     def _execute_robot_trajectory(self, trajectory) -> bool:
         pts = len(trajectory.joint_trajectory.points)
         joints = trajectory.joint_trajectory.joint_names
@@ -780,17 +798,18 @@ class MotionBackend:
         return success
 
     def _execute_trajectory_direct(self, trajectory) -> bool:
-        """Stream a pre-planned trajectory to /robot_joint_commands at the trajectory's own rate.
+        """Stream a pre-planned trajectory to the arm controller at the trajectory's own rate.
 
         Replaces the JTC execute_trajectory action for single-arm real-hardware moves.
-        The JTC path feeds TopicBasedSystem → real_hardware.py at 100Hz; Python timing
-        jitter in set_servo_angle_j TCP calls means commands arrive in bursts → jerky arm.
-        Here we replay each quintic waypoint at its intended wall-clock time (~25Hz for a
-        2s trajectory) so the Python bridge always has ample time per command.
+        The execute_trajectory path can feed TopicBasedSystem at 100Hz; Python SDK
+        timing jitter then makes commands arrive in bursts. Here we replay each
+        quintic waypoint at its intended wall-clock time as single-point controller
+        trajectories with lookahead, which is the same smoother path used by the
+        realtime EXOTica streaming helpers.
         """
         pts = trajectory.joint_trajectory.points
         names = list(trajectory.joint_trajectory.joint_names)
-        if not pts or not names:
+        if not pts or not names or self._joint_traj_stream_pub is None:
             return self._execute_robot_trajectory(trajectory)
 
         arm_names = [n for n in names if n.startswith(self.joint_prefixes)]
@@ -804,14 +823,20 @@ class MotionBackend:
             f"{len(arm_names)} joints, duration={dur_s:.2f}s"
         )
         t0 = time.time()
+        last_t = 0.0
         for pt in pts:
-            t_target = t0 + pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9
+            point_t = pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9
+            t_target = t0 + point_t
             wait_s = t_target - time.time()
             if wait_s > 0.001:
                 time.sleep(wait_s)
-            self._publish_raw_joint_command(
-                {arm_names[i]: float(pt.positions[arm_idx[i]]) for i in range(len(arm_names))}
+            interval = max(point_t - last_t, 0.02)
+            lookahead = max(0.14, min(0.50, interval * 1.8))
+            self._publish_direct_joint_command(
+                {arm_names[i]: float(pt.positions[arm_idx[i]]) for i in range(len(arm_names))},
+                lookahead_s=lookahead,
             )
+            last_t = point_t
 
         # Settle: keep sending the final target until the arm arrives.
         target = {arm_names[i]: float(pts[-1].positions[arm_idx[i]]) for i in range(len(arm_names))}
@@ -826,7 +851,7 @@ class MotionBackend:
                     f"[{self.backend_kind}] Direct trajectory settled (err={err:.4f}rad)"
                 )
                 return True
-            self._publish_raw_joint_command(target)
+            self._publish_direct_joint_command(target, lookahead_s=0.25)
             time.sleep(0.05)
 
         self.node.get_logger().warning(
@@ -1198,6 +1223,7 @@ class MotionBackend:
         if not result or result.fraction < 0.85:
             return False
 
+        self._rescale_trajectory_velocity(result.solution, velocity)
         goal = ExecuteTrajectory.Goal()
         goal.trajectory = result.solution
         if not self._execute_client.wait_for_server(timeout_sec=10.0):

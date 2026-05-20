@@ -6,6 +6,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import Pose
 import threading, json, math, time, os
+from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from disassembly_skill.device_config import DeviceConfig
 from disassembly_skill.motion_backend import MotionBackend
@@ -19,9 +20,28 @@ def write_hold_state(held):
     except Exception:
         pass
 
+def default_device_config_path():
+    env_path = os.environ.get("DISASSEMBLY_DEVICE_CONFIG")
+    if env_path:
+        return Path(env_path).expanduser()
+
+    installed_path = (
+        Path(get_package_share_directory('disassembly_skill'))
+        / 'config' / 'device_configs' / 'hdd.yaml'
+    )
+    source_candidates = [
+        Path.cwd() / 'src' / 'agentic_disassembly' / 'disassembly_skill' / 'config' / 'device_configs' / 'hdd.yaml',
+        Path.home() / 'workspace' / 'disassembly_ws' / 'src' / 'agentic_disassembly' / 'disassembly_skill' / 'config' / 'device_configs' / 'hdd.yaml',
+    ]
+    for candidate in source_candidates:
+        if candidate.exists():
+            return candidate
+    return installed_path
+
 class ObjectHoldSkill(Node):
     def __init__(self, device_cfg=None):
         super().__init__('object_hold_skill_node')
+        self.device_cfg = device_cfg
 
         self.uf850 = MotionBackend(self, "uf850_arm")
         self.gripper = MotionBackend(self, "rg6_gripper")
@@ -47,8 +67,8 @@ class ObjectHoldSkill(Node):
         self.CLOSE_DEG = 35.0
         self.GRIPPER_OPEN_FORCE_N = 40.0
         self.GRIPPER_CLOSE_FORCE_N = 100.0
-        self.APPROACH_VELOCITY = 0.4
-        self.HOVER_VELOCITY = 0.4
+        self.APPROACH_VELOCITY = 0.08
+        self.HOVER_VELOCITY = 0.08
         self.GRIP_VELOCITY = 0.15
         self.TORQUE_THRESHOLD = 3.0
         self.DESCENT_SPEED_MPS = 0.02
@@ -91,11 +111,29 @@ class ObjectHoldSkill(Node):
             'qw': cr * cp * cy + sr * sp * sy,
         }
 
-    def _apply_hold_config(self, cfg):
+    @staticmethod
+    def _norm_label(value):
+        return str(value or "").strip().lower()
+
+    def _select_hold_step(self, cfg, target_label=None):
         hold_steps = [s for s in cfg.disassembly_sequence if s.action == 'hold']
         if not hold_steps:
+            return None
+        target_norm = self._norm_label(target_label)
+        if target_norm:
+            for step in hold_steps:
+                if self._norm_label(step.target) == target_norm:
+                    return step
+            for step in hold_steps:
+                if target_norm in self._norm_label(step.label):
+                    return step
+        return hold_steps[0]
+
+    def _apply_hold_config(self, cfg, target_label=None, hold_step=None):
+        step = hold_step if hold_step is not None else self._select_hold_step(cfg, target_label)
+        if step is None:
             return
-        p = hold_steps[0].parameters
+        p = step.parameters
         self.STRATEGY = p.get('strategy', self.STRATEGY)
         self.TORQUE_THRESHOLD = p.get('torque_threshold_nm', self.TORQUE_THRESHOLD)
         self.DESCENT_SPEED_MPS = p.get('descent_speed_mps', self.DESCENT_SPEED_MPS)
@@ -136,6 +174,13 @@ class ObjectHoldSkill(Node):
         self.GRIP_VELOCITY = p.get('grip_velocity', self.GRIP_VELOCITY)
         self.CONTACT_RETRACT_M = p.get('contact_retract_m', self.CONTACT_RETRACT_M)
         self.CONTACT_RETRACT_VELOCITY = p.get('contact_retract_velocity', self.CONTACT_RETRACT_VELOCITY)
+        source = getattr(cfg, "source_path", None)
+        self.get_logger().info(
+            f"[hold] Config applied from {source}: step={step.step} target='{step.target}' "
+            f"offsets=({self.HOVER_X_OFFSET*1000:.1f}, {self.HOVER_Y_OFFSET*1000:.1f}, "
+            f"{self.HOVER_Z_OFFSET*1000:.1f})mm strategy={self.STRATEGY} "
+            f"hover_velocity={float(self.HOVER_VELOCITY):.2f}m/s"
+        )
 
     def _log_pose_diagnostics(self, target_data, world_xyz, hover_xyz, quaternion_dict):
         raw_xyz = target_data.get("xyz", [None, None, None])
@@ -218,19 +263,19 @@ class ObjectHoldSkill(Node):
         return math.atan2(math.sin(target - current), math.cos(target - current))
 
     def _move_to_hover_pose(self, hover_x, hover_y, hover_z, qd):
-        """Move to hold hover as one continuous EXOTica trajectory.
-
-        arm_teleop's realtime stream is smooth for small hand deltas, but it
-        publishes many short-horizon single-point commands. For this automated
-        ~0.5 m hover transfer that produced visible step/hold motion. The hold
-        hover should be a single retimed EXOTica trajectory instead.
-        """
-        velocity = min(max(float(self.HOVER_VELOCITY), 0.08), 0.45)
+        """Move to hold hover as one low-speed continuous EXOTica trajectory."""
+        velocity = min(max(float(self.HOVER_VELOCITY), 0.03), 0.60)
+        current = self._current_tcp_xyz()
+        self.uf850.stop_servo(timeout_sec=2.0)
+        distance_msg = ""
+        if current is not None:
+            sx, sy, sz = current
+            distance = math.sqrt((hover_x - sx) ** 2 + (hover_y - sy) ** 2 + (hover_z - sz) ** 2)
+            distance_msg = f" distance={distance*1000:.1f}mm"
         self.get_logger().info(
-            f"[hold] EXOTica continuous hover trajectory: "
+            f"[hold] EXOTica continuous hover trajectory:{distance_msg} "
             f"target=({hover_x:.3f},{hover_y:.3f},{hover_z:.3f}) velocity={velocity:.2f}"
         )
-        self.uf850.stop_servo(timeout_sec=2.0)
         ok = self.uf850.move_to_pose_exotica(
             hover_x,
             hover_y,
@@ -940,8 +985,10 @@ class ObjectHoldSkill(Node):
         self.publish_state("HOLDING")
         return True
 
-    def execute_hold(self, part_id, target_label, interactive=True):
+    def execute_hold(self, part_id, target_label, interactive=True, hold_step=None):
         print(f"\n[START] {target_label} Hold Sequence on ID: {part_id}")
+        if self.device_cfg is not None:
+            self._apply_hold_config(self.device_cfg, target_label=target_label, hold_step=hold_step)
         self.publish_hold_status(False)
         self.publish_state("MOVING")
         success = False
@@ -959,10 +1006,8 @@ class ObjectHoldSkill(Node):
 def main(args=None):
     rclpy.init(args=args)
     try:
-        cfg_path = os.path.join(
-            get_package_share_directory('disassembly_skill'),
-            'config', 'device_configs', 'hdd.yaml',
-        )
+        cfg_path = default_device_config_path()
+        print(f"[hold] Loading device config: {cfg_path}")
         device_cfg = DeviceConfig.load(cfg_path)
     except Exception as exc:
         print(f"[WARN] Could not load device config: {exc}. Using defaults.")
