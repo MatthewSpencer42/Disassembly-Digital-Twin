@@ -52,6 +52,8 @@ disassembly_sequence:
       - pcb
     parameters:
       strategy: lateral_clamp
+      # Labels accepted as valid hold targets (searched in order when primary label is absent)
+      holdable_labels: [case, lid]
       grip_width_mm: 101.6
       approach_axis: "+x"
       flip_approach: false
@@ -61,9 +63,9 @@ disassembly_sequence:
       gripper_close_force_n: 100.0
       torque_threshold_nm: 3.0
       use_tactile_descent: true
-      descent_speed_mps: 0.008
-      descent_rate_hz: 25.0
-      descent_step_m: 0.00035
+      descent_speed_mps: 0.030
+      descent_rate_hz: 50.0
+      descent_step_m: 0.00060
       hover_x_offset_m: 0.015
       hover_y_offset_m: 0.0
       hover_z_offset: 0.05
@@ -96,6 +98,10 @@ disassembly_sequence:
       align_only_debug: false
       descent_only_debug: false
       coarse_position_tolerance_m: 0.010
+      # Fixed coarse approach height (overrides depth-derived hover_z).
+      # Run with coarse_only_debug: true, read the "[DIAG] hover_z" line
+      # for each screw, then set this to a consistent safe value (e.g. 0.980).
+      coarse_hover_z_m: ~            # null = depth-derived (noisy); set once calibrated
       screw_camera_z_min_m: 0.45
       screw_camera_z_max_m: 0.65
       screw_world_z_min_m: 0.90
@@ -127,14 +133,18 @@ disassembly_sequence:
       align_joint_alpha: 0.20
       align_max_joint_step_rad: 0.020
       align_max_joint_velocity_rad_s: 0.6
-      pre_descent_align_tolerance_px: 25.0
-      pre_descent_align_stable_cycles: 2
-      final_align_tolerance_px: 2.0
+      pre_descent_align_tolerance_px: 65.0
+      pre_descent_align_timeout_s: 45.0
+      pre_descent_align_stable_cycles: 1
+      final_align_tolerance_px: 5.0
       final_align_timeout_s: 20.0
       final_align_max_radius_m: 0.012
-      final_align_stable_cycles: 3
+      final_align_stable_cycles: 1
+      final_align_xy_speed_mps: 0.006
+      final_align_min_speed_mps: 0.002
+      final_align_error_filter_alpha: 0.15
       unscrew_probe_duration_s: 0.50
-      unscrew_probe_force_increase_n: 0.05
+      unscrew_probe_force_increase_n: 0.15
       unscrew_min_spin_s: 1.0
       unscrew_max_spin_s: 4.0
       unscrew_release_force_ratio: 0.35
@@ -183,6 +193,7 @@ disassembly_sequence:
       drop_x: 0.92
       drop_y: -0.36
       drop_z: 0.99
+      skip_if_not_detected: true   # skip gracefully when PCB not visible (already removed / occluded)
     notes: "Pickup target and approach offsets are config-driven; current HDD sequence uses it for PCB extraction."
 
   - step: 4
@@ -193,6 +204,7 @@ disassembly_sequence:
     reveals: []
     parameters:
       strategy: lateral_clamp
+      holdable_labels: [case, lid]
       grip_width_mm: 101.6
       approach_axis: "+x"
       flip_approach: false
@@ -202,9 +214,9 @@ disassembly_sequence:
       gripper_close_force_n: 100.0
       torque_threshold_nm: 3.0
       use_tactile_descent: true
-      descent_speed_mps: 0.008
-      descent_rate_hz: 25.0
-      descent_step_m: 0.00035
+      descent_speed_mps: 0.030
+      descent_rate_hz: 50.0
+      descent_step_m: 0.00060
       hover_x_offset_m: 0.015
       hover_y_offset_m: 0.0
       hover_z_offset: 0.05
@@ -238,6 +250,7 @@ disassembly_sequence:
     reveals: []
     parameters:
       strategy: lateral_clamp
+      holdable_labels: [case, lid]
       grip_width_mm: 101.6
       approach_axis: "+x"
       flip_approach: false
@@ -247,9 +260,9 @@ disassembly_sequence:
       gripper_close_force_n: 100.0
       torque_threshold_nm: 3.0
       use_tactile_descent: true
-      descent_speed_mps: 0.008
-      descent_rate_hz: 25.0
-      descent_step_m: 0.00035
+      descent_speed_mps: 0.030
+      descent_rate_hz: 50.0
+      descent_step_m: 0.00060
       hover_x_offset_m: 0.015
       hover_y_offset_m: 0.0
       hover_z_offset: 0.05
@@ -282,6 +295,10 @@ disassembly_sequence:
       align_only_debug: false
       descent_only_debug: false
       coarse_position_tolerance_m: 0.010
+      # Fixed coarse approach height (overrides depth-derived hover_z).
+      # Run with coarse_only_debug: true, read the "[DIAG] hover_z" line
+      # for each screw, then set this to a consistent safe value (e.g. 0.980).
+      coarse_hover_z_m: ~            # null = depth-derived (noisy); set once calibrated
       screw_camera_z_min_m: 0.45
       screw_camera_z_max_m: 0.65
       screw_world_z_min_m: 0.90
@@ -313,14 +330,18 @@ disassembly_sequence:
       align_joint_alpha: 0.20
       align_max_joint_step_rad: 0.020
       align_max_joint_velocity_rad_s: 0.6
-      pre_descent_align_tolerance_px: 25.0
-      pre_descent_align_stable_cycles: 2
-      final_align_tolerance_px: 2.0
+      pre_descent_align_tolerance_px: 65.0
+      pre_descent_align_timeout_s: 45.0
+      pre_descent_align_stable_cycles: 1
+      final_align_tolerance_px: 5.0
       final_align_timeout_s: 20.0
       final_align_max_radius_m: 0.012
-      final_align_stable_cycles: 3
+      final_align_stable_cycles: 1
+      final_align_xy_speed_mps: 0.006
+      final_align_min_speed_mps: 0.002
+      final_align_error_filter_alpha: 0.15
       unscrew_probe_duration_s: 0.50
-      unscrew_probe_force_increase_n: 0.05
+      unscrew_probe_force_increase_n: 0.15
       unscrew_min_spin_s: 1.0
       unscrew_max_spin_s: 4.0
       unscrew_release_force_ratio: 0.35

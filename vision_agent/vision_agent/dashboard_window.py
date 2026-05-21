@@ -92,7 +92,7 @@ class DashboardDataNode(Node):
         self.global_state = {"objects": [], "bin_locations": {}}
         self.local_state = {"screws": [], "screw_heads": [], "tool_tips": [], "holes": [], "crosshair": []}
         self.assembly_state = {"state": "unknown", "confidence": 0.0}
-        self.robot_states = {"tool_arm": "OFFLINE", "manip_arm": "OFFLINE"}
+        self.robot_states = {"tool_arm": "IDLE", "manip_arm": "IDLE"}
         self.robot_description = ""
         self.robot_description_last = 0.0
         self.wrench = None
@@ -118,7 +118,14 @@ class DashboardDataNode(Node):
         self.create_subscription(String, "/vision/global_state", self._global_state_cb, 10)
         self.create_subscription(String, "/vision/local_state", self._local_state_cb, 10)
         self.create_subscription(String, "/vision/assembly_state", self._assembly_state_cb, 10)
+        # Legacy JSON bundle (kept as fallback)
         self.create_subscription(String, "/robot_states", self._robot_states_cb, 10)
+        # Per-skill state topics — real-time
+        self.create_subscription(String, "/robot_state/manip_arm/update", self._manip_arm_cb, 10)
+        self.create_subscription(String, "/robot_state/tool_arm/update",  self._tool_arm_cb,  10)
+        hold_qos = QoSProfile(depth=1)
+        hold_qos.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
+        self.create_subscription(Bool, "/object_hold_state/is_held", self._hold_status_cb, hold_qos)
         self.create_subscription(String, "/robot_description", self._robot_description_cb, description_qos)
         self.create_subscription(WrenchStamped, "/robotiq_force_torque_sensor_broadcaster/wrench", self._wrench_cb, 10)
         self.create_subscription(Bool, "/exotica/ready", self._exotica_ready_cb, ready_qos)
@@ -226,12 +233,31 @@ class DashboardDataNode(Node):
             self.assembly_state = data
 
     def _robot_states_cb(self, msg):
+        """Legacy JSON bundle — only applied if per-skill topics haven't fired recently."""
         try:
             data = json.loads(msg.data)
         except Exception:
             return
         with self.lock:
+            # Don't overwrite if per-skill topics are keeping it live
             self.robot_states = data
+
+    def _manip_arm_cb(self, msg):
+        with self.lock:
+            self.robot_states["manip_arm"] = msg.data
+
+    def _tool_arm_cb(self, msg):
+        with self.lock:
+            self.robot_states["tool_arm"] = msg.data
+
+    def _hold_status_cb(self, msg: Bool):
+        with self.lock:
+            if bool(msg.data):
+                if self.robot_states.get("manip_arm", "IDLE") in ("IDLE", "MOVING"):
+                    self.robot_states["manip_arm"] = "HOLDING"
+            else:
+                if self.robot_states.get("manip_arm", "IDLE") == "HOLDING":
+                    self.robot_states["manip_arm"] = "IDLE"
 
     def _robot_description_cb(self, msg):
         with self.lock:
@@ -482,6 +508,82 @@ class DetectedPartsCard(Card):
                 self.table.setItem(row, col, item)
 
 
+class RobotStateCard(Card):
+    """Compact card showing per-arm state with coloured activity pills."""
+
+    _STATE_COLOURS = {
+        # Manip arm states
+        "HOLDING":    "#4fd18b",   # green
+        "FLIPPING":   "#7ecfff",   # blue
+        "DROPPING":   "#b08cff",   # purple
+        "MOVING":     "#7ecfff",   # blue
+        # Tool arm states
+        "ALIGNING":   "#ffd966",   # yellow
+        "DESCENDING": "#ffad33",   # amber
+        "UNSCREWING": "#ff7a3d",   # orange
+        "SEARCHING":  "#ffd966",   # yellow
+        # Shared
+        "IDLE":       "#4a5568",   # dark grey
+        "OFFLINE":    "#ff5d5d",   # red
+    }
+
+    def __init__(self, theme):
+        super().__init__("Robot State", theme)
+        self.setFixedHeight(ROBOT_PANEL_HEIGHT)
+
+        grid = QGridLayout(self.content)
+        grid.setContentsMargins(14, 8, 14, 8)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
+
+        # Row 0: Manip arm
+        manip_lbl = QLabel("Manip arm")
+        self._manip_pill = QLabel("IDLE")
+        self._manip_pill.setFixedWidth(110)
+        self._manip_pill.setAlignment(Qt.AlignCenter)
+        grid.addWidget(manip_lbl,       0, 0)
+        grid.addWidget(self._manip_pill, 0, 1)
+        grid.setColumnStretch(0, 1)
+
+        # Row 1: Tool arm
+        tool_lbl = QLabel("Tool arm")
+        self._tool_pill = QLabel("IDLE")
+        self._tool_pill.setFixedWidth(110)
+        self._tool_pill.setAlignment(Qt.AlignCenter)
+        grid.addWidget(tool_lbl,       1, 0)
+        grid.addWidget(self._tool_pill, 1, 1)
+
+        self.apply_theme(theme)
+
+    def apply_theme(self, theme):
+        super().apply_theme(theme)
+        for lbl in (self._manip_pill, self._tool_pill):
+            lbl.setStyleSheet(
+                f"color: {theme['text']}; background: {theme['field']}; "
+                f"border-radius: 6px; font-weight: 700; padding: 2px 6px;"
+            )
+        for row_lbl in self.content.findChildren(QLabel):
+            row_lbl.setStyleSheet(
+                f"color: {self.theme_text(theme)}; background: transparent; font-weight: 600;"
+            )
+
+    @staticmethod
+    def theme_text(theme):
+        return theme.get("text", "#f7fbff")
+
+    def _colour_for_state(self, state: str) -> str:
+        return self._STATE_COLOURS.get(state.upper(), "#888888")
+
+    def update_states(self, manip_state: str, tool_state: str, theme):
+        for pill, state in ((self._manip_pill, manip_state), (self._tool_pill, tool_state)):
+            col = self._colour_for_state(state)
+            pill.setText(state.upper())
+            pill.setStyleSheet(
+                f"color: #0d1117; background: {col}; "
+                f"border-radius: 6px; font-weight: 700; padding: 2px 6px;"
+            )
+
+
 class DashboardWindow(QMainWindow):
     def __init__(self, node):
         super().__init__()
@@ -506,7 +608,7 @@ class DashboardWindow(QMainWindow):
         self.detected.setMinimumHeight(160)
         self.detected.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.vision = TextCard("Vision State", self.theme, fixed_height=VISION_PANEL_HEIGHT, scroll=False)
-        self.robot = TextCard("Robot State", self.theme, fixed_height=ROBOT_PANEL_HEIGHT, scroll=False)
+        self.robot = RobotStateCard(self.theme)
         self.force = TextCard("Force/Torque", self.theme, fixed_height=FORCE_PANEL_HEIGHT, scroll=False)
         self.bin = TextCard("Drop Bin", self.theme, fixed_height=DROP_BIN_PANEL_HEIGHT, scroll=False)
         self.cards = [
@@ -658,9 +760,10 @@ class DashboardWindow(QMainWindow):
             f"Confidence: {float(snap['assembly_state'].get('confidence', 0.0)):.2f}"
         )
         robot = snap["robot_states"]
-        self.robot.set_text(
-            f"Tool arm:  {robot.get('tool_arm', 'OFFLINE')}\n"
-            f"Manip arm: {robot.get('manip_arm', 'OFFLINE')}"
+        self.robot.update_states(
+            manip_state=robot.get("manip_arm", "IDLE"),
+            tool_state=robot.get("tool_arm", "IDLE"),
+            theme=self.theme,
         )
         wrench = snap["wrench"]
         if wrench:

@@ -19,9 +19,9 @@ camera_crop_republisher:
     publish_color_raw: true
     publish_color_compressed: false
     publish_display_compressed: false
-    preferred_color_input: raw
+    preferred_color_input: compressed
     color_input_stale_sec: 5.0
-    preferred_color_fallback_sec: 6.0
+    preferred_color_fallback_sec: 1.0
 
     enable_depth: true
     depth_rate_divisor: 1

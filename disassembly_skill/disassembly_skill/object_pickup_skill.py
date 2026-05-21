@@ -11,22 +11,6 @@ from ament_index_python.packages import get_package_share_directory
 from disassembly_skill.device_config import DeviceConfig
 from disassembly_skill.motion_backend import MotionBackend
 
-HOLD_STATE_FILE = '/tmp/disassembly_hold_state'
-
-def read_hold_state():
-    try:
-        with open(HOLD_STATE_FILE, 'r') as f:
-            return f.read().strip() == 'true'
-    except Exception:
-        return False
-
-def write_hold_state(held):
-    try:
-        with open(HOLD_STATE_FILE, 'w') as f:
-            f.write('true' if held else 'false')
-    except Exception:
-        pass
-
 def default_device_config_path():
     env_path = os.environ.get("DISASSEMBLY_DEVICE_CONFIG")
     if env_path:
@@ -87,8 +71,10 @@ class PickupSkill(Node):
         self.PRECONDITION_RETRACT_M = 0.10
         self.ACCEPT_MAX_DEPTH_WITHOUT_CONTACT = True
         self.DESCENT_ACCEPT_RATIO = 0.85
+        self.SKIP_IF_NOT_DETECTED = True   # skip gracefully when target not in vision snapshot
 
         self.UF_HOME_JOINTS = {'uf850_joint1': 0.0, 'uf850_joint2': 0.0, 'uf850_joint3': -1.57, 'uf850_joint4': 0.0, 'uf850_joint5': -1.57, 'uf850_joint6': 0.0}
+        self.XARM5_HOME_JOINTS = {'xarm5_joint1': 0.0, 'xarm5_joint2': 0.0, 'xarm5_joint3': -1.57, 'xarm5_joint4': 1.57, 'xarm5_joint5': 0.0}
         self.DROP_POSE = {'x': 0.92, 'y': -0.36, 'z': 0.99}
 
         if device_cfg is not None:
@@ -148,6 +134,7 @@ class PickupSkill(Node):
             p.get('accept_max_depth_without_contact', self.ACCEPT_MAX_DEPTH_WITHOUT_CONTACT)
         )
         self.DESCENT_ACCEPT_RATIO = p.get('descent_accept_ratio', self.DESCENT_ACCEPT_RATIO)
+        self.SKIP_IF_NOT_DETECTED = bool(p.get('skip_if_not_detected', self.SKIP_IF_NOT_DETECTED))
         self.GRIPPER_OPEN_MIN_WIDTH_MM = p.get(
             'gripper_open_min_width_mm',
             max(float(p.get('grip_width_mm', 80.0)) + 30.0, self.GRIPPER_OPEN_MIN_WIDTH_MM),
@@ -485,13 +472,41 @@ class PickupSkill(Node):
         # Ensure clean trajectory mode (previous skill may have left servo on)
         self.uf850.stop_servo()
 
+        # --- PRE-FLIGHT VISION CHECK (before any arm movement) ---
+        # Verify target is visible NOW — avoids releasing hold/homing for nothing.
+        print(f"🔎 Pre-flight vision check for '{target_label}'...")
+        with self.data_lock:
+            _pf_target = None
+            if target_id is not None:
+                _pf_target = next(
+                    (t for t in self.latest_targets if t.get('id') == target_id), None
+                )
+            if not _pf_target:
+                _pf_target = next(
+                    (t for t in self.latest_targets
+                     if self._norm_label(target_label) in self._norm_label(t.get('label', ''))),
+                    None,
+                )
+        if not _pf_target:
+            if self.SKIP_IF_NOT_DETECTED:
+                print(
+                    f"⚠️ [{target_label}] not visible in vision snapshot — "
+                    f"part may already be removed or occluded. Skipping pickup (no arm movement)."
+                )
+                self.publish_state("IDLE")
+                return True
+            else:
+                print(f"❌ [{target_label}] not found in vision snapshot before execution. Aborting.")
+                self.publish_state("IDLE")
+                return False
+        print(f"✅ Pre-flight check passed: '{target_label}' visible in vision (id={_pf_target.get('id')}).")
+
         # --- STEP 0: PRE-CONDITION ---
         if self.is_holding_object:
             print("📦 [PRE-CONDITION] Active Hold Detected. Releasing...")
             self.publish_state("IDLE")
             if not self._open_gripper_verified(): return False
             self.hold_status_pub.publish(Bool(data=False))
-            write_hold_state(False)
 
             if not self._retract_before_home():
                 return False
@@ -518,14 +533,33 @@ class PickupSkill(Node):
                         return False
                     self.wait_for_arm_settled()
 
+        # --- STEP 0c: xArm5 HOME CHECK (always, regardless of MOVE_XARM5_CLEARANCE) ---
+        curr_x5 = {n: p for n, p in self.xarm5.current_joint_positions.items() if n.startswith("xarm5_")}
+        if curr_x5:
+            max_diff_x5 = max(
+                abs(curr_x5.get(j, 0.0) - self.XARM5_HOME_JOINTS[j])
+                for j in self.XARM5_HOME_JOINTS
+            )
+            if max_diff_x5 > 0.20:  # ~11.5° tolerance
+                print(f"🏠 [PRE-CONDITION] xArm5 not at home (max_diff={math.degrees(max_diff_x5):.1f}°). Moving to home...")
+                if not self.xarm5.move_to_joint_positions(self.XARM5_HOME_JOINTS, velocity=0.2):
+                    print("⚠️ xArm5 home move failed — proceeding anyway (may cause collision).")
+                else:
+                    self.wait_for_arm_settled(self.xarm5)
+                    print("✅ xArm5 at home.")
+            else:
+                self.get_logger().info(f"[pickup] xArm5 already near home (max_diff={math.degrees(max_diff_x5):.1f}°).")
+        else:
+            self.get_logger().warning("[pickup] Could not read xArm5 joint positions for home check.")
+
         # --- STEP 1: CLEAR WORKSPACE ---
         if self.MOVE_XARM5_CLEARANCE:
-            print("🏠 Clearing xArm5 workspace...")
-            if not self.xarm5.move_to_joint_positions({'xarm5_joint1': 0.0, 'xarm5_joint2': 0.0, 'xarm5_joint3': -1.57, 'xarm5_joint4': 1.57, 'xarm5_joint5': 0.0}):
+            print("🏠 Clearing xArm5 workspace (explicit clearance move)...")
+            if not self.xarm5.move_to_joint_positions(self.XARM5_HOME_JOINTS):
                 return False
             self.wait_for_arm_settled(self.xarm5)
         else:
-            self.get_logger().info("[pickup] xArm5 clearance move disabled by config.")
+            self.get_logger().info("[pickup] xArm5 explicit clearance move disabled by config.")
 
         # --- STEP 2: COORDINATE TRANSFORM ---
         print(f"🔎 Using current live vision snapshot to find {target_label}...")
@@ -542,9 +576,18 @@ class PickupSkill(Node):
                 print(f"⚠️ ID {target_id} not present. Searching by label '{target_label}'...")
                 target = next((t for t in self.latest_targets if self._norm_label(target_label) in self._norm_label(t.get('label'))), None)
 
-        if not target: 
-            print(f"❌ [ERROR] {target_label} not found in current vision snapshot. Aborting.")
-            return False
+        if not target:
+            if self.SKIP_IF_NOT_DETECTED:
+                print(
+                    f"⚠️ [{target_label}] not found in vision snapshot — "
+                    f"part may already be removed or occluded. Skipping pickup gracefully."
+                )
+                self.publish_state("IDLE")
+                return True
+            else:
+                print(f"❌ [ERROR] {target_label} not found in current vision snapshot. Aborting.")
+                self.publish_state("IDLE")
+                return False
         
         print(f"🎯 Targeted {target.get('label')} at {target['xyz']}")
         raw_p = Pose()
@@ -638,7 +681,6 @@ class PickupSkill(Node):
         self.wait_for_gripper(self.CLOSE_DEG)
         self.publish_state("HOLDING")
         self.hold_status_pub.publish(Bool(data=True))
-        write_hold_state(True)
 
         print(f"⬆️ Final Retract {self.POST_GRASP_RETRACT_M*1000:.0f}mm...")
         if not self._verified_post_grasp_retract(): return False
@@ -659,7 +701,6 @@ class PickupSkill(Node):
         self.publish_state("IDLE")
         if not self._open_gripper_verified(): return False
         self.hold_status_pub.publish(Bool(data=False))
-        write_hold_state(False)
         
         if not self.uf850.move_to_joint_positions(self.UF_HOME_JOINTS, velocity=0.2): return False
         
@@ -680,10 +721,6 @@ def main(args=None):
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
     time.sleep(1.0)
-    # Check file-based hold state as fallback (survives process death)
-    if not node.is_holding_object and read_hold_state():
-        print("📦 Hold state detected from file (previous skill). Proceeding...")
-        node.is_holding_object = True
     try:
         configured_step = node._select_pickup_step(device_cfg) if device_cfg is not None else None
         configured_target = configured_step.target if configured_step is not None else None

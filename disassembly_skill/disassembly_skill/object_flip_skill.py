@@ -10,22 +10,6 @@ from ament_index_python.packages import get_package_share_directory
 from disassembly_skill.device_config import DeviceConfig
 from disassembly_skill.motion_backend import MotionBackend
 
-HOLD_STATE_FILE = '/tmp/disassembly_hold_state'
-
-def read_hold_state():
-    try:
-        with open(HOLD_STATE_FILE, 'r') as f:
-            return f.read().strip() == 'true'
-    except Exception:
-        return False
-
-def write_hold_state(held):
-    try:
-        with open(HOLD_STATE_FILE, 'w') as f:
-            f.write('true' if held else 'false')
-    except Exception:
-        pass
-
 class ObjectFlipSkill(Node):
     def __init__(self, device_cfg=None):
         super().__init__('object_flip_skill_node')
@@ -98,7 +82,6 @@ class ObjectFlipSkill(Node):
 
     def publish_hold_status(self, h):
         self.hold_status_pub.publish(Bool(data=h))
-        write_hold_state(h)
 
     def hold_status_callback(self, msg):
         self.is_holding_object = msg.data
@@ -421,10 +404,6 @@ def main(args=None):
     spin_thread.start()
     # Wait for TF buffer to populate before doing anything
     time.sleep(2.0)
-    # Check file-based hold state as fallback (survives process death)
-    if not node.is_holding_object and read_hold_state():
-        print("📦 Hold state detected from file (previous skill). Proceeding...")
-        node.is_holding_object = True
     try:
         if not node.is_holding_object:
             print("❌ No object held. Run object_hold_skill first.")

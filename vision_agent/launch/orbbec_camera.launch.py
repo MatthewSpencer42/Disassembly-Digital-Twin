@@ -31,13 +31,24 @@ def generate_launch_description():
                 "color_qos":    "default",
 
                 # Keep depth native. The global node already handles color/depth
-                # resolution differences, and avoiding SW alignment prevents the
-                # Orbbec driver from starving the 4K color stream.
+                # resolution differences. Keep the driver on its known Femto
+                # Bolt enum value; depth_registration=false prevents aligned
+                # depth publication.
                 "depth_registration":  "false",
                 "align_mode":          "SW",
                 "align_target_stream": "COLOR",
                 "depth_fps":           "15",
                 "depth_qos":           "default",
+
+                # The disassembly stack does not consume IR/IMU streams. Keeping
+                # them off makes Femto Bolt startup more reliable and avoids the
+                # depth engine retry path ("try to disable ir stream and try again").
+                "enable_ir":                     "false",
+                "enable_ir_auto_exposure":       "false",
+                "enable_accel":                  "false",
+                "enable_gyro":                   "false",
+                "enable_sync_output_accel_gyro": "false",
+                "enable_frame_sync":             "false",
 
                 "enable_point_cloud":         "false",
                 "enable_colored_point_cloud": "false",

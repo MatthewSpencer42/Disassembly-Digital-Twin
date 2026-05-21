@@ -10,22 +10,6 @@ from ament_index_python.packages import get_package_share_directory
 from disassembly_skill.device_config import DeviceConfig
 from disassembly_skill.motion_backend import MotionBackend
 
-HOLD_STATE_FILE = '/tmp/disassembly_hold_state'
-
-def read_hold_state():
-    try:
-        with open(HOLD_STATE_FILE, 'r') as f:
-            return f.read().strip() == 'true'
-    except Exception:
-        return False
-
-def write_hold_state(held):
-    try:
-        with open(HOLD_STATE_FILE, 'w') as f:
-            f.write('true' if held else 'false')
-    except Exception:
-        pass
-
 class FlipDropSkill(Node):
     def __init__(self, device_cfg=None):
         super().__init__('flip_drop_skill_node')
@@ -126,10 +110,23 @@ class FlipDropSkill(Node):
             "orientation unchanged."
         )
 
-    def publish_state(self, s): self.state_update_pub.publish(String(data=s))
+    def publish_state(self, s):
+        self.state_update_pub.publish(String(data=s))
+
+    def _publish_holding_settled(self):
+        self.is_holding_object = True
+        self.publish_state("HOLDING")
+        self.publish_hold_status(True)
+        # Repeat a few times so the runner/dashboard catches the transition
+        # even if the first message races with the final motion-settle callback.
+        for _ in range(3):
+            time.sleep(0.1)
+            self.publish_state("HOLDING")
+            self.publish_hold_status(True)
+
     def publish_hold_status(self, h):
+        self.is_holding_object = bool(h)
         self.hold_status_pub.publish(Bool(data=h))
-        write_hold_state(h)
     def hold_status_callback(self, msg):
         self.is_holding_object = msg.data
         if self.is_holding_object: self.hold_event.set()
@@ -636,7 +633,7 @@ class FlipDropSkill(Node):
 
         # 1. RETRACT
         print("🚀 STEP 1: Vertical planned retract...")
-        self.publish_state("FLIPPING")
+        self.publish_state("FLIP_DROPPING")
         retract_info = self._planned_retract_z(self.RETRACT_Z_HEIGHT)
         if retract_info is None:
             return False
@@ -689,10 +686,10 @@ class FlipDropSkill(Node):
         # 6. DESCEND BACK TO PRE-RETRACT HOLD HEIGHT
         if not self._return_to_start_height(sx, sy, sz, q_start):
             return False
+        self.wait_for_arm_settled(timeout=2.0)
 
         print("✅ [SUCCESS] Flip-Drop Complete. Chassis remains held.")
-        self.publish_state("HOLDING")
-        self.publish_hold_status(True)
+        self._publish_holding_settled()
         return True
 
 def main(args=None):
@@ -720,11 +717,6 @@ def main(args=None):
     # --- SINGLE RUN LOGIC ---
     try:
         print("🕒 Waiting for arm to hold object before starting...")
-        # Check file-based hold state as fallback (survives process death)
-        if not node.is_holding_object and read_hold_state():
-            print("📦 Hold state detected from file (previous skill). Proceeding...")
-            node.is_holding_object = True
-            node.hold_event.set()
 
         # Wait until the manager or a previous skill sets the HOLD status
         while rclpy.ok():

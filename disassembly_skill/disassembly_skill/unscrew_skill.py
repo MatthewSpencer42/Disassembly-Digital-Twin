@@ -24,7 +24,7 @@ class UnscrewSkill(Node):
             "COARSE_POSITION_TOLERANCE": 0.010,  # m, abort descent/search if hover TCP is off target
             "COARSE_PLANNER": "exotica",    # EXOTica IK with slide correction — accurate hover position
             "COARSE_X_OFFSET": -0.01,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
-            "COARSE_Y_OFFSET": -0.02,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
+            "COARSE_Y_OFFSET": 0.0,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
             "COARSE_ONLY_DEBUG": False,      # temporary: verify all screw hover poses before unscrewing
             "ALIGN_ONLY_DEBUG": True,        # current debug path: run XY align only, skip descent/extraction
             "DESCENT_ONLY_DEBUG": False,     # validate conical descent, then stop before extraction/bin
@@ -32,6 +32,7 @@ class UnscrewSkill(Node):
             "SCREW_CAMERA_Z_MAX": 0.65,
             "SCREW_WORLD_Z_MIN": 0.90,       # m, HDD screw surface sanity range in base_link
             "SCREW_WORLD_Z_MAX": 1.05,
+            "COARSE_HOVER_Z_OVERRIDE": None, # m — if set, overrides depth-derived hover_z for coarse approach
             "PRE_RETRACT": 0.0,             # disabled: bad xArm mode can turn this into lateral motion
             
             # Descent & Alignment
@@ -68,13 +69,18 @@ class UnscrewSkill(Node):
             "ALIGN_JOINT_ALPHA": 0.35,
             "ALIGN_MAX_JOINT_STEP_RAD": 0.035,
             "ALIGN_MAX_JOINT_VELOCITY_RAD_S": 0.6,
-            "PRE_DESCENT_ALIGN_TOLERANCE_PX": 25.0,
-            "PRE_DESCENT_ALIGN_TIMEOUT": 20.0,
-            "PRE_DESCENT_ALIGN_STABLE_CYCLES": 2,
+            # Hover alignment only needs to bring the screw into the conical
+            # descent capture window; the descent loop keeps correcting XY.
+            "PRE_DESCENT_ALIGN_TOLERANCE_PX": 65.0,
+            "PRE_DESCENT_ALIGN_TIMEOUT": 45.0,
+            "PRE_DESCENT_ALIGN_STABLE_CYCLES": 1,
             "FINAL_ALIGN_TOLERANCE_PX": 3.0,
             "FINAL_ALIGN_TIMEOUT": 20.0,
             "FINAL_ALIGN_MAX_RADIUS": 0.012,
-            "FINAL_ALIGN_STABLE_CYCLES": 3,
+            "FINAL_ALIGN_STABLE_CYCLES": 1,
+            "FINAL_ALIGN_XY_SPEED": 0.006,
+            "FINAL_ALIGN_MIN_SPEED": 0.002,
+            "FINAL_ALIGN_ERROR_ALPHA": 0.15,
             
             # Extraction
             "EXTRACTION_MAX_TIME": 20.0,    # s
@@ -85,7 +91,7 @@ class UnscrewSkill(Node):
             "RETRACT_SPEED": 0.06,          # m/s, safety lift after failed unscrew phases
             "POST_UNSCREW_RETRACT_SPEED": 0.06,  # m/s, closed-loop lift after screw grab
             "UNSCREW_PROBE_DURATION": 0.50,  # s, first short engagement test spin
-            "UNSCREW_PROBE_FORCE_INCREASE": 0.05,  # N, axial force change required to trust engagement
+            "UNSCREW_PROBE_FORCE_INCREASE": 0.15,  # N, axial force change required to trust engagement
             "UNSCREW_MIN_SPIN_TIME": 1.0,    # s, minimum continuous unscrew after probe
             "UNSCREW_MAX_SPIN_TIME": 4.0,    # s, hard cap before grabbing/retracting
             "UNSCREW_RELEASE_FORCE_RATIO": 0.35,  # stable drop below peak ratio indicates loosening
@@ -129,11 +135,22 @@ class UnscrewSkill(Node):
         self.data_lock = threading.Lock()
         self.latest_targets = []
         self.local_view = {}
-        self.cached_bin1_xyz = None  
+        self.cached_bin1_xyz = None
+        self._bin1_locked = False    # once set, bin1 is frozen for the session
         self.last_contact_fz_diff = 0.0
         self.tool_status = {}
-        
+
         self.get_logger().info("🚀 Refactored Unscrew Skill Active (Compliance & Safety Updated).")
+
+    # ------------------------------------------------------------------
+    # State helper — use this instead of calling state_pub directly.
+    # ------------------------------------------------------------------
+    def _pub_state(self, state: str):
+        """Publish tool-arm state to /robot_state/tool_arm/update."""
+        try:
+            self.state_pub.publish(String(data=state))
+        except Exception:
+            pass
 
     def _apply_unscrew_config(self, cfg):
         unscrew_steps = [s for s in cfg.disassembly_sequence if s.action == 'unscrew']
@@ -159,6 +176,7 @@ class UnscrewSkill(Node):
             'screw_camera_z_max_m': 'SCREW_CAMERA_Z_MAX',
             'screw_world_z_min_m': 'SCREW_WORLD_Z_MIN',
             'screw_world_z_max_m': 'SCREW_WORLD_Z_MAX',
+            'coarse_hover_z_m': 'COARSE_HOVER_Z_OVERRIDE',
             'pre_retract_m': 'PRE_RETRACT',
             'xy_speed_align_mps': 'XY_SPEED_ALIGN',
             'z_speed_descent_mps': 'Z_SPEED_DESCENT',
@@ -188,11 +206,15 @@ class UnscrewSkill(Node):
             'align_max_joint_step_rad': 'ALIGN_MAX_JOINT_STEP_RAD',
             'align_max_joint_velocity_rad_s': 'ALIGN_MAX_JOINT_VELOCITY_RAD_S',
             'pre_descent_align_tolerance_px': 'PRE_DESCENT_ALIGN_TOLERANCE_PX',
+            'pre_descent_align_timeout_s': 'PRE_DESCENT_ALIGN_TIMEOUT',
             'pre_descent_align_stable_cycles': 'PRE_DESCENT_ALIGN_STABLE_CYCLES',
             'final_align_tolerance_px': 'FINAL_ALIGN_TOLERANCE_PX',
             'final_align_timeout_s': 'FINAL_ALIGN_TIMEOUT',
             'final_align_max_radius_m': 'FINAL_ALIGN_MAX_RADIUS',
             'final_align_stable_cycles': 'FINAL_ALIGN_STABLE_CYCLES',
+            'final_align_xy_speed_mps': 'FINAL_ALIGN_XY_SPEED',
+            'final_align_min_speed_mps': 'FINAL_ALIGN_MIN_SPEED',
+            'final_align_error_filter_alpha': 'FINAL_ALIGN_ERROR_ALPHA',
             'engagement_depth_mm': 'ENGAGEMENT_DEPTH_MM',
             'unscrew_probe_duration_s': 'UNSCREW_PROBE_DURATION',
             'unscrew_probe_force_increase_n': 'UNSCREW_PROBE_FORCE_INCREASE',
@@ -237,7 +259,15 @@ class UnscrewSkill(Node):
             data = json.loads(raw_data)
             if "bin_1" in data and "xyz" in data["bin_1"]:
                 with self.data_lock:
-                    self.cached_bin1_xyz = data["bin_1"]["xyz"]
+                    if not self._bin1_locked:
+                        self.cached_bin1_xyz = data["bin_1"]["xyz"]
+                        self._bin1_locked = True
+                        self.get_logger().info(
+                            f"[BIN] Bin-1 coordinates locked at startup: "
+                            f"({self.cached_bin1_xyz[0]:.4f}, "
+                            f"{self.cached_bin1_xyz[1]:.4f}, "
+                            f"{self.cached_bin1_xyz[2]:.4f})"
+                        )
         except Exception: pass
 
     def tool_status_callback(self, msg):
@@ -956,6 +986,11 @@ class UnscrewSkill(Node):
         timeout_s: float = None,
         max_radius_m: float = None,
         stable_cycles: int = None,
+        max_xy_mps: float = None,
+        min_xy_mps: float = None,
+        error_alpha: float = None,
+        screw_head_only: bool = False,
+        enable_spiral: bool = None,
     ):
         """Fine XY alignment from the local tool camera only.
 
@@ -988,11 +1023,11 @@ class UnscrewSkill(Node):
 
         rate_hz = max(float(self.CONFIG["ALIGN_RATE_HZ"]), 1.0)
         dt = 1.0 / rate_hz
-        max_xy = float(self.CONFIG["XY_SPEED_ALIGN"])
-        min_xy = min(float(self.CONFIG["ALIGN_MIN_SPEED"]), max_xy)
+        max_xy = float(max_xy_mps if max_xy_mps is not None else self.CONFIG["XY_SPEED_ALIGN"])
+        min_xy = min(float(min_xy_mps if min_xy_mps is not None else self.CONFIG["ALIGN_MIN_SPEED"]), max_xy)
         full_spd_err = max(float(self.CONFIG["ALIGN_FULL_SPEED_ERROR_PX"]), 1.0)
         tol_px = float(tolerance_px if tolerance_px is not None else self.CONFIG["ALIGN_TOLERANCE_PX"])
-        alpha_xy = max(0.05, min(1.0, float(self.CONFIG["ALIGN_ERROR_FILTER_ALPHA"])))
+        alpha_xy = max(0.05, min(1.0, float(error_alpha if error_alpha is not None else self.CONFIG["ALIGN_ERROR_FILTER_ALPHA"])))
         align_stable = int(stable_cycles if stable_cycles is not None else self.CONFIG["ALIGN_STABLE_CYCLES"])
         align_timeout = (
             float(timeout_s)
@@ -1003,7 +1038,7 @@ class UnscrewSkill(Node):
         verify_tol = float(self.CONFIG["ALIGN_VERIFY_TOLERANCE"])
         z_lock_gain = float(self.CONFIG["ALIGN_Z_LOCK_GAIN"])
         z_lock_speed = float(self.CONFIG["ALIGN_Z_LOCK_SPEED"])
-        enable_spiral_search = bool(self.CONFIG.get("ENABLE_SPIRAL_SEARCH", True))
+        enable_spiral_search = bool(enable_spiral if enable_spiral is not None else self.CONFIG.get("ENABLE_SPIRAL_SEARCH", True))
         spiral_speed = max(0.0005, min(float(self.CONFIG["SPIRAL_SPEED"]), max_xy))
         spiral_gap_mm = float(self.CONFIG["SPIRAL_GAP_MM"])
         spiral_start_mm = float(self.CONFIG["SPIRAL_START_DIST_MM"])
@@ -1067,6 +1102,8 @@ class UnscrewSkill(Node):
                 det = _choose_detection(heads, crosshair, preferred)
                 if det is not None:
                     return "screw_head", det, crosshair, lv
+            if screw_head_only:
+                return None, None, crosshair, lv
             if screws:
                 preferred = tracked_center if tracked_label == "screw" else None
                 det = _choose_detection(screws, crosshair, preferred)
@@ -2116,6 +2153,14 @@ class UnscrewSkill(Node):
             )
         return False
 
+    def _reset_tool_for_unscrew_start(self):
+        """Stop screwdriver motor and open screw gripper before any unscrew motion."""
+        print("[TOOL] Startup reset: stopping screwdriver (cmd=0), opening screw gripper (cmd=3).")
+        self.tool_pub.publish(Int8(data=0))
+        time.sleep(0.10)
+        self.tool_pub.publish(Int8(data=3))
+        time.sleep(max(float(self.CONFIG["TOOL_RELEASE_SETTLE"]), 0.1))
+
     def _run_unscrew_probe(self, baseline_fz: float) -> tuple[bool, float]:
         probe_duration = max(float(self.CONFIG["UNSCREW_PROBE_DURATION"]), 0.05)
         threshold = max(float(self.CONFIG["UNSCREW_PROBE_FORCE_INCREASE"]), 0.01)
@@ -2277,15 +2322,12 @@ class UnscrewSkill(Node):
         baseline_fz = self._sample_fz_average(0.15)
         engaged, peak_delta = self._run_unscrew_probe(baseline_fz)
         if not engaged:
-            if self.last_contact_fz_diff >= float(self.CONFIG["FORCE_THRESHOLD"]) * 0.8:
-                print(
-                    "[UNSCREW] Probe force delta was low, but contact force was already "
-                    f"confirmed ({self.last_contact_fz_diff:.2f}N). Continuing unscrew."
-                )
-            else:
-                print("[UNSCREW] Probe did not show axial force increase. Keeping tool stopped.")
-                self.tool_pub.publish(Int8(data=0))
-                return False, True  # retryable: no force spike
+            print(
+                "[UNSCREW] Probe did not show enough axial force increase. "
+                "Keeping tool stopped and retrying alignment/descent."
+            )
+            self.tool_pub.publish(Int8(data=0))
+            return False, True  # retryable: no force spike
 
         if not self._continue_unscrew_until_released(baseline_fz, peak_delta):
             self.tool_pub.publish(Int8(data=0))
@@ -2313,6 +2355,7 @@ class UnscrewSkill(Node):
     # =========================================================================
     def execute_unscrew_command(self, target_id, target_label, interactive=True, target_data_override=None):
         print(f"\n🛠️ [START] Unscrew Sequence on ID: {target_id} ({target_label})")
+        self._reset_tool_for_unscrew_start()
         
         # Verify Bin 1 location
         with self.data_lock: bin1_raw = copy.deepcopy(self.cached_bin1_xyz)
@@ -2386,14 +2429,21 @@ class UnscrewSkill(Node):
         ty = ty_raw + float(self.CONFIG["COARSE_Y_OFFSET"])
         tz_screw = world_pose.pose.position.z
         dist_base = math.hypot(base_pose.pose.position.x, base_pose.pose.position.y)
-        hover_z = tz_screw + self.CONFIG["HOVER_DISTANCE"]
+        _hover_z_override = self.CONFIG.get("COARSE_HOVER_Z_OVERRIDE")
+        if _hover_z_override is not None:
+            hover_z = float(_hover_z_override)
+        else:
+            hover_z = tz_screw + self.CONFIG["HOVER_DISTANCE"]
 
         print(f"[DIAG] Screw in base_link raw: ({tx_raw:.4f}, {ty_raw:.4f}, {tz_screw:.4f})")
         print(
             f"[DIAG] Coarse XY offset: dx={self.CONFIG['COARSE_X_OFFSET']*1000:.1f}mm "
             f"dy={self.CONFIG['COARSE_Y_OFFSET']*1000:.1f}mm -> target=({tx:.4f}, {ty:.4f})"
         )
-        print(f"[DIAG] hover_z = {tz_screw:.4f} + {self.CONFIG['HOVER_DISTANCE']:.3f} = {hover_z:.4f}")
+        if _hover_z_override is not None:
+            print(f"[DIAG] hover_z = {hover_z:.4f} (fixed override from coarse_hover_z_m)")
+        else:
+            print(f"[DIAG] hover_z = {tz_screw:.4f} + {self.CONFIG['HOVER_DISTANCE']:.3f} = {hover_z:.4f}")
         print(f"[DIAG] xarm5 base dist: {dist_base:.3f}m (limit {self.CONFIG['REACH_LIMIT']:.3f}m)")
 
         if not (self.CONFIG["SCREW_WORLD_Z_MIN"] <= tz_screw <= self.CONFIG["SCREW_WORLD_Z_MAX"]):
@@ -2431,19 +2481,26 @@ class UnscrewSkill(Node):
         else:
             print("[DIAG] Pre-retract disabled; moving directly to verified screw hover.")
 
+        self._pub_state("MOVING")
         if not self._approach_verified_hover(tx, ty, hover_z):
+            self._pub_state("IDLE")
             return False
 
         if bool(self.CONFIG.get("COARSE_ONLY_DEBUG", False)):
             print("[DEBUG] Coarse-only mode active: verified hover reached; skipping descent, visual servo, tool spin, extraction, and bin drop.")
+            self._pub_state("IDLE")
             return True
 
         if bool(self.CONFIG.get("ALIGN_ONLY_DEBUG", False)):
             print("[DEBUG] Align-only mode active: running XY search/align with Z locked; skipping descent, tool spin, extraction, and bin drop.")
-            return self.perform_xy_align_search_only()
+            self._pub_state("ALIGNING")
+            result = self.perform_xy_align_search_only()
+            self._pub_state("IDLE")
+            return result
 
         # Phase 1: Servo XY align (Z locked at hover)
         print("\n[PHASE 1] Servo XY alignment at hover...")
+        self._pub_state("ALIGNING")
         if not self._perform_xy_align_search_only_exotica_legacy(
             tolerance_px=self.CONFIG["PRE_DESCENT_ALIGN_TOLERANCE_PX"],
             timeout_s=self.CONFIG["PRE_DESCENT_ALIGN_TIMEOUT"],
@@ -2451,50 +2508,39 @@ class UnscrewSkill(Node):
         ):
             print("⚠️ XY alignment failed.")
             self._post_unscrew_style_retract("[RETRACT] XY-align failure lift")
+            self._pub_state("IDLE")
             return self._finish_failed_run_at_bin(bin1_raw)
 
         if interactive: input("👉 GATE 2: Start conical descent [ENTER]")
 
         # Phase 2: Servo conical descent until FT contact or screw depth
         print("\n[PHASE 2] Servo conical descent to contact...")
+        self._pub_state("DESCENDING")
         if not self.perform_exotica_descent(hover_z=hover_z, screw_z=tz_screw):
             print("⚠️ Descent failed or timed out. Lifting to safety.")
             self._post_unscrew_style_retract("[RETRACT] Descent failure lift")
+            self._pub_state("IDLE")
             return self._finish_failed_run_at_bin(bin1_raw)
 
         if bool(self.CONFIG.get("DESCENT_ONLY_DEBUG", False)):
-            print("[DEBUG] Descent-only mode active: running final XY align after contact/depth stop; skipping extraction and bin drop.")
-            final_ok = self.perform_xy_align_search_only()
-            if not final_ok:
-                print("⚠️ Final XY alignment failed after descent. Lifting to safety.")
-                self._post_unscrew_style_retract("[RETRACT] Final-align failure lift")
-                return self._finish_failed_run_at_bin(bin1_raw)
-            print("[DEBUG] Descent-only validation complete after final XY align.")
+            print("[DEBUG] Descent-only validation complete after contact/depth stop.")
+            self._pub_state("IDLE")
             return True
 
         time.sleep(0.3)
 
-        # Phase 3: Final Servo XY settle at contact Z. Unscrew is not started
-        # until this strict local-camera alignment completes.
-        print("\n[PHASE 3] Final XY alignment at contact...")
-        if not self.perform_xy_align_search_only(
-            tolerance_px=self.CONFIG["FINAL_ALIGN_TOLERANCE_PX"],
-            timeout_s=self.CONFIG["FINAL_ALIGN_TIMEOUT"],
-            max_radius_m=self.CONFIG["FINAL_ALIGN_MAX_RADIUS"],
-            stable_cycles=self.CONFIG["FINAL_ALIGN_STABLE_CYCLES"],
-        ):
-            print("⚠️ Final XY alignment failed.")
-            self._post_unscrew_style_retract("[RETRACT] Final-align failure lift")
-            return self._finish_failed_run_at_bin(bin1_raw)
+        print("\n[PHASE 3] Surface contact confirmed — skipping final XY align.")
 
         if interactive: input("👉 GATE 3: Start compliant extraction [ENTER]")
 
         # Phase 4: Compliant extraction with up to 3 retries on no-force-spike
+        self._pub_state("UNSCREWING")
         MAX_PROBE_RETRIES = 3
         for probe_attempt in range(MAX_PROBE_RETRIES):
             ok, no_force_spike = self.perform_compliant_extraction()
             if ok:
                 print("🎉 Screw Extracted.")
+                self._pub_state("DROPPING")
                 return self._navigate_to_bin(bin1_raw)
 
             if not no_force_spike or probe_attempt >= MAX_PROBE_RETRIES - 1:
@@ -2509,12 +2555,17 @@ class UnscrewSkill(Node):
                 print("⚠️ Retry retract failed. Aborting.")
                 break
 
-            # Re-run final XY align from the slightly lifted position
+            # Re-align only after lifting off the surface, then descend again.
             if not self.perform_xy_align_search_only(
                 tolerance_px=self.CONFIG["FINAL_ALIGN_TOLERANCE_PX"],
                 timeout_s=self.CONFIG["FINAL_ALIGN_TIMEOUT"],
                 max_radius_m=self.CONFIG["FINAL_ALIGN_MAX_RADIUS"],
                 stable_cycles=self.CONFIG["FINAL_ALIGN_STABLE_CYCLES"],
+                max_xy_mps=self.CONFIG["FINAL_ALIGN_XY_SPEED"],
+                min_xy_mps=self.CONFIG["FINAL_ALIGN_MIN_SPEED"],
+                error_alpha=self.CONFIG["FINAL_ALIGN_ERROR_ALPHA"],
+                screw_head_only=False,
+                enable_spiral=False,
             ):
                 print("⚠️ Retry XY alignment failed. Aborting.")
                 break
@@ -2525,19 +2576,11 @@ class UnscrewSkill(Node):
                 break
 
             time.sleep(0.3)
-
-            # Re-run final XY settle after descent
-            if not self.perform_xy_align_search_only(
-                tolerance_px=self.CONFIG["FINAL_ALIGN_TOLERANCE_PX"],
-                timeout_s=self.CONFIG["FINAL_ALIGN_TIMEOUT"],
-                max_radius_m=self.CONFIG["FINAL_ALIGN_MAX_RADIUS"],
-                stable_cycles=self.CONFIG["FINAL_ALIGN_STABLE_CYCLES"],
-            ):
-                print("⚠️ Retry post-descent XY alignment failed. Aborting.")
-                break
+            print("[RETRY] Surface contact confirmed — skipping post-contact XY align.")
 
         print("⚠️ Extraction failed. Lifting to safety and stopping this run.")
         self._post_unscrew_style_retract("[RETRACT] Extraction failure lift")
+        self._pub_state("IDLE")
         return self._finish_failed_run_at_bin(bin1_raw)
 
     def _finish_failed_run_at_bin(self, bin1_raw) -> bool:
@@ -2586,8 +2629,10 @@ class UnscrewSkill(Node):
         if ok:
             self.wait_for_arm_settled(timeout=3.0)
             print("[HOME] xArm5 home reached. Waiting; not selecting another screw.")
+            self._pub_state("IDLE")
             return True
         print("[HOME] Failed to reach xArm5 home pose.")
+        self._pub_state("IDLE")
         return False
 
 def main(args=None):

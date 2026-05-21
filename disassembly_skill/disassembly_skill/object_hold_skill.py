@@ -11,15 +11,6 @@ from ament_index_python.packages import get_package_share_directory
 from disassembly_skill.device_config import DeviceConfig
 from disassembly_skill.motion_backend import MotionBackend
 
-HOLD_STATE_FILE = '/tmp/disassembly_hold_state'
-
-def write_hold_state(held):
-    try:
-        with open(HOLD_STATE_FILE, 'w') as f:
-            f.write('true' if held else 'false')
-    except Exception:
-        pass
-
 def default_device_config_path():
     env_path = os.environ.get("DISASSEMBLY_DEVICE_CONFIG")
     if env_path:
@@ -55,6 +46,15 @@ class ObjectHoldSkill(Node):
         self.hold_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.hold_status_pub = self.create_publisher(Bool, '/object_hold_state/is_held', self.hold_qos)
         self.state_update_pub = self.create_publisher(String, '/robot_state/manip_arm/update', 10)
+
+        # Track whether we (or any other skill) currently consider the object held.
+        # Subscription uses transient-local so we pick up the last published value on connect.
+        self.is_holding_object = False
+        self.create_subscription(Bool, '/object_hold_state/is_held', self._hold_status_cb, self.hold_qos)
+
+        # Labels searched in vision when the primary target label is not found.
+        # Overridden per step via holdable_labels in the device config.
+        self.HOLDABLE_LABELS = ["case", "chassis", "device", "hdd_holder", "holder", "lid"]
 
         # Configuration
         self.CAMERA_FRAME = 'camera_color_optical_frame'
@@ -115,6 +115,32 @@ class ObjectHoldSkill(Node):
     def _norm_label(value):
         return str(value or "").strip().lower()
 
+    # ── Hold-state helpers ────────────────────────────────────────────────────
+
+    def _hold_status_cb(self, msg: Bool):
+        """Receive hold state published by this node or any other skill (e.g. pickup)."""
+        self.is_holding_object = bool(msg.data)
+
+    def _gripper_has_object(self) -> bool:
+        """Return True if the RG6 bridge reports object_detected."""
+        try:
+            return bool(self.gripper.current_gripper_state.get("object_detected", False))
+        except Exception:
+            return False
+
+    def _get_target_by_any_label(self, labels):
+        """Search vision snapshot for the first object matching any label in *labels*."""
+        with self.data_lock:
+            for lbl in labels:
+                result = next(
+                    (t for t in self.latest_targets
+                     if lbl.lower() in t.get("label", "").lower()),
+                    None,
+                )
+                if result:
+                    return result
+        return None
+
     def _select_hold_step(self, cfg, target_label=None):
         hold_steps = [s for s in cfg.disassembly_sequence if s.action == 'hold']
         if not hold_steps:
@@ -174,12 +200,18 @@ class ObjectHoldSkill(Node):
         self.GRIP_VELOCITY = p.get('grip_velocity', self.GRIP_VELOCITY)
         self.CONTACT_RETRACT_M = p.get('contact_retract_m', self.CONTACT_RETRACT_M)
         self.CONTACT_RETRACT_VELOCITY = p.get('contact_retract_velocity', self.CONTACT_RETRACT_VELOCITY)
+        # Labels accepted as valid hold targets (used as vision-search fallback list)
+        holdable_labels = p.get('holdable_labels', None)
+        if holdable_labels:
+            self.HOLDABLE_LABELS = [str(l).lower() for l in holdable_labels]
         source = getattr(cfg, "source_path", None)
         self.get_logger().info(
             f"[hold] Config applied from {source}: step={step.step} target='{step.target}' "
             f"offsets=({self.HOVER_X_OFFSET*1000:.1f}, {self.HOVER_Y_OFFSET*1000:.1f}, "
             f"{self.HOVER_Z_OFFSET*1000:.1f})mm strategy={self.STRATEGY} "
-            f"hover_velocity={float(self.HOVER_VELOCITY):.2f}m/s"
+            f"hover_velocity={float(self.HOVER_VELOCITY):.2f}m/s "
+            f"descent={float(self.DESCENT_SPEED_MPS)*1000:.1f}mm/s@{float(self.DESCENT_RATE_HZ):.0f}Hz "
+            f"max_step={float(self.DESCENT_STEP_M)*1000:.2f}mm"
         )
 
     def _log_pose_diagnostics(self, target_data, world_xyz, hover_xyz, quaternion_dict):
@@ -382,11 +414,20 @@ class ObjectHoldSkill(Node):
         )
 
     def _retract_after_contact(self, distance_m=None):
+        """Lift the arm distance_m above the contact point using a single planned trajectory.
+
+        Reads the contact z once from TF, computes a fixed target_z = contact_z + distance_m,
+        and executes one EXOTica trajectory to that point.  No streaming — avoids stale-TF
+        jump artefacts that occurred with retract_z_exotica.
+        """
         distance_m = abs(float(self.CONTACT_RETRACT_M if distance_m is None else distance_m))
         if distance_m <= 0.0:
             return True
 
-        self.uf850.stop_servo(timeout_sec=2.0)
+        # Stop any ongoing servo stream before reading position.
+        self.uf850.stop_servo(timeout_sec=0.5)
+        time.sleep(0.15)  # let arm settle so TF is current
+
         try:
             start_tf = self.uf850.tf_buffer.lookup_transform(
                 self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
@@ -395,28 +436,24 @@ class ObjectHoldSkill(Node):
             sy = float(start_tf.transform.translation.y)
             sz = float(start_tf.transform.translation.z)
             q = start_tf.transform.rotation
-            qd = {"qx": q.x, "qy": q.y, "qz": q.z, "qw": q.w}
         except Exception as exc:
             self.get_logger().error(f"[hold] Contact retract TF lookup failed: {exc}")
             return False
 
         target_z = sz + distance_m
-        velocity = max(0.005, min(float(self.CONTACT_RETRACT_VELOCITY), 0.05))
+        velocity = max(0.010, min(float(self.CONTACT_RETRACT_VELOCITY), 0.05))
         self.get_logger().info(
-            f"[hold] Contact retract: {self.ROBOT_EE_LINK} z={sz:.4f} -> {target_z:.4f} "
-            f"(+{distance_m*1000:.1f}mm)"
+            f"[hold] Contact retract: {self.ROBOT_EE_LINK} z={sz:.4f} → {target_z:.4f} "
+            f"(+{distance_m*1000:.1f}mm) at {velocity*1000:.0f}mm/s"
         )
 
+        qd = {"qx": float(q.x), "qy": float(q.y), "qz": float(q.z), "qw": float(q.w)}
         ok = self.uf850.move_to_pose_exotica(sx, sy, target_z, qd, velocity=velocity)
         if not ok:
-            self.get_logger().warning("[hold] Planned contact retract failed; trying EXOTica streaming retract.")
-            ok = self.uf850.retract_z_exotica(distance_m=distance_m, speed_mps=velocity)
-        if not ok:
-            self.uf850._hold_current_arm_position()
-            self.get_logger().error("[hold] Contact retract command failed.")
+            self.get_logger().error("[hold] Contact retract planned move failed.")
             return False
 
-        self.wait_for_arm_settled(timeout=5.0)
+        self.wait_for_arm_settled(timeout=3.0)
         try:
             end_tf = self.uf850.tf_buffer.lookup_transform(
                 self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
@@ -426,26 +463,76 @@ class ObjectHoldSkill(Node):
             self.get_logger().warning(f"[hold] Could not verify contact retract TF: {exc}")
             return True
 
-        min_expected = max(0.002, min(distance_m * 0.6, distance_m - 0.001))
         self.get_logger().info(
-            f"[hold] Contact retract actual dz={actual_dz*1000:.1f}mm "
+            f"[hold] Contact retract done: actual dz={actual_dz*1000:.1f}mm "
             f"target={distance_m*1000:.1f}mm"
         )
-        if actual_dz < min_expected:
-            self.uf850._hold_current_arm_position()
-            self.get_logger().error(
-                f"[hold] Contact retract unsafe/incomplete: actual dz={actual_dz*1000:.1f}mm "
-                f"(minimum {min_expected*1000:.1f}mm)."
+        if actual_dz < 0.001:
+            self.get_logger().warning(
+                f"[hold] Contact retract moved {actual_dz*1000:.1f}mm — retrying live streamed Z lift."
             )
-            return False
+            retry_ok = self.uf850.retract_z_exotica(
+                distance_m=distance_m,
+                speed_mps=velocity,
+                rate_hz=50.0,
+            )
+            if not retry_ok:
+                self.get_logger().error("[hold] Contact retract streaming retry failed.")
+                return False
+            self.wait_for_arm_settled(timeout=3.0)
+            try:
+                retry_tf = self.uf850.tf_buffer.lookup_transform(
+                    self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+                )
+                retry_dz = float(retry_tf.transform.translation.z) - sz
+            except Exception as exc:
+                self.get_logger().warning(f"[hold] Could not verify contact retract retry TF: {exc}")
+                return True
+            self.get_logger().info(
+                f"[hold] Contact retract retry done: actual dz={retry_dz*1000:.1f}mm "
+                f"target={distance_m*1000:.1f}mm"
+            )
+            if retry_dz < max(0.002, distance_m * 0.6):
+                self.get_logger().error(
+                    f"[hold] Contact retract unsafe/incomplete after retry: "
+                    f"actual dz={retry_dz*1000:.1f}mm."
+                )
+                return False
         return True
+
+    def _tactile_descent_to_contact(self, q_dict=None, joint_index=4, target_x=None, target_y=None):
+        """Filtered EXOTica Z descent with effort stop.
+
+        This keeps the previous working tactile descent path, but uses the
+        smaller 0.35 mm increments and higher update rate from config. The
+        fully realtime target-function stream was too conservative on hardware
+        and held position at 0 mm travelled.
+        """
+        self.get_logger().info(
+            f"[hold] Filtered tactile descent: distance={self.DESCENT_DISTANCE_M*1000:.1f}mm "
+            f"step={self.DESCENT_STEP_M*1000:.2f}mm rate={self.DESCENT_RATE_HZ:.1f}Hz "
+            f"threshold={self.TORQUE_THRESHOLD:.2f}Nm"
+        )
+        return self.uf850.move_linear_z_with_effort_stop_exotica(
+            descent_distance_m=self.DESCENT_DISTANCE_M,
+            step_m=self.DESCENT_STEP_M,
+            threshold_nm=self.TORQUE_THRESHOLD,
+            joint_index=joint_index,
+            q_dict=q_dict,
+            rate_hz=self.DESCENT_RATE_HZ,
+            command_alpha=0.45,
+            max_joint_step_rad=0.012,
+            target_x=target_x,
+            target_y=target_y,
+            settling_cycles=1,   # 1 cycle = 20ms stop latency; noise << threshold so safe
+        )
 
     def publish_state(self, s):
         self.state_update_pub.publish(String(data=s))
 
     def publish_hold_status(self, h):
-        self.hold_status_pub.publish(Bool(data=h))
-        write_hold_state(h)
+        self.is_holding_object = bool(h)   # synchronous local update (no callback delay)
+        self.hold_status_pub.publish(Bool(data=bool(h)))
 
     def vision_callback(self, msg):
         try:
@@ -651,6 +738,18 @@ class ObjectHoldSkill(Node):
             print(f"⚠️ ID {part_id} not found. Searching by label '{target_label}'...")
             target_data = self._get_target_by_label(target_label)
 
+        # Second fallback: try any of the configured holdable_labels (e.g. 'lid' after a flip)
+        if not target_data or 'xyz' not in target_data:
+            fallback_labels = [l for l in self.HOLDABLE_LABELS if l != self._norm_label(target_label)]
+            if fallback_labels:
+                print(
+                    f"⚠️ '{target_label}' not found in vision. "
+                    f"Trying holdable_labels fallback: {fallback_labels}"
+                )
+                target_data = self._get_target_by_any_label(fallback_labels)
+                if target_data:
+                    print(f"[hold] Fallback target found: label='{target_data.get('label')}' id={target_data.get('id')}")
+
         if not target_data or 'xyz' not in target_data:
             print(f"ABORT: Vision data for '{target_label}' (ID {part_id}) is missing.")
             return False
@@ -828,29 +927,43 @@ class ObjectHoldSkill(Node):
             print(f"[DIAG] {self.ROBOT_EE_LINK} COMMANDED: ({hover_x:.4f}, {hover_y:.4f}, {hover_z:.4f})")
             print(f"[DIAG] TCP error: dx={ax-hover_x:.4f} dy={ay-hover_y:.4f} dz={az-hover_z:.4f} m | norm={hover_err:.4f} m")
             print(f"[DIAG] Object in base_link: ({wx:.4f}, {wy:.4f}, {wz:.4f})")
+            _MAX_HOVER_CORRECTIONS = 3
+            _HOVER_CORRECTION_VEL = 0.12   # m/s — fast enough to generate a real trajectory
+            _HOVER_ABORT_THRESHOLD = 0.055  # 55 mm — abort only if all corrections fail
             if hover_err > 0.018:
-                self.get_logger().warning(
-                    f"[lateral_clamp] Hover TCP error {hover_err*1000:.1f}mm; "
-                    "running one slow correction before tactile descent."
-                )
-                if not self.uf850.move_to_pose_exotica(
-                    hover_x, hover_y, hover_z, qd, velocity=min(self.GRIP_VELOCITY, 0.08)
-                ):
-                    print("[ERROR] Slow hover correction failed. Aborting hold.")
-                    return False
-                if not self.wait_for_arm_settled():
-                    print("[ERROR] Arm did not settle after slow hover correction.")
-                    return False
-                tf_check = self.uf850.tf_buffer.lookup_transform(
-                    self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
-                )
-                ax = tf_check.transform.translation.x
-                ay = tf_check.transform.translation.y
-                az = tf_check.transform.translation.z
-                hover_err = math.sqrt((ax - hover_x) ** 2 + (ay - hover_y) ** 2 + (az - hover_z) ** 2)
-                print(f"[DIAG] corrected {self.ROBOT_EE_LINK}: ({ax:.4f}, {ay:.4f}, {az:.4f}) | err={hover_err:.4f} m")
-                if hover_err > 0.030:
-                    print("[ERROR] Corrected hold hover is still more than 30mm from target. Aborting before descent.")
+                for _corr_i in range(_MAX_HOVER_CORRECTIONS):
+                    self.get_logger().warning(
+                        f"[lateral_clamp] Hover TCP error {hover_err*1000:.1f}mm; "
+                        f"correction attempt {_corr_i + 1}/{_MAX_HOVER_CORRECTIONS} "
+                        f"at {_HOVER_CORRECTION_VEL*1000:.0f}mm/s."
+                    )
+                    if not self.uf850.move_to_pose_exotica(
+                        hover_x, hover_y, hover_z, qd, velocity=_HOVER_CORRECTION_VEL
+                    ):
+                        print(f"[ERROR] Hover correction {_corr_i + 1} move failed. Aborting hold.")
+                        return False
+                    time.sleep(0.3)   # let TF propagate before checking
+                    if not self.wait_for_arm_settled():
+                        print("[ERROR] Arm did not settle after hover correction.")
+                        return False
+                    tf_check = self.uf850.tf_buffer.lookup_transform(
+                        self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+                    )
+                    ax = tf_check.transform.translation.x
+                    ay = tf_check.transform.translation.y
+                    az = tf_check.transform.translation.z
+                    hover_err = math.sqrt((ax - hover_x) ** 2 + (ay - hover_y) ** 2 + (az - hover_z) ** 2)
+                    print(
+                        f"[DIAG] corrected {self.ROBOT_EE_LINK} (attempt {_corr_i + 1}): "
+                        f"({ax:.4f}, {ay:.4f}, {az:.4f}) | err={hover_err*1000:.1f}mm"
+                    )
+                    if hover_err <= _HOVER_ABORT_THRESHOLD:
+                        break
+                if hover_err > _HOVER_ABORT_THRESHOLD:
+                    print(
+                        f"[ERROR] Hover still {hover_err*1000:.1f}mm from target after "
+                        f"{_MAX_HOVER_CORRECTIONS} corrections. Aborting before descent."
+                    )
                     return False
         except Exception as e:
             print(f"[DIAG] TCP TF lookup failed: {e}")
@@ -864,15 +977,9 @@ class ObjectHoldSkill(Node):
                     f"distance={self.DESCENT_DISTANCE_M*1000:.1f}mm "
                     f"step={self.DESCENT_STEP_M*1000:.2f}mm threshold={self.TORQUE_THRESHOLD:.2f}Nm"
                 )
-                if not self.uf850.move_linear_z_with_effort_stop_exotica(
-                    descent_distance_m=self.DESCENT_DISTANCE_M,
-                    step_m=self.DESCENT_STEP_M,
-                    threshold_nm=self.TORQUE_THRESHOLD,
-                    joint_index=4,
+                if not self._tactile_descent_to_contact(
                     q_dict=qd,
-                    rate_hz=self.DESCENT_RATE_HZ,
-                    command_alpha=0.35,
-                    max_joint_step_rad=0.015,
+                    joint_index=4,
                     target_x=hover_x,
                     target_y=hover_y,
                 ):
@@ -906,12 +1013,7 @@ class ObjectHoldSkill(Node):
             if interactive:
                 input(f"STEP 2: Tactile Z-descent toward {target_label} side? [Enter]")
             print(f"Starting tactile Z-descent to contact HDD side face (threshold={self.TORQUE_THRESHOLD}Nm)...")
-            if not self.uf850.move_linear_z_with_effort_stop_exotica(
-                descent_distance_m=self.DESCENT_DISTANCE_M,
-                step_m=self.DESCENT_STEP_M,
-                threshold_nm=self.TORQUE_THRESHOLD,
-                joint_index=4,
-            ):
+            if not self._tactile_descent_to_contact(joint_index=4):
                 print("[ERROR] Tactile Z-descent failed before side contact.")
                 return False
             print("[lateral_clamp] Contact confirmed — retracting 5mm before gripper close...")
@@ -962,13 +1064,8 @@ class ObjectHoldSkill(Node):
             print("[ERROR] Arm did not settle after hover move.")
             return False
 
-        print("Starting EXOTica stepped tactile Z-descent with effort spike stop...")
-        if not self.uf850.move_linear_z_with_effort_stop_exotica(
-            descent_distance_m=self.DESCENT_DISTANCE_M,
-            step_m=self.DESCENT_STEP_M,
-            threshold_nm=self.TORQUE_THRESHOLD,
-            joint_index=4,
-        ):
+        print("Starting filtered EXOTica tactile Z-descent with effort spike stop...")
+        if not self._tactile_descent_to_contact(q_dict=qd, joint_index=4):
             print("[ERROR] Tactile descent failed before contact.")
             return False
         if self.STRATEGY == "top_down_clamp":
@@ -989,6 +1086,19 @@ class ObjectHoldSkill(Node):
         print(f"\n[START] {target_label} Hold Sequence on ID: {part_id}")
         if self.device_cfg is not None:
             self._apply_hold_config(self.device_cfg, target_label=target_label, hold_step=hold_step)
+
+        # ── Idempotency: gripper already confirmed holding → treat as success ──
+        # Covers the case where the arm is still gripping after a flip or a
+        # previous hold step that was not released in between.
+        if self.is_holding_object and self._gripper_has_object():
+            print(
+                "[hold] Object already gripped (is_held=True + gripper object_detected). "
+                "Skipping full hold sequence — treating step as success."
+            )
+            self.publish_hold_status(True)
+            self.publish_state("HOLDING")
+            return True
+
         self.publish_hold_status(False)
         self.publish_state("MOVING")
         success = False
@@ -1054,8 +1164,6 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        # Persist final state to file so downstream skills can read it after this node dies
-        write_hold_state(is_held)
         rclpy.shutdown()
 
 if __name__ == '__main__':

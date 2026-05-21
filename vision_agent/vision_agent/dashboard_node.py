@@ -41,7 +41,7 @@ class DashboardNode(Node):
         self.global_state = {"objects": [], "bin_locations": {}}
         self.local_state = {"screws": [], "screw_heads": [], "tool_tips": [], "holes": [], "crosshair": []}
         self.assembly_state = {"state": "unknown", "confidence": 0.0}
-        self.robot_states = {"tool_arm": "OFFLINE", "manip_arm": "OFFLINE"}
+        self.robot_states = {"tool_arm": "IDLE", "manip_arm": "IDLE"}
         self.latest_zeroed_wrench = None
         self.wrench_offset = None
         self._fps_time = time.time()
@@ -77,7 +77,13 @@ class DashboardNode(Node):
         self.create_subscription(String, "/vision/global_state", self.cb_global_state, 10)
         self.create_subscription(String, "/vision/local_state", self.cb_local_state, 10)
         self.create_subscription(String, "/vision/assembly_state", self.cb_assembly_state, 10)
+        # Legacy JSON bundle — kept as a fallback (may not be published)
         self.create_subscription(String, "/robot_states", self.cb_robot_states, 10)
+        # Per-skill state topics — real-time updates from each skill
+        self.create_subscription(String, "/robot_state/manip_arm/update", self.cb_manip_arm_state, 10)
+        self.create_subscription(String, "/robot_state/tool_arm/update",  self.cb_tool_arm_state,  10)
+        hold_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(Bool, "/object_hold_state/is_held", self.cb_hold_status, hold_qos)
         ready_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(Bool, "/exotica/ready", self.cb_exotica_ready, ready_qos)
         self.create_subscription(
@@ -145,11 +151,34 @@ class DashboardNode(Node):
             self.get_logger().error(f"Assembly state parse error: {e}")
 
     def cb_robot_states(self, msg):
+        """Legacy JSON bundle subscriber — overwritten by per-skill callbacks if they publish."""
         try:
-            self.robot_states = json.loads(msg.data)
-            self._robot_state_time = time.time()
+            data = json.loads(msg.data)
+            # Only apply if per-skill topics haven't already updated these fields
+            now = time.time()
+            if now - self._robot_state_time > 2.0:
+                self.robot_states = data
+                self._robot_state_time = now
         except Exception as e:
             self.get_logger().error(f"Robot state parse error: {e}")
+
+    def cb_manip_arm_state(self, msg):
+        self.robot_states["manip_arm"] = msg.data
+        self._robot_state_time = time.time()
+
+    def cb_tool_arm_state(self, msg):
+        self.robot_states["tool_arm"] = msg.data
+        self._robot_state_time = time.time()
+
+    def cb_hold_status(self, msg):
+        if bool(msg.data):
+            # Reflect HOLDING in manip_arm state if it's currently IDLE/MOVING
+            if self.robot_states.get("manip_arm", "IDLE") in ("IDLE", "MOVING"):
+                self.robot_states["manip_arm"] = "HOLDING"
+        else:
+            if self.robot_states.get("manip_arm", "IDLE") == "HOLDING":
+                self.robot_states["manip_arm"] = "IDLE"
+        self._robot_state_time = time.time()
 
     def cb_exotica_ready(self, msg):
         self._exotica_ready = bool(msg.data)
@@ -345,8 +374,8 @@ class DashboardNode(Node):
         cv2.rectangle(panel, (x3 + 16, 92), (x4 - 16, 144), box_color, -1)
         draw_text(panel, state[:18], x3 + 28, 126, 0.68, (255, 255, 255), 2)
         draw_text(panel, f"Confidence {status.get('confidence', 0.0):.2f}", x3 + 16, 174, 0.52, (190, 202, 216), 1)
-        draw_text(panel, f"Tool arm {self.robot_states.get('tool_arm', 'OFFLINE')}", x3 + 16, 202, 0.52, (190, 202, 216), 1)
-        draw_text(panel, f"Manip arm {self.robot_states.get('manip_arm', 'OFFLINE')}", x3 + 16, 228, 0.52, (190, 202, 216), 1)
+        draw_text(panel, f"Tool arm {self.robot_states.get('tool_arm', 'IDLE')}", x3 + 16, 202, 0.52, (190, 202, 216), 1)
+        draw_text(panel, f"Manip arm {self.robot_states.get('manip_arm', 'IDLE')}", x3 + 16, 228, 0.52, (190, 202, 216), 1)
 
         card(x5, 60, x6, DASHBOARD_HEIGHT - 14, "FORCE/TORQUE")
         if wrench_data:

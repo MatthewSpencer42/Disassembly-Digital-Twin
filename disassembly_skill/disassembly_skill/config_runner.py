@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import sys
 import threading
 import time
@@ -36,7 +37,9 @@ from tkinter import font as tkfont
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg import String
+from rclpy.qos import QoSProfile, DurabilityPolicy
+from geometry_msgs.msg import Pose
+from std_msgs.msg import Bool, String
 
 from ament_index_python.packages import get_package_share_directory
 from disassembly_skill.device_config import DeviceConfig
@@ -109,6 +112,20 @@ class RunnerGUI:
             top, text="Initialising…", bg="#111", fg="#ffd966", font=sm
         )
         self._status_lbl.pack(side="right", padx=10)
+
+        # ── robot-state strip (below top bar) ────────────────────────────────
+        state_row = tk.Frame(self.root, bg="#181818", pady=3)
+        state_row.pack(fill="x")
+        tk.Label(state_row, text="  ARM STATE:", bg="#181818", fg="#555", font=sm).pack(side="left")
+        self._arm_state_lbl = tk.Label(
+            state_row, text="IDLE", bg="#181818", fg="#888", font=bold, width=10, anchor="w"
+        )
+        self._arm_state_lbl.pack(side="left", padx=(2, 16))
+        tk.Label(state_row, text="GRIP HOLD:", bg="#181818", fg="#555", font=sm).pack(side="left")
+        self._held_lbl = tk.Label(
+            state_row, text="—", bg="#181818", fg="#888", font=bold, width=8, anchor="w"
+        )
+        self._held_lbl.pack(side="left", padx=2)
 
         # ── body ─────────────────────────────────────────────────────────────
         body = tk.Frame(self.root, bg=_BG)
@@ -209,6 +226,23 @@ class RunnerGUI:
             self._status_lbl.configure(text=msg, fg=colour)
         self.root.after(0, _update)
 
+    def set_robot_state(self, arm_state: str, is_held: bool) -> None:
+        """Update the arm-state / grip-hold strip."""
+        _ARM_COLOURS = {
+            "HOLDING": "#66cc66",
+            "MOVING":  "#7ecfff",
+            "FLIPPING": "#ffb347",
+            "FLIP_DROPPING": "#ffb347",
+            "IDLE":    "#888888",
+        }
+        arm_col = _ARM_COLOURS.get(arm_state.upper(), "#888888")
+        held_txt = "✓ HELD" if is_held else "—"
+        held_col = "#66cc66" if is_held else "#555555"
+        def _update():
+            self._arm_state_lbl.configure(text=arm_state.upper(), fg=arm_col)
+            self._held_lbl.configure(text=held_txt, fg=held_col)
+        self.root.after(0, _update)
+
     def set_buttons_enabled(self, next_: bool, skip: bool) -> None:
         def _update():
             self._btn_next.configure(state="normal" if next_ else "disabled")
@@ -255,11 +289,26 @@ class ConfigRunner(Node):
         self._latest_vision: dict = {}
         self.create_subscription(String, "/vision/agent_state", self._vision_cb, 10)
 
+        # ── Robot state tracking (updates GUI strip) ──────────────────────────
+        self._arm_state = "IDLE"
+        self._is_held   = False
+        self.create_subscription(String, "/robot_state/manip_arm/update", self._arm_state_cb, 10)
+        _hold_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(Bool, "/object_hold_state/is_held", self._hold_status_cb, _hold_qos)
+
+        # Publishers so the runner can seed IDLE on both arm state topics at launch.
+        self._manip_state_pub = self.create_publisher(String, "/robot_state/manip_arm/update", 10)
+        self._tool_state_pub  = self.create_publisher(String, "/robot_state/tool_arm/update",  10)
+
         self.hold_skill      = ObjectHoldSkill(device_cfg=cfg)
         self.unscrew_skill   = UnscrewSkill(device_cfg=cfg)
         self.flip_skill      = ObjectFlipSkill(device_cfg=cfg)
         self.flip_drop_skill = FlipDropSkill(device_cfg=cfg)
         self.pickup_skill    = PickupSkill(device_cfg=cfg)
+
+        # One-shot timer: publish IDLE on both arm-state topics 0.5 s after
+        # startup so the dashboard never shows OFFLINE at system launch.
+        self._init_state_timer = self.create_timer(0.5, self._publish_initial_idle)
 
     # ── GUI callbacks (called from main thread via button press) ──────────────
 
@@ -275,6 +324,15 @@ class ConfigRunner(Node):
         self._stop_event.set()
         self._proceed_event.set()  # unblock any wait
 
+    # ── Startup IDLE ──────────────────────────────────────────────────────────
+
+    def _publish_initial_idle(self):
+        """Fire once 0.5 s after launch; seeds both arm-state topics so the
+        dashboard shows IDLE rather than OFFLINE on a fresh system start."""
+        self._manip_state_pub.publish(String(data="IDLE"))
+        self._tool_state_pub.publish(String(data="IDLE"))
+        self._init_state_timer.cancel()
+
     # ── Vision ────────────────────────────────────────────────────────────────
 
     def _vision_cb(self, msg: String):
@@ -283,6 +341,16 @@ class ConfigRunner(Node):
                 self._latest_vision = json.loads(msg.data)
         except Exception:
             pass
+
+    def _arm_state_cb(self, msg: String):
+        self._arm_state = msg.data
+        if self.gui:
+            self.gui.set_robot_state(self._arm_state, self._is_held)
+
+    def _hold_status_cb(self, msg: Bool):
+        self._is_held = bool(msg.data)
+        if self.gui:
+            self.gui.set_robot_state(self._arm_state, self._is_held)
 
     def _global_screws(self, zone_label: str | None = None) -> list:
         with self._vision_lock:
@@ -295,6 +363,104 @@ class ConfigRunner(Node):
         if exact:
             return exact
         return [o for o in screws if zone_label in o.get("label", "").lower()]
+
+    def _all_global_screws(self) -> list:
+        with self._vision_lock:
+            objs = self._latest_vision.get("global_view", {}).get("objects", [])
+        return [o for o in objs if "screw" in o.get("label", "").lower()]
+
+    def _global_objects(self) -> list:
+        with self._vision_lock:
+            return list(self._latest_vision.get("global_view", {}).get("objects", []) or [])
+
+    def _find_global_label(self, label: str):
+        label_norm = str(label or "").strip().lower()
+        if not label_norm:
+            return None
+        for obj in self._global_objects():
+            obj_label = str(obj.get("label", "")).strip().lower()
+            if obj_label == label_norm or label_norm in obj_label:
+                xyz = obj.get("xyz")
+                if isinstance(xyz, (list, tuple)) and len(xyz) >= 3 and all(v is not None for v in xyz[:3]):
+                    return obj
+        return None
+
+    def _wait_for_global_label(self, label: str, timeout_s: float = 3.0):
+        deadline = time.time() + max(float(timeout_s), 0.1)
+        while time.time() < deadline and not self._stop_event.is_set():
+            obj = self._find_global_label(label)
+            if obj is not None:
+                return obj
+            time.sleep(0.2)
+        return None
+
+    def _screw_key(self, obj) -> str:
+        obj_id = obj.get("id", None)
+        if obj_id is not None:
+            return f"id:{obj_id}"
+        xyz = obj.get("xyz") or []
+        if len(xyz) >= 3:
+            try:
+                return "xyz:" + ",".join(f"{float(v):.3f}" for v in xyz[:3])
+            except Exception:
+                pass
+        return f"anon:{id(obj)}"
+
+    def _collect_unscrew_targets(self, zone_label: str, expected_count: int, timeout_s: float = 5.0) -> list:
+        """Collect visible screw detections over several fresh frames.
+
+        Vision can briefly report only part of the screw set. For the runner,
+        use the union of visible screw IDs over a short window, preferring the
+        requested zone but allowing other visible screw labels when the zone
+        detector reports fewer than the config expects.
+        """
+        deadline = time.time() + max(float(timeout_s), 0.5)
+        by_key: dict[str, dict] = {}
+        best_zone_count = 0
+        while time.time() < deadline and not self._stop_event.is_set():
+            zone_screws = self._global_screws(zone_label)
+            all_screws = self._all_global_screws()
+            visible = list(zone_screws)
+            if len(zone_screws) < expected_count:
+                seen = {self._screw_key(o) for o in visible}
+                visible.extend(o for o in all_screws if self._screw_key(o) not in seen)
+            for obj in visible:
+                by_key[self._screw_key(obj)] = copy.deepcopy(obj)
+            best_zone_count = max(best_zone_count, len(zone_screws))
+            if len(by_key) >= expected_count:
+                break
+            time.sleep(0.25)
+        targets = list(by_key.values())
+        if targets:
+            self._log(
+                f"  Vision union: {len(targets)} visible screw candidate(s) "
+                f"({best_zone_count} matched zone '{zone_label}')",
+                "info",
+            )
+        return targets
+
+    def _screw_distance_from_xarm(self, obj) -> float:
+        xyz = obj.get("xyz")
+        if not isinstance(xyz, (list, tuple)) or len(xyz) < 3 or any(v is None for v in xyz[:3]):
+            return math.inf
+        try:
+            raw_pose = Pose()
+            raw_pose.position.x = float(xyz[0])
+            raw_pose.position.y = float(xyz[1])
+            raw_pose.position.z = float(xyz[2])
+            base_pose = self.unscrew_skill.moveit_backend.get_transformed_pose(
+                raw_pose,
+                self.unscrew_skill.CONFIG["CAMERA_FRAME"],
+                self.unscrew_skill.CONFIG["XARM_BASE_FRAME"],
+            )
+            if base_pose is not None:
+                return math.hypot(
+                    float(base_pose.pose.position.x),
+                    float(base_pose.pose.position.y),
+                )
+        except Exception:
+            pass
+        return math.inf
 
     # ── Gate ──────────────────────────────────────────────────────────────────
 
@@ -319,25 +485,107 @@ class ConfigRunner(Node):
         if self.gui:
             self.gui.log(msg, tag)
 
+    # ── Vision cache reset ────────────────────────────────────────────────────
+
+    def _reset_vision_caches(self, wait_s: float = 1.5):
+        """Clear stale vision snapshots in all skills, then wait for fresh data."""
+        self._log("  [vision] Resetting vision caches for next step…", "info")
+        with self._vision_lock:
+            self._latest_vision = {}
+        for skill in (self.pickup_skill, self.unscrew_skill):
+            lock = getattr(skill, "data_lock", None)
+            if lock is None:
+                continue
+            with lock:
+                if hasattr(skill, "latest_targets"):
+                    skill.latest_targets = []
+                if hasattr(skill, "local_view"):
+                    skill.local_view = {}
+        time.sleep(wait_s)   # let vision node publish a fresh snapshot
+
+    def _sync_hold_state(self, held: bool):
+        """Keep all in-process skills consistent with the runner hold state."""
+        held = bool(held)
+        self._is_held = held
+        for skill in (self.hold_skill, self.flip_skill, self.pickup_skill):
+            if hasattr(skill, "is_holding_object"):
+                skill.is_holding_object = held
+        if self.gui:
+            self.gui.set_robot_state(self._arm_state, self._is_held)
+        if held:
+            try:
+                self.hold_skill.publish_hold_status(True)
+            except Exception:
+                pass
+
+    def _held_now(self) -> bool:
+        if self._is_held:
+            self._sync_hold_state(True)
+            return True
+        return False
+
+    def _previous_hold_step(self, before_step_number: int):
+        holds = [
+            s for s in self.cfg.disassembly_sequence
+            if s.action.lower() == "hold" and s.step < before_step_number
+        ]
+        return holds[-1] if holds else None
+
+    def _ensure_hold_for_step(self, step, reason: str) -> bool:
+        if self._held_now():
+            self._is_held = True
+            self._log(f"  [state] Active hold detected — no re-hold needed before {reason}.", "info")
+            return True
+        hold_step = self._previous_hold_step(step.step)
+        if hold_step is None:
+            self._log(f"  [state] No active hold and no previous hold step before {reason}.", "warn")
+            return True
+        self._log(
+            f"  [state] No active hold before {reason}; re-running hold step {hold_step.step}.",
+            "warn",
+        )
+        ok = self._run_hold(hold_step)
+        if ok:
+            self._is_held = True
+            self._reset_vision_caches()
+        return ok
+
     # ── Step dispatch ─────────────────────────────────────────────────────────
 
     def _run_hold(self, step) -> bool:
+        if self._held_now() and not bool(step.parameters.get("force_rehold", False)):
+            self._is_held = True
+            self._log(
+                f"  [state] Active hold detected — step {step.step} hold already satisfied.",
+                "info",
+            )
+            return True
         return self.hold_skill.execute_hold(
             part_id=None, target_label=step.target, interactive=False, hold_step=step
         )
 
     def _run_unscrew(self, step) -> bool:
         """
-        Iterate over all detected screws in this zone (up to screw_count).
+        Iterate over all visible screws for this zone, nearest to xArm first.
         Holes confirmed by sniper are counted as already-removed and skipped.
-        If fewer screws than configured are found, warn and continue.
+        If a screw fails in interactive mode, Next retries that screw and Skip
+        advances to the next screw without aborting the whole zone.
         """
         screw_count = step.parameters.get("screw_count", 1)
         zone_name   = step.target
+        if not self._ensure_hold_for_step(step, "unscrew"):
+            return False
 
-        detected = self._global_screws(zone_name)
+        detected = self._collect_unscrew_targets(zone_name, screw_count)
+        detected = sorted(
+            detected,
+            key=lambda obj: (
+                self._screw_distance_from_xarm(obj),
+                int(obj.get("id", 999999)) if str(obj.get("id", "")).isdigit() else 999999,
+            ),
+        )
         self._log(
-            f"  Vision: {len(detected)} screw(s) in global view  "
+            f"  Vision: {len(detected)} screw candidate(s) visible  "
             f"(config expects {screw_count} in zone '{zone_name}')",
             "info",
         )
@@ -348,15 +596,40 @@ class ConfigRunner(Node):
                 "warn",
             )
 
-        targets_to_try = detected[:screw_count]
-        done, holes, failures = 0, 0, 0
+        targets_to_try = detected
+        if targets_to_try:
+            order = ", ".join(
+                f"ID={obj.get('id')}({self._screw_distance_from_xarm(obj):.3f}m)"
+                for obj in targets_to_try
+            )
+            self._log(f"  Nearest-first screw order: {order}", "info")
+        done, holes, failures, skipped = 0, 0, 0, 0
 
-        for i, obj in enumerate(targets_to_try):
+        i = 0
+        while i < len(targets_to_try):
+            obj = targets_to_try[i]
             if self._stop_event.is_set():
                 return False
             obj_id  = obj.get("id")
             obj_lbl = obj.get("label", "screw")
-            self._log(f"  Screw {i+1}/{len(targets_to_try)}  ID={obj_id}  label={obj_lbl}", "head")
+
+            # ── Per-screw gate: show ID and wait for user confirmation ────────
+            self._log(
+                f"  Screw {i+1}/{len(targets_to_try)}  ID={obj_id}  label={obj_lbl}",
+                "head",
+            )
+            if self.interactive:
+                proceed = self._gate(
+                    f"Screw {i+1}/{len(targets_to_try)}: ID={obj_id}  [{obj_lbl}]"
+                    "  —  Next to unscrew / Skip to skip / Stop to abort"
+                )
+                if self._stop_event.is_set():
+                    return False
+                if not proceed:   # user pressed Skip
+                    self._log(f"  Skipped screw ID={obj_id} by user.", "warn")
+                    skipped += 1
+                    i += 1
+                    continue
 
             result = self.unscrew_skill.execute_unscrew_command(
                 target_id=obj_id,
@@ -368,6 +641,7 @@ class ConfigRunner(Node):
             if result == "HOLE":
                 self._log(f"  → ID={obj_id}: sniper confirmed hole — skipping.", "warn")
                 holes += 1
+                i += 1
             elif result:
                 if step.parameters.get("align_only_debug", False):
                     self._log(f"  → ID={obj_id}: XY alignment verified.", "ok")
@@ -376,27 +650,63 @@ class ConfigRunner(Node):
                 else:
                     self._log(f"  → ID={obj_id}: extracted.", "ok")
                 done += 1
+                i += 1
             else:
                 self._log(f"  → ID={obj_id}: FAILED.", "fail")
                 failures += 1
-                # Stop the zone on first failure — arm may need repositioning
-                return False
+                if not self.interactive:
+                    return False
+                self._log(
+                    "  Press Next to retry this screw, Skip to skip only this screw and continue, Stop to abort.",
+                    "warn",
+                )
+                proceed = self._gate(
+                    f"Unscrew ID={obj_id} failed. [Next = retry / Skip = skip this screw / Stop = abort]"
+                )
+                if self._stop_event.is_set():
+                    return False
+                if proceed:
+                    self._log(f"  Retrying screw ID={obj_id}.", "warn")
+                    continue
+                skipped += 1
+                self._log(f"  Skipping failed screw ID={obj_id}; moving to next screw.", "warn")
+                i += 1
 
         self._log(
             f"  Zone '{zone_name}': {done} "
             f"{'XY alignments verified' if step.parameters.get('align_only_debug', False) else ('coarse poses verified' if step.parameters.get('coarse_only_debug', False) else 'extracted')}, "
-            f"{holes} holes skipped, {failures} failed.",
-            "ok" if failures == 0 else "warn",
+            f"{holes} holes skipped, {skipped} user-skipped, {failures} failed attempt(s).",
+            "ok" if failures == 0 and skipped == 0 else "warn",
         )
         return True
 
     def _run_pickup(self, step) -> bool:
+        if not self._ensure_hold_for_step(step, "pickup"):
+            return False
+        self._reset_vision_caches(wait_s=2.0)
+        target = self._wait_for_global_label(step.target, timeout_s=3.0)
+        if target is None:
+            self._log(
+                f"  [pickup] Target '{step.target}' is not visible in global vision. "
+                "Skipping pickup; part may already be removed or occluded.",
+                "warn",
+            )
+            return True
+        self._log(
+            f"  [pickup] Target '{step.target}' visible: ID={target.get('id')} "
+            f"label={target.get('label')}.",
+            "info",
+        )
+        self.pickup_skill.is_holding_object = self._held_now()
         self.pickup_skill._apply_pickup_config(self.cfg, target_label=step.target, pickup_step=step)
         return self.pickup_skill.execute_pickup(
             target_id=None, target_label=step.target, interactive=False, pickup_step=step
         )
 
-    def _run_flip(self, _step) -> bool:
+    def _run_flip(self, step) -> bool:
+        if not self._ensure_hold_for_step(step, "flip"):
+            return False
+        self.flip_skill.is_holding_object = self._held_now()
         return self.flip_skill.execute_flip(interactive=False)
 
     def _run_flip_drop(self, _step) -> bool:
@@ -415,7 +725,12 @@ class ConfigRunner(Node):
         if fn is None:
             self._log(f"Unknown action '{action}' — skipping.", "warn")
             return True
-        return fn(step)
+        result = fn(step)
+        # After a successful hold the robot pose has changed; always flush stale
+        # vision caches so the next step (unscrew / pickup) sees fresh detections.
+        if action == "hold" and result:
+            self._reset_vision_caches()
+        return result
 
     # ── Main sequence loop ────────────────────────────────────────────────────
 
