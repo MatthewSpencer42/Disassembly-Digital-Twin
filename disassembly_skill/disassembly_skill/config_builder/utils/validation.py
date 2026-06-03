@@ -74,12 +74,6 @@ def validate_config(data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         errors.append("Disassembly sequence must contain at least one step.")
         return errors, warnings
 
-    first_action = sequence[0].get("action") or sequence[0].get("type")
-    if first_action != "hold":
-        errors.append("The first disassembly step must be a hold step.")
-
-    active_hold = False
-
     for step_index, step in enumerate(sequence, start=1):
         # Support both spec keys and legacy keys
         step_label = step.get("label") or step.get("name") or f"step_{step_index}"
@@ -111,23 +105,6 @@ def validate_config(data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         # Component reference check
         if target and target not in component_labels and target not in dict(zone_items):
             warnings.append(f"Step '{step_label}' target '{target}' is not defined in components or zones.")
-
-        # Hold-state logic
-        if action == "unscrew":
-            if not active_hold:
-                errors.append(f"Unscrew step '{step_label}' requires an active hold first.")
-        elif action == "pickup":
-            if not active_hold:
-                errors.append(f"Pickup step '{step_label}' requires an active hold first.")
-            active_hold = False
-        elif action in {"flip", "flip_drop"}:
-            if not active_hold:
-                errors.append(f"'{action}' step '{step_label}' requires an active hold.")
-        elif action == "hold":
-            active_hold = True
-
-    if active_hold:
-        warnings.append("Sequence ends with an active hold; ensure release behaviour is intentional.")
 
     if _detect_cycle(dependency_graph):
         errors.append("Circular dependency detected in screw-zone depends_on_removal_of relationships.")

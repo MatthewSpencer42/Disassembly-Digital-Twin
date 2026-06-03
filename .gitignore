@@ -85,3 +85,5 @@ lerobot_pick_place/smolvla_training_output/
 
 vision_training/Project 1 (Segmentation)/rfdetr/Electronic_Device_Global-1
 vision_training/Project 2 (Tool-Screw)/rfdetr/Electronic_Devices_Local-1
+vision_training/Project 1 (Segmentation)/rfdetr/dataset_yolo11_seg_1080
+vision_training/Project 2 (Tool-Screw)/rfdetr/dataset_yolo11_seg_640

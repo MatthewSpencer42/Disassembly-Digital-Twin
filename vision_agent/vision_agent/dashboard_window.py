@@ -81,6 +81,35 @@ LIGHT_THEME = {
     "button_border": "#ffffff",
 }
 
+# FT300 sensor physical maximums used for colour scaling
+_FT300_FORCE_MAX_N   = 300.0   # ± 300 N  for Fx / Fy / Fz
+_FT300_TORQUE_MAX_NM = 30.0    # ± 30 Nm  for Tx / Ty / Tz
+
+# Confidence colour scale: values below this floor are clamped to red.
+# Set to the lowest per-class threshold (pcb_screw=0.30) so the full
+# displayed range uses the green→yellow→red gradient meaningfully.
+_CONF_DISPLAY_MIN = 0.30
+
+
+def _value_to_color(ratio: float) -> str:
+    """Map ratio ∈ [0, 1] (1 = best/green, 0 = worst/red) to a hex colour.
+
+    Interpolates through:
+      1.0 → #4fd18b (green) → 0.5 → #ffd966 (yellow) → 0.0 → #ff5d5d (red)
+    """
+    ratio = max(0.0, min(1.0, float(ratio)))
+    if ratio >= 0.5:
+        t = (1.0 - ratio) * 2.0          # 0 at 1.0  →  1 at 0.5
+        r = int(0x4f + t * (0xff - 0x4f))
+        g = int(0xd1 + t * (0xd9 - 0xd1))
+        b = int(0x8b + t * (0x66 - 0x8b))
+    else:
+        t = (0.5 - ratio) * 2.0          # 0 at 0.5  →  1 at 0.0
+        r = 0xff
+        g = int(0xd9 + t * (0x5d - 0xd9))
+        b = int(0x66 + t * (0x5d - 0x66))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
 
 class DashboardDataNode(Node):
     def __init__(self):
@@ -493,18 +522,24 @@ class DetectedPartsCard(Card):
         """)
 
     def update_rows(self, objects):
-        objects = objects or []
+        objects = sorted(objects or [], key=lambda o: str(o.get("label", "")).lower())
         self.table.setRowCount(len(objects))
         for row, obj in enumerate(objects):
             conf = obj.get("confidence")
+            conf_str = f"{float(conf):.2f}" if conf is not None else "-"
             values = [
                 str(obj.get("id", "?")),
                 str(obj.get("label", "part")),
-                f"{float(conf):.2f}" if conf is not None else "-",
+                conf_str,
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                if col == 2 and conf is not None:
+                    # Remap: _CONF_DISPLAY_MIN → red (0), 1.0 → green (1)
+                    span = max(1e-6, 1.0 - _CONF_DISPLAY_MIN)
+                    ratio = max(0.0, (float(conf) - _CONF_DISPLAY_MIN) / span)
+                    item.setForeground(QColor(_value_to_color(ratio)))
                 self.table.setItem(row, col, item)
 
 
@@ -584,6 +619,151 @@ class RobotStateCard(Card):
             )
 
 
+class VisionStateCard(Card):
+    """Compact card showing assembly state with colour-coded confidence value."""
+
+    def __init__(self, theme):
+        super().__init__("Vision State", theme)
+        self.setFixedHeight(VISION_PANEL_HEIGHT)
+
+        vbox = QVBoxLayout(self.content)
+        vbox.setContentsMargins(14, 8, 14, 8)
+        vbox.setSpacing(6)
+
+        self._state_pill = QLabel("UNKNOWN")
+        self._state_pill.setAlignment(Qt.AlignCenter)
+        self._state_pill.setObjectName("vsPill")
+
+        self._conf_lbl = QLabel("Confidence  —")
+        self._conf_lbl.setAlignment(Qt.AlignCenter)
+        self._conf_lbl.setObjectName("vsConf")
+
+        vbox.addWidget(self._state_pill)
+        vbox.addWidget(self._conf_lbl)
+        self.apply_theme(theme)
+
+    def apply_theme(self, theme):
+        super().apply_theme(theme)
+        self._state_pill.setStyleSheet(
+            f"background: {theme['card']}; color: {theme['text']}; "
+            f"border-radius: 8px; font-size: 16px; font-weight: 800; padding: 4px 10px;"
+        )
+        self._conf_lbl.setStyleSheet(
+            f"background: transparent; color: {theme['muted']}; "
+            f"font-size: 14px; font-weight: 600;"
+        )
+
+    def update_state(self, state: str, confidence, theme):
+        self._state_pill.setText(str(state).upper())
+        if confidence is not None:
+            span = max(1e-6, 1.0 - _CONF_DISPLAY_MIN)
+            ratio = max(0.0, (float(confidence) - _CONF_DISPLAY_MIN) / span)
+            color = _value_to_color(ratio)
+            self._conf_lbl.setText(f"Confidence  {float(confidence):.2f}")
+            self._conf_lbl.setStyleSheet(
+                f"background: transparent; color: {color}; "
+                f"font-size: 14px; font-weight: 700;"
+            )
+        else:
+            self._conf_lbl.setText("Confidence  —")
+            self._conf_lbl.setStyleSheet(
+                f"background: transparent; color: {theme['muted']}; "
+                f"font-size: 14px; font-weight: 600;"
+            )
+
+
+class ForceTorqueCard(Card):
+    """Card showing FT300 readings with colour-coded values (green → yellow → red).
+
+    Colour scale is based on absolute reading vs. the FT300 physical maximum:
+      0 N / 0 Nm  → green (#4fd18b)
+      ±150 N / ±15 Nm → yellow (#ffd966)
+      ±300 N / ±30 Nm → red (#ff5d5d)
+    """
+
+    def __init__(self, theme):
+        super().__init__("Force / Torque", theme)
+        self.setFixedHeight(FORCE_PANEL_HEIGHT)
+
+        grid = QGridLayout(self.content)
+        grid.setContentsMargins(14, 8, 14, 8)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(4)
+
+        # (display-key, unit, max-value)
+        specs = [
+            ("Fx", "N",  _FT300_FORCE_MAX_N),
+            ("Fy", "N",  _FT300_FORCE_MAX_N),
+            ("Fz", "N",  _FT300_FORCE_MAX_N),
+            ("Tx", "Nm", _FT300_TORQUE_MAX_NM),
+            ("Ty", "Nm", _FT300_TORQUE_MAX_NM),
+            ("Tz", "Nm", _FT300_TORQUE_MAX_NM),
+        ]
+        self._rows: dict = {}
+        for i, (key, unit, max_val) in enumerate(specs):
+            col_base = (i // 3) * 2    # 0 for Fx/Fy/Fz, 2 for Tx/Ty/Tz
+            row = i % 3
+
+            name_lbl = QLabel(key)
+            name_lbl.setObjectName("ftName")
+
+            val_lbl = QLabel("—")
+            val_lbl.setObjectName("ftVal")
+            val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+            grid.addWidget(name_lbl, row, col_base)
+            grid.addWidget(val_lbl,  row, col_base + 1)
+            self._rows[key] = (val_lbl, unit, max_val)
+
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        self.apply_theme(theme)
+
+    def apply_theme(self, theme):
+        super().apply_theme(theme)
+        for lbl in self.content.findChildren(QLabel):
+            name = lbl.objectName()
+            if name == "ftName":
+                lbl.setStyleSheet(
+                    f"color: {theme['muted']}; background: transparent; "
+                    f"font-weight: 700; font-size: 14px;"
+                )
+            elif name == "ftVal":
+                lbl.setStyleSheet(
+                    f"color: {theme['text']}; background: transparent; "
+                    f"font-weight: 700; font-size: 14px;"
+                )
+
+    def update_wrench(self, wrench, theme):
+        if wrench is None:
+            for key, (val_lbl, unit, _) in self._rows.items():
+                val_lbl.setText("—")
+                val_lbl.setStyleSheet(
+                    f"color: {theme['muted']}; background: transparent; "
+                    f"font-weight: 700; font-size: 14px;"
+                )
+            return
+
+        data = {
+            "Fx": wrench.get("fx", 0.0),
+            "Fy": wrench.get("fy", 0.0),
+            "Fz": wrench.get("fz", 0.0),
+            "Tx": wrench.get("tx", 0.0),
+            "Ty": wrench.get("ty", 0.0),
+            "Tz": wrench.get("tz", 0.0),
+        }
+        for key, (val_lbl, unit, max_val) in self._rows.items():
+            v = float(data.get(key, 0.0))
+            ratio = max(0.0, 1.0 - abs(v) / max_val)
+            color = _value_to_color(ratio)
+            fmt = f"{v:+.2f} {unit}" if unit == "N" else f"{v:+.3f} {unit}"
+            val_lbl.setText(fmt)
+            val_lbl.setStyleSheet(
+                f"color: {color}; background: transparent; "
+                f"font-weight: 700; font-size: 14px;"
+            )
+
+
 class DashboardWindow(QMainWindow):
     def __init__(self, node):
         super().__init__()
@@ -607,9 +787,9 @@ class DashboardWindow(QMainWindow):
         self.detected = DetectedPartsCard(self.theme)
         self.detected.setMinimumHeight(160)
         self.detected.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.vision = TextCard("Vision State", self.theme, fixed_height=VISION_PANEL_HEIGHT, scroll=False)
+        self.vision = VisionStateCard(self.theme)
         self.robot = RobotStateCard(self.theme)
-        self.force = TextCard("Force/Torque", self.theme, fixed_height=FORCE_PANEL_HEIGHT, scroll=False)
+        self.force = ForceTorqueCard(self.theme)
         self.bin = TextCard("Drop Bin", self.theme, fixed_height=DROP_BIN_PANEL_HEIGHT, scroll=False)
         self.cards = [
             self.global_video,
@@ -698,9 +878,12 @@ class DashboardWindow(QMainWindow):
                 background: {t["button_bg"]};
                 color: {t["text"]};
                 border: 1px solid {t["button_border"]};
-                border-radius: 0px;
-                padding: 10px 18px;
+                border-radius: 8px;
+                padding: 8px 18px;
                 font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background: {t["card"]};
             }}
             QScrollBar:vertical {{
                 background: {t["root"]};
@@ -755,9 +938,10 @@ class DashboardWindow(QMainWindow):
         self.status.setText(f"Global {snap['global_fps']:.1f} fps | Local {snap['local_fps']:.1f} fps")
         self.stack.update_items(self.stack_items(snap, now), self.theme)
         self.detected.update_rows(snap["global_state"].get("objects", []))
-        self.vision.set_text(
-            f"{str(snap['assembly_state'].get('state', 'unknown')).upper()}\n"
-            f"Confidence: {float(snap['assembly_state'].get('confidence', 0.0)):.2f}"
+        self.vision.update_state(
+            state=snap["assembly_state"].get("state", "unknown"),
+            confidence=snap["assembly_state"].get("confidence"),
+            theme=self.theme,
         )
         robot = snap["robot_states"]
         self.robot.update_states(
@@ -765,15 +949,7 @@ class DashboardWindow(QMainWindow):
             tool_state=robot.get("tool_arm", "IDLE"),
             theme=self.theme,
         )
-        wrench = snap["wrench"]
-        if wrench:
-            self.force.set_text(
-                f"Fx {wrench['fx']:>7.2f} N   Tx {wrench['tx']:>7.3f} Nm\n"
-                f"Fy {wrench['fy']:>7.2f} N   Ty {wrench['ty']:>7.3f} Nm\n"
-                f"Fz {wrench['fz']:>7.2f} N   Tz {wrench['tz']:>7.3f} Nm"
-            )
-        else:
-            self.force.set_text("Waiting for FT300 wrench")
+        self.force.update_wrench(snap["wrench"], self.theme)
         xyz = (snap["global_state"].get("bin_locations", {}).get("bin_1", {}) or {}).get("xyz")
         if xyz:
             self.bin.set_text(f"BIN 1   X {xyz[0]:.3f}m   Y {xyz[1]:.3f}m   Z {xyz[2]:.3f}m")

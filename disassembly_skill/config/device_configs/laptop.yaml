@@ -1,0 +1,270 @@
+device:
+  class: laptop
+  model: laptop_generic
+  dimensions_mm:
+    length: 330.0
+    width: 230.0
+    height: 20.0
+  material: aluminium
+  fixturing: none
+  notes: >
+    Laptop lies flat on the work surface — no clamping arm needed.
+    Sequence is: unscrew heat_sink_screw → pickup heat_sink →
+    unscrew ssd_holder_Screw.  Pickup uses detection centroid; fine-tune
+    approach_rpy_deg and offsets once grasp geometry is confirmed.
+
+components:
+  heat_sink:
+    label: heat_sink
+    type: shield
+    removable: true
+    notes: "Copper/aluminium heat spreader. Lifted out after its screws are removed."
+  ssd_holder:
+    label: ssd_holder
+    type: bracket
+    removable: true
+    notes: "Metal bracket retaining the SSD. Targeted in step 3."
+
+screw_zones:
+  heat_sink_screw:
+    parent_component: heat_sink
+    screw_count: 4
+    screw_type: phillips
+    depends_on_removal_of: []
+    notes: "Screws securing the heat sink to the motherboard / chassis."
+  ssd_holder_Screw:
+    parent_component: ssd_holder
+    screw_count: 2
+    screw_type: phillips
+    depends_on_removal_of: []
+    notes: "Screws securing the SSD retention bracket. Label uses exact model class name."
+
+disassembly_sequence:
+
+  # ── Step 1: Unscrew heat sink ──────────────────────────────────────────
+  - step: 1
+    action: unscrew
+    label: "Remove heat-sink screws"
+    target: heat_sink_screw
+    depends_on_steps: []
+    reveals:
+      - heat_sink
+    parameters:
+      screw_type: phillips
+      screw_count: 4
+      user_skip_counts_as_resolved: true
+      engagement_depth_mm: 5.0
+      descent_max_distance_m: 0.060
+      initial_torque_nm: 0.5
+      max_torque_nm: 1.5
+      rotation_speed_rpm: 60
+      force_threshold_n: 5.0
+      align_tolerance_px: 4.0
+      spiral_timeout_s: 30.0
+      coarse_planner: exotica
+      coarse_only_debug: false
+      align_only_debug: false
+      descent_only_debug: false
+      coarse_position_tolerance_m: 0.010
+      coarse_hover_z_m: 0.98624
+      coarse_velocity: 0.20
+      screw_camera_z_min_m: 0.45
+      screw_camera_z_max_m: 0.65
+      screw_world_z_min_m: 0.90
+      screw_world_z_max_m: 1.05
+      pre_retract_m: 0.0
+      xy_speed_align_mps: 0.060
+      z_speed_descent_mps: 0.020
+      spiral_start_dist_mm: 2.0
+      spiral_gap_mm: 2.0
+      spiral_speed_mps: 0.002
+      search_max_step_m: 0.001
+      search_joint_smooth_alpha: 0.35
+      visual_servo_gain: 0.8
+      visual_servo_max_radius_m: 0.025
+      align_move_step_m: 0.0005
+      align_verify_tolerance_m: 0.015
+      align_error_filter_alpha: 0.25
+      align_target_filter_alpha: 0.25
+      align_stable_cycles: 3
+      align_only_timeout_s: 90.0
+      align_full_speed_error_px: 150.0
+      align_min_speed_mps: 0.012
+      align_z_lock_gain: 1.2
+      align_z_lock_speed_mps: 0.003
+      align_target_wait_s: 3.0
+      align_target_lost_grace_s: 0.6
+      enable_spiral_search: true
+      align_rate_hz: 30.0
+      align_joint_alpha: 0.20
+      align_max_joint_step_rad: 0.020
+      align_max_joint_velocity_rad_s: 0.6
+      pre_descent_align_tolerance_px: 65.0
+      pre_descent_align_timeout_s: 45.0
+      pre_descent_align_stable_cycles: 1
+      final_align_tolerance_px: 3.0
+      final_align_timeout_s: 20.0
+      final_align_max_radius_m: 0.012
+      final_align_stable_cycles: 1
+      final_align_xy_speed_mps: 0.006
+      final_align_min_speed_mps: 0.002
+      final_align_error_filter_alpha: 0.15
+      unscrew_probe_duration_s: 0.50
+      unscrew_probe_force_increase_n: 0.30
+      unscrew_min_spin_s: 1.0
+      unscrew_max_spin_s: 4.0
+      unscrew_release_force_ratio: 0.50
+      unscrew_release_debounce_s: 0.15    # s, sustained below release_level triggers success
+      unscrew_force_ideal_delta_n: 0.15
+      unscrew_force_deadband_n: 0.04
+      unscrew_z_relief_gain_mps_per_n: 0.003
+      unscrew_z_relief_speed_cap_mps: 0.008
+      unscrew_z_relief_max_m: 0.030
+      tool_release_settle_s: 0.50
+      tool_grab_settle_s: 0.50
+      skip_final_align_on_contact: true   # FT contact → go straight to unscrew
+      use_screw_gripper: false
+
+  # ── Step 2: Pick up heat sink ──────────────────────────────────────────
+  - step: 2
+    action: pickup
+    label: "Extract heat sink"
+    target: heat_sink
+    depends_on_steps: []
+    reveals:
+      - ssd_holder_Screw
+    parameters:
+      grasp_type: precision
+      grip_width_mm: 60.0
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_open_min_width_mm: 120.0
+      gripper_close_force_n: 40.0
+      approach_axis: "+z"
+      lift_height_mm: 20.0
+      lift_speed_mps: 0.05
+      precondition_retract_m: 0.20
+      move_xarm5_clearance: false
+      approach_x_offset_m: -0.025
+      approach_y_offset_m: -0.010
+      approach_z_offset_m: 0.015
+      # Sideways approach (commented out — using standard top-down for now):
+      # approach_quat_xyzw: [0.547778, 0.00620888, -0.0143922, 0.836477]
+      # approach_rpy_deg: [180.0, 25.0, 0.0]
+      wrist_joint6_deg: 90.0
+      home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
+      hover_velocity: 0.25
+      descent_distance_m: 0.060
+      descent_step_m: 0.0005
+      descent_rate_hz: 25.0
+      accept_max_depth_without_contact: true
+      descent_accept_ratio: 0.70
+      torque_threshold_nm: 3.0
+      contact_retract_m: 0.008
+      contact_retract_velocity: 0.02
+      post_grasp_retract_m: 0.040
+      drop_x: 0.92
+      drop_y: -0.36
+      drop_z: 0.99
+      skip_if_not_detected: true
+      z_extra_descent_mm: 0
+    notes: >
+      Sideways approach: gripper tilted (approach_quat_xyzw from RViz) so lower finger
+      slides under the thin heat sink edge.
+      Tune approach_x/y_offset_m to shift TCP toward the grippable edge.
+      Tune approach_z_offset_m so the lower finger lands at part-surface level.
+      Tune wrist_joint6_deg to fine-tune tilt direction at the grasp point.
+      grip_close_width_mm 40 mm: sandwiches the thin part without slipping.
+
+  # ── Step 3: Unscrew SSD holder ────────────────────────────────────────
+  - step: 3
+    action: unscrew
+    label: "Remove SSD holder screws"
+    target: ssd_holder_Screw
+    depends_on_steps: []
+    reveals:
+      - ssd_holder
+    parameters:
+      screw_type: phillips
+      screw_count: 2
+      user_skip_counts_as_resolved: true
+      engagement_depth_mm: 5.0
+      descent_max_distance_m: 0.060
+      initial_torque_nm: 0.5
+      max_torque_nm: 1.5
+      rotation_speed_rpm: 60
+      force_threshold_n: 5.0
+      align_tolerance_px: 4.0
+      spiral_timeout_s: 30.0
+      coarse_planner: exotica
+      coarse_only_debug: false
+      align_only_debug: false
+      descent_only_debug: false
+      coarse_position_tolerance_m: 0.010
+      coarse_hover_z_m: 0.98624
+      coarse_velocity: 0.20
+      screw_camera_z_min_m: 0.45
+      screw_camera_z_max_m: 0.65
+      screw_world_z_min_m: 0.90
+      screw_world_z_max_m: 1.05
+      pre_retract_m: 0.0
+      xy_speed_align_mps: 0.060
+      z_speed_descent_mps: 0.020
+      spiral_start_dist_mm: 2.0
+      spiral_gap_mm: 2.0
+      spiral_speed_mps: 0.002
+      search_max_step_m: 0.001
+      search_joint_smooth_alpha: 0.35
+      visual_servo_gain: 0.8
+      visual_servo_max_radius_m: 0.025
+      align_move_step_m: 0.0005
+      align_verify_tolerance_m: 0.015
+      align_error_filter_alpha: 0.25
+      align_target_filter_alpha: 0.25
+      align_stable_cycles: 3
+      align_only_timeout_s: 90.0
+      align_full_speed_error_px: 150.0
+      align_min_speed_mps: 0.012
+      align_z_lock_gain: 1.2
+      align_z_lock_speed_mps: 0.003
+      align_target_wait_s: 3.0
+      align_target_lost_grace_s: 0.6
+      enable_spiral_search: true
+      align_rate_hz: 30.0
+      align_joint_alpha: 0.20
+      align_max_joint_step_rad: 0.020
+      align_max_joint_velocity_rad_s: 0.6
+      pre_descent_align_tolerance_px: 65.0
+      pre_descent_align_timeout_s: 45.0
+      pre_descent_align_stable_cycles: 1
+      final_align_tolerance_px: 3.0
+      final_align_timeout_s: 20.0
+      final_align_max_radius_m: 0.012
+      final_align_stable_cycles: 1
+      final_align_xy_speed_mps: 0.006
+      final_align_min_speed_mps: 0.002
+      final_align_error_filter_alpha: 0.15
+      unscrew_probe_duration_s: 0.50
+      unscrew_probe_force_increase_n: 0.30
+      unscrew_min_spin_s: 1.0
+      unscrew_max_spin_s: 4.0
+      unscrew_release_force_ratio: 0.50
+      unscrew_release_debounce_s: 0.15    # s, sustained below release_level triggers success
+      unscrew_force_ideal_delta_n: 0.15
+      unscrew_force_deadband_n: 0.04
+      unscrew_z_relief_gain_mps_per_n: 0.003
+      unscrew_z_relief_speed_cap_mps: 0.008
+      unscrew_z_relief_max_m: 0.030
+      tool_release_settle_s: 0.50
+      tool_grab_settle_s: 0.50
+      use_screw_gripper: false
+    notes: "Exposed after heat sink is removed. Uses exact model class label 'ssd_holder_Screw'."
+
+metadata:
+  version: 1
+  author: adip
+  created_with: manual
+  notes: >
+    Initial laptop config — heat sink unscrew/pickup + SSD holder unscrew.
+    No hold arm used (fixturing: none).  Pickup offsets are placeholders;
+    update approach_x/y_offset_m and grip_width_mm after first test run.

@@ -83,10 +83,11 @@ ACTION_ICON = {
 class RunnerGUI:
     """tkinter window — must be created and mainloop()'d on the main thread."""
 
-    def __init__(self, cfg: DeviceConfig, on_next, on_skip, on_stop):
+    def __init__(self, cfg: DeviceConfig, on_next, on_skip, on_stop, on_execute_all=None):
         self._on_next = on_next
         self._on_skip = on_skip
         self._on_stop = on_stop
+        self._on_execute_all = on_execute_all
         self._steps = cfg.disassembly_sequence
 
         self.root = tk.Tk()
@@ -202,6 +203,13 @@ class RunnerGUI:
         )
         self._btn_skip.pack(side="left", padx=4)
 
+        self._btn_execute_all = tk.Button(
+            btns, text="⚡  EXECUTE ALL",
+            bg="#1a3a1a", fg="#66cc66", font=bold,
+            command=self._on_execute_all or (lambda: None), **_BTN,
+        )
+        self._btn_execute_all.pack(side="left", padx=4)
+
         self._btn_stop = tk.Button(
             btns, text="⏹  STOP",
             bg="#3a1a1a", fg="#ff6666", font=bold,
@@ -249,6 +257,19 @@ class RunnerGUI:
             self._btn_skip.configure(state="normal" if skip  else "disabled")
         self.root.after(0, _update)
 
+    def set_execute_all_active(self, active: bool) -> None:
+        """Dim the Execute All button and show status when auto-run is in progress."""
+        def _update():
+            if active:
+                self._btn_execute_all.configure(
+                    bg="#0d1f0d", fg="#44aa44", text="⚡  RUNNING…", state="disabled"
+                )
+            else:
+                self._btn_execute_all.configure(
+                    bg="#1a3a1a", fg="#66cc66", text="⚡  EXECUTE ALL", state="normal"
+                )
+        self.root.after(0, _update)
+
     def log(self, msg: str, tag: str = "info") -> None:
         ts = datetime.now().strftime("%H:%M:%S")
         def _update():
@@ -283,6 +304,8 @@ class ConfigRunner(Node):
         self._proceed_event = threading.Event()   # Next button
         self._skip_event    = threading.Event()   # Skip button
         self._stop_event    = threading.Event()   # Stop button
+        self._completed_steps: set[int] = set()
+        self._skipped_steps: set[int] = set()
 
         # Subscribe to vision state so we can read screw counts at runtime
         self._vision_lock    = threading.Lock()
@@ -323,6 +346,15 @@ class ConfigRunner(Node):
     def gui_stop(self):
         self._stop_event.set()
         self._proceed_event.set()  # unblock any wait
+
+    def gui_execute_all(self):
+        """Switch to non-interactive mode: all remaining gates auto-proceed."""
+        self.interactive = False
+        self._skip_event.clear()
+        self._proceed_event.set()  # unblock current gate if waiting
+        if self.gui:
+            self.gui.set_execute_all_active(True)
+            self.gui.set_status_bar("Auto-executing all steps…", "#66cc66")
 
     # ── Startup IDLE ──────────────────────────────────────────────────────────
 
@@ -573,37 +605,67 @@ class ConfigRunner(Node):
         """
         screw_count = step.parameters.get("screw_count", 1)
         zone_name   = step.target
+        # Apply per-zone config parameters (e.g. pcb_screw vs lid_screw differ in HDD)
+        self.unscrew_skill._apply_unscrew_config(self.cfg, target_label=zone_name)
         if not self._ensure_hold_for_step(step, "unscrew"):
             return False
 
         detected = self._collect_unscrew_targets(zone_name, screw_count)
-        detected = sorted(
-            detected,
-            key=lambda obj: (
+
+        # ── Zone-first ordering ───────────────────────────────────────────────
+        # Always attempt zone-matched screws before falling back to screws that
+        # carry a different label.  Within each group, nearest to xArm first.
+        zone_norm = zone_name.lower()
+        def _dist_key(obj):
+            return (
                 self._screw_distance_from_xarm(obj),
                 int(obj.get("id", 999999)) if str(obj.get("id", "")).isdigit() else 999999,
-            ),
-        )
-        self._log(
-            f"  Vision: {len(detected)} screw candidate(s) visible  "
-            f"(config expects {screw_count} in zone '{zone_name}')",
-            "info",
-        )
-        if len(detected) < screw_count:
-            self._log(
-                f"  [WARN] Only {len(detected)} detected — "
-                f"{screw_count - len(detected)} may be already removed or occluded.",
-                "warn",
             )
 
-        targets_to_try = detected
+        zone_matched  = sorted(
+            [o for o in detected if zone_norm in o.get("label", "").lower()],
+            key=_dist_key,
+        )
+        non_matched = sorted(
+            [o for o in detected if zone_norm not in o.get("label", "").lower()],
+            key=_dist_key,
+        )
+        # Only attempt zone-matched screws.  Non-matched screws belong to other
+        # steps in the sequence and must not be attempted here — doing so would
+        # cause the runner to jump ahead and unscrew parts that haven't been
+        # revealed yet (e.g. attempting core_holder_screw during hdd_holder_screw step).
+        targets_to_try = zone_matched
+
+        self._log(
+            f"  Vision: {len(detected)} screw candidate(s) visible  "
+            f"(config expects {screw_count} in zone '{zone_name}' | "
+            f"{len(zone_matched)} zone-matched, {len(non_matched)} other-zone — other-zone screws skipped for this step)",
+            "info",
+        )
+        if non_matched:
+            self._log(
+                f"  [INFO] {len(non_matched)} differently-labelled screw(s) visible "
+                f"(not '{zone_name}'): will be handled by their own steps.",
+                "info",
+            )
+        if len(zone_matched) < screw_count:
+            self._log(
+                f"  [WARN] Only {len(zone_matched)} zone-matched '{zone_name}' screws detected "
+                f"(config expects {screw_count}). "
+                f"Will attempt all {len(zone_matched)} zone-matched screw(s); "
+                f"step completes when zone-matched screws are exhausted.",
+                "warn",
+            )
         if targets_to_try:
             order = ", ".join(
                 f"ID={obj.get('id')}({self._screw_distance_from_xarm(obj):.3f}m)"
                 for obj in targets_to_try
             )
             self._log(f"  Nearest-first screw order: {order}", "info")
-        done, holes, failures, skipped = 0, 0, 0, 0
+        done, holes, failures, unresolved_failures, skipped = 0, 0, 0, 0, 0
+        skip_counts_as_resolved = bool(
+            step.parameters.get("user_skip_counts_as_resolved", self.interactive)
+        )
 
         i = 0
         while i < len(targets_to_try):
@@ -626,7 +688,8 @@ class ConfigRunner(Node):
                 if self._stop_event.is_set():
                     return False
                 if not proceed:   # user pressed Skip
-                    self._log(f"  Skipped screw ID={obj_id} by user.", "warn")
+                    skip_note = "assumed false/absent" if skip_counts_as_resolved else "unresolved"
+                    self._log(f"  Skipped screw ID={obj_id} by user ({skip_note}).", "warn")
                     skipped += 1
                     i += 1
                     continue
@@ -668,21 +731,52 @@ class ConfigRunner(Node):
                 if proceed:
                     self._log(f"  Retrying screw ID={obj_id}.", "warn")
                     continue
+                if not skip_counts_as_resolved:
+                    unresolved_failures += 1
                 skipped += 1
-                self._log(f"  Skipping failed screw ID={obj_id}; moving to next screw.", "warn")
+                skip_note = "assuming false/absent" if skip_counts_as_resolved else "leaving unresolved"
+                self._log(f"  Skipping failed screw ID={obj_id}; {skip_note} and moving to next screw.", "warn")
                 i += 1
 
+        debug_mode = bool(
+            step.parameters.get("align_only_debug", False)
+            or step.parameters.get("coarse_only_debug", False)
+        )
+        expected_visible = min(int(screw_count), len(targets_to_try)) if targets_to_try else 0
+        successful_visible = done + holes
+        resolved_visible = successful_visible + (skipped if skip_counts_as_resolved else 0)
+        zone_ok = (
+            unresolved_failures == 0
+            and (skip_counts_as_resolved or skipped == 0)
+            and resolved_visible >= expected_visible
+        )
         self._log(
             f"  Zone '{zone_name}': {done} "
             f"{'XY alignments verified' if step.parameters.get('align_only_debug', False) else ('coarse poses verified' if step.parameters.get('coarse_only_debug', False) else 'extracted')}, "
-            f"{holes} holes skipped, {skipped} user-skipped, {failures} failed attempt(s).",
-            "ok" if failures == 0 and skipped == 0 else "warn",
+            f"{holes} holes skipped, {skipped} user-skipped, {failures} failed attempt(s), "
+            f"{unresolved_failures} unresolved failure(s), "
+            f"user_skip_counts_as_resolved={skip_counts_as_resolved}.",
+            "ok" if zone_ok else "warn",
         )
+        if not zone_ok:
+            if debug_mode:
+                self._log(
+                    f"  [sequence] Debug unscrew step did not verify all visible targets "
+                    f"({resolved_visible}/{expected_visible} resolved); blocking dependent steps.",
+                    "fail",
+                )
+            else:
+                self._log(
+                    f"  [sequence] Unscrew step incomplete "
+                    f"({resolved_visible}/{expected_visible} visible screw(s) resolved, "
+                    f"{skipped} skipped, {unresolved_failures} unresolved). "
+                    "Blocking dependent pickup.",
+                    "fail",
+                )
+            return False
         return True
 
     def _run_pickup(self, step) -> bool:
-        if not self._ensure_hold_for_step(step, "pickup"):
-            return False
         self._reset_vision_caches(wait_s=2.0)
         target = self._wait_for_global_label(step.target, timeout_s=3.0)
         if target is None:
@@ -699,8 +793,16 @@ class ConfigRunner(Node):
         )
         self.pickup_skill.is_holding_object = self._held_now()
         self.pickup_skill._apply_pickup_config(self.cfg, target_label=step.target, pickup_step=step)
+        with self.pickup_skill.data_lock:
+            self.pickup_skill.latest_targets = self._global_objects()
+            if target not in self.pickup_skill.latest_targets:
+                self.pickup_skill.latest_targets.append(dict(target))
         return self.pickup_skill.execute_pickup(
-            target_id=None, target_label=step.target, interactive=False, pickup_step=step
+            target_id=target.get("id"),
+            target_label=step.target,
+            interactive=False,
+            pickup_step=step,
+            target_snapshot=dict(target),
         )
 
     def _run_flip(self, step) -> bool:
@@ -725,6 +827,16 @@ class ConfigRunner(Node):
         if fn is None:
             self._log(f"Unknown action '{action}' — skipping.", "warn")
             return True
+        deps = [int(d) for d in getattr(step, "depends_on_steps", []) or []]
+        unmet = [d for d in deps if d not in self._completed_steps]
+        if unmet:
+            skipped = [d for d in unmet if d in self._skipped_steps]
+            detail = f" skipped_dependencies={skipped}." if skipped else ""
+            self._log(
+                f"  [sequence] Step {step.step} depends on completed step(s) {deps}; "
+                f"unmet={unmet}.{detail} Continuing because runner dependencies are advisory.",
+                "warn",
+            )
         result = fn(step)
         # After a successful hold the robot pose has changed; always flush stale
         # vision caches so the next step (unscrew / pickup) sees fresh detections.
@@ -743,6 +855,7 @@ class ConfigRunner(Node):
 
             if step.step < self.start_step:
                 self._log(f"[skip] step {step.step}: {step.label}", "info")
+                self._completed_steps.add(int(step.step))
                 if self.gui:
                     self.gui.set_step_status(idx, "skipped")
                 continue
@@ -770,6 +883,7 @@ class ConfigRunner(Node):
 
             if not proceed:
                 self._log(f"Step {step.step} skipped by user.", "warn")
+                self._skipped_steps.add(int(step.step))
                 if self.gui:
                     self.gui.set_step_status(idx, "skipped")
                 continue
@@ -784,6 +898,7 @@ class ConfigRunner(Node):
             elapsed = time.monotonic() - t0
 
             if success:
+                self._completed_steps.add(int(step.step))
                 self._log(f"Step {step.step} done in {elapsed:.1f}s.", "ok")
                 if self.gui:
                     self.gui.set_step_status(idx, "done")
@@ -809,6 +924,7 @@ class ConfigRunner(Node):
                     success = self._dispatch(step)
                     elapsed = time.monotonic() - t0
                     if success:
+                        self._completed_steps.add(int(step.step))
                         self._log(f"Step {step.step} retry succeeded in {elapsed:.1f}s.", "ok")
                         if self.gui:
                             self.gui.set_step_status(idx, "done")
@@ -862,14 +978,16 @@ def main(args=None):
     # Button callbacks use a ref-list so they work before runner is created.
     runner_ref: list[ConfigRunner | None] = [None]
 
-    def _next(): runner_ref[0] and runner_ref[0].gui_next()
-    def _skip(): runner_ref[0] and runner_ref[0].gui_skip()
-    def _stop(): runner_ref[0] and runner_ref[0].gui_stop()
+    def _next():        runner_ref[0] and runner_ref[0].gui_next()
+    def _skip():        runner_ref[0] and runner_ref[0].gui_skip()
+    def _stop():        runner_ref[0] and runner_ref[0].gui_stop()
+    def _execute_all(): runner_ref[0] and runner_ref[0].gui_execute_all()
 
     # ── Build GUI immediately (before any slow node init) ─────────────────────
     gui: RunnerGUI | None = None
     if interactive:
-        gui = RunnerGUI(cfg, on_next=_next, on_skip=_skip, on_stop=_stop)
+        gui = RunnerGUI(cfg, on_next=_next, on_skip=_skip, on_stop=_stop,
+                        on_execute_all=_execute_all)
         gui.set_buttons_enabled(next_=False, skip=False)
         gui.set_status_bar("Initialising ROS nodes…", "#aaaaaa")
 

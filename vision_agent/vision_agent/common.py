@@ -30,7 +30,7 @@ GLOBAL_RELIABLE_QOS = QoSProfile(
 DASHBOARD_HEIGHT = 260
 PROCESSING_RATE_HZ = 30.0
 GLOBAL_SCOUT_EVERY_N_FRAMES = 12
-LOCAL_INFERENCE_EVERY_N_FRAMES = 1
+LOCAL_INFERENCE_EVERY_N_FRAMES = 3   # run local YOLO every 3rd frame (~10 Hz at 30 Hz loop)
 REFEREE_EVERY_N_FRAMES = 3
 DEBUG_PUBLISH_RATE_HZ = 8.0
 DEBUG_JPEG_QUALITY = 75
@@ -44,15 +44,21 @@ LOCAL_CROSSHAIR_SMALL_OFFSET_Y = -10
 LOCAL_CROSSHAIR_SMALL_ARM_PX = 20
 
 # Large tool head: detected bounding-box area >= LOCAL_TOOL_HEAD_AREA_THRESHOLD_PX2
-LOCAL_CROSSHAIR_LARGE_OFFSET_X = -3
-LOCAL_CROSSHAIR_LARGE_OFFSET_Y = 10
-LOCAL_CROSSHAIR_LARGE_ARM_PX = 40
+LOCAL_CROSSHAIR_LARGE_OFFSET_X = -13
+LOCAL_CROSSHAIR_LARGE_OFFSET_Y = 154
+LOCAL_CROSSHAIR_LARGE_ARM_PX = LOCAL_CROSSHAIR_SMALL_ARM_PX
 
 # Line thickness in pixels for both crosshair variants.
 LOCAL_CROSSHAIR_LINE_THICKNESS = 2
 
 # Pixel² area boundary that separates the two tool head sizes.
 LOCAL_TOOL_HEAD_AREA_THRESHOLD_PX2 = 45000
+
+# ── Vision backend selector ────────────────────────────────────────────────
+# RF-DETR is the default — more reliable detection for all HDD classes.
+# Override at launch time with:  VISION_BACKEND=yolo ros2 launch ...
+VISION_BACKEND: str = os.getenv("VISION_BACKEND", "rfdetr").lower()
+
 
 def resolve_checkpoint_path(*parts):
     base_path = os.path.join(WS_ROOT, *parts)
@@ -67,20 +73,44 @@ def resolve_checkpoint_path(*parts):
     return base_path
 
 
-PATH_SCOUT = resolve_checkpoint_path(
+# ── RF-DETR model paths (legacy) ──────────────────────────────────────────
+PATH_SCOUT_RFDETR = resolve_checkpoint_path(
     "vision_training",
     "Project 1 (Segmentation)",
     "rfdetr",
     "global_model",
     "checkpoint_best_ema.pt",
 )
-PATH_SNIPER = resolve_checkpoint_path(
+PATH_SNIPER_RFDETR = resolve_checkpoint_path(
     "vision_training",
     "Project 2 (Tool-Screw)",
     "rfdetr",
     "local_model",
     "checkpoint_best_ema.pt",
 )
+
+# ── YOLOv11 model paths ───────────────────────────────────────────────────
+PATH_SCOUT_YOLO = os.path.join(
+    WS_ROOT,
+    "vision_training",
+    "Project 1 (Segmentation)",
+    "rfdetr",
+    "global_model",
+    "best.pt",
+)
+PATH_SNIPER_YOLO = os.path.join(
+    WS_ROOT,
+    "vision_training",
+    "Project 2 (Tool-Screw)",
+    "rfdetr",
+    "local_model",
+    "best.pt",
+)
+
+# ── Active paths (resolved by backend) ───────────────────────────────────
+PATH_SCOUT  = PATH_SCOUT_YOLO  if VISION_BACKEND == "yolo" else PATH_SCOUT_RFDETR
+PATH_SNIPER = PATH_SNIPER_YOLO if VISION_BACKEND == "yolo" else PATH_SNIPER_RFDETR
+
 PATH_REFEREE = os.path.join(
     WS_ROOT,
     "vision_training",
@@ -212,3 +242,81 @@ class StaticAnchorTracker:
                     del self.anchors[obj_id]
 
         return assigned_ids
+
+
+class DetectionStabilizer:
+    """Temporal persistence filter for local (tool-cam) YOLO detections.
+
+    A detection is only reported if it overlaps (IoU ≥ iou_thresh) with a
+    detection in at least ``min_hits`` of the last ``window`` inference results.
+    This suppresses single-frame false positives while keeping true detections.
+
+    Parameters
+    ----------
+    window     : number of past inference frames to consider (default 5)
+    min_hits   : how many of those frames must contain a matching detection (default 3)
+    iou_thresh : minimum IoU to consider two boxes as the same object (default 0.35)
+    """
+
+    _CATEGORIES = ("screws", "screw_heads", "tool_tips", "holes")
+
+    def __init__(self, window: int = 7, min_hits: int = 4, iou_thresh: float = 0.40):
+        self.window = window
+        self.min_hits = min_hits
+        self.iou_thresh = iou_thresh
+        self._history: deque = deque(maxlen=window)
+
+    # ------------------------------------------------------------------
+    def update(self, new_dets: dict) -> dict:
+        """Push ``new_dets`` into history and return the stable subset.
+
+        Works for any dict of ``{category: [det, ...]}``.  The _CATEGORIES
+        constant is the default set used by the local sniper; the global scout
+        passes its own per-label keys and they are handled identically.
+        """
+        self._history.append(new_dets)
+        # Not enough history yet — pass everything through unchanged.
+        if len(self._history) < self.min_hits:
+            return new_dets
+
+        # Collect all category keys seen across history + current frame.
+        all_cats = set(new_dets.keys())
+        for frame in self._history:
+            all_cats.update(frame.keys())
+
+        result = {}
+        for cat in all_cats:
+            stable = []
+            for det in new_dets.get(cat, []):
+                box = det.get("box")
+                if not box:
+                    continue
+                hits = sum(
+                    1
+                    for frame in self._history
+                    if any(
+                        self._iou(box, pd["box"]) >= self.iou_thresh
+                        for pd in frame.get(cat, [])
+                        if pd.get("box")
+                    )
+                )
+                if hits >= self.min_hits:
+                    stable.append(det)
+            result[cat] = stable
+        return result
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _iou(a, b) -> float:
+        ax1, ay1, ax2, ay2 = float(a[0]), float(a[1]), float(a[2]), float(a[3])
+        bx1, by1, bx2, by2 = float(b[0]), float(b[1]), float(b[2]), float(b[3])
+        ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+        iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+        inter = iw * ih
+        if inter == 0.0:
+            return 0.0
+        ua = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+        ub = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+        union = ua + ub - inter
+        return inter / union if union > 0.0 else 0.0

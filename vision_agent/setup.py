@@ -40,7 +40,12 @@ setup(
     name=package_name,
     version='0.0.1',
     # !!! CRITICAL: Include the sub-package here !!!
-    packages=[package_name, 'vision_agent.agents'],
+    packages=[
+        package_name,
+        'vision_agent.agents',
+        'vision_agent.agents.yolo',
+        'vision_agent.agents.rfdetr',
+    ],
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),

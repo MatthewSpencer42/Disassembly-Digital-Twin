@@ -34,6 +34,7 @@ def _stage_exit_handlers(process_action, stage_name: str, critical: bool = True)
 def generate_launch_description():
     hardware_type = LaunchConfiguration("hardware_type")
     tool_video_device = LaunchConfiguration("tool_video_device")
+    vision_backend = LaunchConfiguration("vision_backend")
 
     # Clean up stale Orbbec depth-engine lock left by unclean shutdowns.
     cleanup_orbbec_lock = ExecuteProcess(
@@ -100,6 +101,7 @@ def generate_launch_description():
             "system_startup.launch.py",
             ["tool_video_device:=", tool_video_device],
         ],
+        additional_env={"VISION_BACKEND": vision_backend},
         output="screen",
         name="disassembly_vision_stage",
     )
@@ -219,6 +221,11 @@ def generate_launch_description():
                 "tool_video_device",
                 default_value="auto",
                 description="Optional tool camera video device override",
+            ),
+            DeclareLaunchArgument(
+                "vision_backend",
+                default_value="rfdetr",
+                description="Vision inference backend: 'rfdetr' (RF-DETR, default) or 'yolo' (YOLOv11 seg)",
             ),
             cleanup_orbbec_lock,
             LogInfo(msg="🚀 [1/5] Starting EXOTica MoveIt stack..."),

@@ -1,0 +1,1409 @@
+# Workspace Memory
+
+Generated: 2026-06-03T17:23:22
+Root: `/home/adip/workspace/disassembly_ws/src/agentic_disassembly`
+Git: branch `devel_v1`, HEAD `acbbb7f`
+
+Scope: normal project files reported by `rg --files --hidden` with `.git`, `.claude`, `.claude-flow`, `.swarm`, and this generated file excluded. Hidden local tool/cache directories are summarized, not enumerated. Binary/model/mesh assets are inventoried but not read as source.
+
+## Hidden Local State Summary
+
+- `.claude-flow`: 133 files, 350.1 KB
+- `.claude`: 7 files, 160.1 KB
+- `.swarm`: 4 files, 213.5 KB
+- `.code-review-graph`: 2 files, 7.3 MB
+
+## Code-Review Graph
+
+- counts={'nodes': 720, 'edges': 8951, 'communities': 0, 'flows': 0}
+- metadata={'schema_version': '5', 'last_updated': '2026-06-03T17:10:20', 'last_build_type': 'incremental', 'git_branch': 'devel_v1', 'git_head_sha': 'acbbb7f958aab784e438ad86b801c71a4f50a3c6'}
+- node_kinds=[('Function', 628), ('Class', 50), ('File', 37), ('Test', 5)]
+- edge_kinds=[('CALLS', 7805), ('CONTAINS', 702), ('IMPORTS_FROM', 393), ('INHERITS', 30), ('TESTED_BY', 21)]
+- covered_files=disassembly_skill/disassembly_skill/config_builder/models/config_model.py, disassembly_skill/disassembly_skill/config_builder/utils/validation.py, disassembly_skill/disassembly_skill/config_runner.py, disassembly_skill/disassembly_skill/debug_feed_republisher.py, disassembly_skill/disassembly_skill/groq_master_agent.py, disassembly_skill/disassembly_skill/master_agent.py, disassembly_skill/disassembly_skill/object_flip_drop_skill.py, disassembly_skill/disassembly_skill/object_flip_skill.py, disassembly_skill/disassembly_skill/object_hold_skill.py, disassembly_skill/disassembly_skill/object_pickup_skill.py, disassembly_skill/disassembly_skill/unscrew_skill.py, disassembly_skill/launch/calibrated_disassembly_system.launch.py, disassembly_skill/launch/disassembly_system.launch.py, disassembly_skill/setup.py, disassembly_skill/test/test_device_config.py, dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py, dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py, dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py, dual_arm_moveit_config/hardware/real_hardware.py, dual_arm_moveit_config/launch/demo.launch.py, tool_camera_pkg/launch/tool_camera.launch.py, tool_controller/tool_controller/tool_commander.py, vision_agent/launch/orbbec_camera.launch.py, vision_agent/launch/start_vision.launch.py, vision_agent/launch/system_startup.launch.py, vision_agent/setup.py, vision_agent/vision_agent/agents/scout.py, vision_agent/vision_agent/agents/sniper.py, vision_agent/vision_agent/camera_crop_republisher.py, vision_agent/vision_agent/common.py, vision_agent/vision_agent/dashboard_node.py, vision_agent/vision_agent/dashboard_window.py, vision_agent/vision_agent/global_node.py, vision_agent/vision_agent/local_node.py, vision_agent/vision_agent/runtime_env.py, vision_training/Project 1 (Segmentation)/rfdetr/rfdetr-train.ipynb, vision_training/Project 2 (Tool-Screw)/rfdetr/rfdetr-train.ipynb
+
+## High-Level Architecture
+
+- ROS 2 Humble dual-arm disassembly workspace.
+- `dual_arm_moveit_config` owns MoveIt, ros2_control, Servo, EXOTica wrappers, hardware bridge scripts, and launch orchestration.
+- `dual_arm_scene_description` owns the URDF/Xacro/mesh/USD scene assets used by MoveIt and RViz.
+- `vision_agent` owns camera crop republishing and split inference nodes: global, local, classifier, dashboard.
+- `disassembly_skill` is the application layer: device configs, config builder, skill nodes, deterministic config runner, and LLM master agents.
+- `arm_teleop` provides webcam/Quest/joystick teleoperation but currently has stale package references that need patching before clean use.
+- `tool_controller`, `tool_camera_pkg`, and `rq_fts_ros2_driver` integrate screwdriver, tool camera, and FT300 force-torque sensing.
+- `exotica`, `bio_ik`, `easy_handeye2`, and `aruco_ros` are dependency/vendor packages kept in the source tree.
+
+## Active Runtime Flow
+
+1. MoveIt/EXOTica: `ros2 launch dual_arm_moveit_config exotica.launch.py hardware_type:=real`.
+2. Full disassembly: `ros2 launch disassembly_skill disassembly_system.launch.py hardware_type:=real`.
+3. `disassembly_system.launch.py` starts cleanup, MoveIt/EXOTica, hand-eye TF publisher, FT300 standalone node, vision system, debug republisher, and dashboard window.
+4. `vision_agent/launch/start_vision.launch.py` starts Orbbec, tool camera, crop republisher, global/local/classifier/dashboard nodes.
+5. Skill nodes consume vision state, TF, joint state/effort, and controller services through `disassembly_skill.motion_backend`, which wraps `dual_arm_moveit_config.motion_backend`.
+
+## Package Summary
+
+- `.`: 5 files, 38.9 KB, 1237 text lines. Repository root metadata/docs or hidden tool state.
+  Main kinds: script/text:2, Markdown doc:2, C# source:1
+- `arm_teleop`: 18 files, 163.5 KB, 3989 text lines. Webcam, Quest-topic, and joystick teleoperation nodes and launch files.
+  Active note: Teleop package, but several manifests/launches still refer to stale nr_dual_arm_moveit_config.
+  Main kinds: Python source:8, ROS launch file:4, YAML config:2, ROS package manifest:1, script/text:1, tooling config:1
+- `bio_ik`: 29 files, 583.9 KB, 11070 text lines. Vendored BioIK MoveIt kinematics plugin.
+  Main kinds: C/C++ source:20, PDF doc:2, CMake build file:1, script/text:1, text/config:1, Markdown doc:1
+- `camera_calibaration`: 142 files, 7.4 MB, 22316 text lines. Vendored easy_handeye2 and aruco_ros calibration packages. Directory name is misspelled in repo.
+  Main kinds: C/C++ source:45, image asset:25, ROS interface:20, Python source:17, ROS launch file:7, CMake build file:5
+- `disassembly_skill`: 41 files, 682.7 KB, 15914 text lines. Device configs, config builder, skill nodes, deterministic runner, and LLM orchestration.
+  Active note: Active application layer. disassembly_system.launch.py starts MoveIt, hand-eye, FT300, vision, debug republisher, and dashboard.
+  Main kinds: Python source:26, YAML config:4, ROS launch file:4, Markdown doc:3, ROS package manifest:1, script/text:1
+- `dual_arm_moveit_config`: 42 files, 332.7 KB, 7356 text lines. MoveIt/ros2_control/Servo/EXOTica launch and Python motion/hardware integration.
+  Active note: Active MoveIt package. Main launch: launch/exotica.launch.py -> launch/demo.launch.py plus exotica_ik_server_node.py.
+  Main kinds: YAML config:10, ROS launch file:10, Python source:9, robot description:3, calibration file:3, RViz config:2
+- `dual_arm_scene_description`: 78 files, 315.9 MB, 3492 text lines. URDF/Xacro/mesh/USD robot and world description assets.
+  Active note: Active scene description package installed into share with urdf/meshes/launch/rviz.
+  Main kinds: USD scene asset:38, mesh asset:30, robot description:4, ROS launch file:2, CMake build file:1, image asset:1
+- `exotica`: 732 files, 3.7 MB, 75503 text lines. Vendored EXOTica motion-planning framework and plugins.
+  Main kinds: C/C++ source:223, text/config:116, XML/UI config:88, script/text:64, RST doc:55, ROS launch file:47
+- `rq_fts_ros2_driver`: 44 files, 3.6 MB, 4101 text lines. Robotiq FT sensor driver, interfaces, and description.
+  Main kinds: C/C++ source:11, mesh asset:6, robot description:6, ROS launch file:5, CMake build file:3, ROS package manifest:3
+- `tool_camera_pkg`: 10 files, 8.3 KB, 267 text lines. USB tool camera launch and calibration config.
+  Active note: Active wrapper around usb_cam for local tool camera.
+  Main kinds: Python source:4, YAML config:1, ROS launch file:1, ROS package manifest:1, script/text:1, tooling config:1
+- `tool_controller`: 12 files, 13.0 KB, 433 text lines. Screwdriver serial/Pico command bridge.
+  Active note: Active tool commander package for screwdriver serial commands.
+  Main kinds: Python source:7, YAML config:1, ROS package manifest:1, script/text:1, tooling config:1, ament_python setup:1
+- `vision_agent`: 39 files, 187.7 KB, 4835 text lines. Orbbec/tool-camera crop republishing plus split global/local/classifier/dashboard vision nodes.
+  Active note: Active launch path is start_vision.launch.py using global_node/local_node/classifier_node/dashboard_node/camera_crop_republisher.
+  Main kinds: Python source:24, text/config:5, ROS launch file:3, script/text:3, YAML config:1, ROS package manifest:1
+- `vision_training`: 21 files, 1.7 GB, 1411 text lines. RF-DETR/YOLO training notebooks, scripts, model checkpoints, and experiments.
+  Main kinds: model artifact:9, Jupyter notebook:5, Python source:4, tooling config:2, Markdown doc:1
+
+## Extension Counts
+
+`.py`:211, `.h`:149, `.cpp`:147, `.xml`:131, `.in`:98, `[none]`:76, `.rst`:58, `.txt`:39, `.stl`:39, `.usd`:38, `.urdf`:33, `.png`:28, `.yaml`:22, `.md`:18, `.rviz`:16, `.srv`:14, `.srdf`:12, `.xacro`:10, `.cfg`:8, `.msg`:8, `.jpg`:7, `.scene`:6, `.pt`:5, `.ipynb`:5, `.obj`:4, `.pdf`:3, `.hpp`:3, `.ui`:3, `.calib`:3, `.sh`:3, `.mtl`:3, `.traj`:3, `.cmake`:2, `.onnx`:2, `.pth`:2, `.cs`:1, `.dae`:1, `.toml`:1, `.lock`:1
+
+## Console Entry Points
+
+### `arm_teleop/setup.py`
+- `webcam_hand_tracker = arm_teleop.webcam_hand_tracker:main`
+- `exotica_arm_teleop = arm_teleop.exotica_arm_teleop:main`
+- `joy_arm_teleop = arm_teleop.joy_arm_teleop:main`
+- `joy_teleop_control_panel = arm_teleop.joy_teleop_control_panel:main`
+- `wait_for_exotica_ready = arm_teleop.wait_for_exotica_ready:main`
+- `teleop_control_panel = arm_teleop.teleop_control_panel:main`
+
+### `camera_calibaration/easy_handeye2/easy_handeye2/setup.py`
+- `handeye_server = easy_handeye2.handeye_server:main`
+- `handeye_server_robot = easy_handeye2.handeye_server_robot:main`
+- `handeye_publisher = easy_handeye2.handeye_publisher:main`
+- `handeye_calibration_commander = easy_handeye2.handeye_calibration_commander:main`
+
+### `disassembly_skill/setup.py`
+- `motion_backend = disassembly_skill.motion_backend:main`
+- `debug_feed_republisher = disassembly_skill.debug_feed_republisher:main`
+- `object_hold_skill = disassembly_skill.object_hold_skill:main`
+- `object_flip_skill = disassembly_skill.object_flip_skill:main`
+- `object_flip_drop_skill = disassembly_skill.object_flip_drop_skill:main`
+- `object_pickup_skill = disassembly_skill.object_pickup_skill:main`
+- `unscrew_skill = disassembly_skill.unscrew_skill:main`
+- `test_exotica_planner = disassembly_skill.test_exotica_planner:main`
+- `master_agent = disassembly_skill.master_agent:main`
+- `groq_master_agent = disassembly_skill.groq_master_agent:main`
+- `device_config_builder = disassembly_skill.config_builder.config_builder_app:main`
+- `config_runner = disassembly_skill.config_runner:main`
+
+### `tool_camera_pkg/setup.py`
+- No console entry points detected.
+
+### `tool_controller/setup.py`
+- `tool_commander = tool_controller.tool_commander:main`
+
+### `vision_agent/setup.py`
+- `start_vision = vision_agent.agent_node:main`
+- `start_vision_rtdetr = vision_agent.agent_node_v2:main`
+- `start_vision_v2 = vision_agent.agent_node_v2:main`
+- `start_vision_split = vision_agent.split_runtime:main`
+- `start_vision_global = vision_agent.global_node:main`
+- `start_vision_local = vision_agent.local_node:main`
+- `start_vision_classifier = vision_agent.classifier_node:main`
+- `start_vision_dashboard = vision_agent.dashboard_node:main`
+- `dashboard_window = vision_agent.dashboard_window:main`
+- `detect_workspace = vision_agent.workspace_detector:main`
+- `crop_camera_streams = vision_agent.camera_crop_republisher:main`
+
+## Known Hazards
+
+- README.md: contains stale nr_dual_arm_* reference
+- arm_teleop/arm_teleop/exotica_arm_teleop.py: contains stale nr_dual_arm_* reference
+- arm_teleop/arm_teleop/joy_arm_teleop.py: contains stale nr_dual_arm_* reference
+- arm_teleop/launch/joy_exotica_teleop.launch.py: contains stale nr_dual_arm_* reference
+- arm_teleop/launch/quest_exotica_teleop.launch.py: contains stale nr_dual_arm_* reference
+- arm_teleop/launch/webcam_exotica_teleop.launch.py: contains stale nr_dual_arm_* reference
+- arm_teleop/package.xml: contains stale nr_dual_arm_* reference
+- disassembly_skill/DISASSEMBLY_SKILLS_REPORT.md: hard-coded dependency on /home/adip/workspace/dev_ws
+- disassembly_skill/launch/disassembly_system.launch.py: hard-coded dependency on /home/adip/workspace/dev_ws
+- dual_arm_moveit_config/launch/dual_arm_exotica_stream.launch.py: references stream demo executables not present in source/install list
+- vision_agent/setup.py: declares legacy/missing console modules
+
+## Dirty Worktree At Generation
+
+- `M .gitignore`
+- ` M disassembly_skill/config/device_configs/hdd.yaml`
+- ` M disassembly_skill/disassembly_skill/config_builder/utils/validation.py`
+- ` M disassembly_skill/disassembly_skill/config_runner.py`
+- ` M disassembly_skill/disassembly_skill/groq_master_agent.py`
+- ` M disassembly_skill/disassembly_skill/master_agent.py`
+- ` M disassembly_skill/disassembly_skill/object_hold_skill.py`
+- ` M disassembly_skill/disassembly_skill/object_pickup_skill.py`
+- ` M disassembly_skill/disassembly_skill/unscrew_skill.py`
+- ` M disassembly_skill/launch/disassembly_system.launch.py`
+- ` M dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py`
+- ` M dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py`
+- ` M dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py`
+- ` M dual_arm_moveit_config/hardware/real_hardware.py`
+- ` M vision_agent/setup.py`
+- ` M vision_agent/vision_agent/common.py`
+- ` M vision_agent/vision_agent/dashboard_node.py`
+- ` M vision_agent/vision_agent/dashboard_window.py`
+- ` M vision_agent/vision_agent/global_node.py`
+- ` M vision_agent/vision_agent/local_node.py`
+- ` M "vision_training/Project 1 (Segmentation)/rfdetr/rfdetr-train.ipynb"`
+- ` M "vision_training/Project 2 (Tool-Screw)/rfdetr/rfdetr-train.ipynb"`
+- `?? WORKSPACE_MEMORY.md`
+- `?? disassembly_skill/config/device_configs/laptop.yaml`
+- `?? disassembly_skill/config/device_configs/mini_pc.yaml`
+- `?? vision_agent/vision_agent/agents/rfdetr/`
+- `?? vision_agent/vision_agent/agents/yolo/`
+- `?? "vision_training/Project 1 (Segmentation)/rfdetr/global_model/best.onnx"`
+- `?? "vision_training/Project 1 (Segmentation)/rfdetr/global_model/best.pt"`
+- `?? "vision_training/Project 1 (Segmentation)/rfdetr/yolov11-train.ipynb"`
+- `?? "vision_training/Project 2 (Tool-Screw)/rfdetr/local_model/best.onnx"`
+- `?? "vision_training/Project 2 (Tool-Screw)/rfdetr/local_model/best.pt"`
+- `?? "vision_training/Project 2 (Tool-Screw)/rfdetr/yolov11-train.ipynb"`
+
+## File Inventory
+
+### `.`
+- `.gitattributes` - script/text; 83 B; lines=2; text file
+- `.gitignore` - script/text; 2.5 KB; lines=89; text file
+- `OpenXRGestureDetectorROS.cs` - C# source; 13.6 KB; lines=385; approx code symbols=0
+- `README.md` - Markdown doc; 10.3 KB; lines=419; headings=NR Dual-Arm Workspace, New System Quick Start, Remaining packages, Build
+- `SKILLS_ARCHITECTURE.md` - Markdown doc; 12.4 KB; lines=342; headings=Disassembly Skills — Architecture Flowcharts, How the Skills Chain Together, 1. Object Hold Skill, 2. Unscrew Skill
+### `arm_teleop`
+- `arm_teleop/arm_teleop/__init__.py` - Python source; 73 B; lines=1; doc=Teleoperation package for webcam tracking and EXOTica arm control.
+- `arm_teleop/arm_teleop/exotica_arm_teleop.py` - Python source; 44.1 KB; lines=991; classes=ExoticaArmTeleop(33 methods); funcs=main; imports=__future__, arm_teleop, geometry_msgs, math, nr_dual_arm_moveit_config, rclpy, std_msgs, std_srvs, threading, time
+- `arm_teleop/arm_teleop/hand_math.py` - Python source; 6.1 KB; lines=200; funcs=clamp, vec_add, vec_sub, vec_scale, dot, cross, norm, normalize, mat_vec_mul, quat_normalize...; imports=__future__, math, typing
+- `arm_teleop/arm_teleop/joy_arm_teleop.py` - Python source; 25.0 KB; lines=613; doc=Joystick (gamepad) teleoperation for dual-arm setup via EXOTica IK.; classes=JoyArmTeleop(19 methods); funcs=main; imports=__future__, arm_teleop, math, nr_dual_arm_moveit_config, rclpy, sensor_msgs, std_msgs, std_srvs, threading, time
+- `arm_teleop/arm_teleop/joy_teleop_control_panel.py` - Python source; 16.4 KB; lines=422; doc=Joy Teleop Control Panel — Tkinter GUI for gamepad arm teleoperation.; classes=JoyTeleopPanelNode(10 methods), JoyTeleopControlPanel(10 methods); funcs=main; imports=__future__, rclpy, std_msgs, std_srvs, threading, tkinter
+- `arm_teleop/arm_teleop/teleop_control_panel.py` - Python source; 17.8 KB; lines=481; doc=Teleop Control Panel — Tkinter GUI node for arm teleop control.; classes=TeleopControlPanelNode(13 methods), TeleopControlPanel(12 methods); funcs=main; imports=__future__, geometry_msgs, rclpy, std_msgs, std_srvs, threading, tkinter
+- `arm_teleop/arm_teleop/wait_for_exotica_ready.py` - Python source; 1.7 KB; lines=54; classes=ExoticaReadyWaiter(3 methods); funcs=main; imports=__future__, rclpy, std_msgs, threading
+- `arm_teleop/arm_teleop/webcam_hand_tracker.py` - Python source; 29.6 KB; lines=599; classes=WebcamHandTracker(24 methods); funcs=main; imports=PIL, __future__, arm_teleop, collections, geometry_msgs, os, pathlib, rclpy, statistics, std_msgs
+- `arm_teleop/config/quest_exotica_teleop.yaml` - YAML config; 910 B; lines=32; top-level keys=exotica_arm_teleop
+- `arm_teleop/config/webcam_exotica_teleop.yaml` - YAML config; 1.7 KB; lines=57; top-level keys=webcam_hand_tracker, exotica_arm_teleop
+- `arm_teleop/launch/joy_exotica_teleop.launch.py` - ROS launch file; 3.5 KB; lines=92; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, pathlib
+- `arm_teleop/launch/quest_exotica_teleop.launch.py` - ROS launch file; 5.0 KB; lines=121; doc=Teleop launch that expects hand-tracking data from a Meta Quest (or any external; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, pathlib
+- `arm_teleop/launch/realsense.launch.py` - ROS launch file; 3.8 KB; lines=111; funcs=_camera_node, _republisher_node, generate_launch_description; imports=launch, launch_ros
+- `arm_teleop/launch/webcam_exotica_teleop.launch.py` - ROS launch file; 4.5 KB; lines=116; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, pathlib
+- `arm_teleop/package.xml` - ROS package manifest; 992 B; lines=29; package=arm_teleop; deps=rclpy, std_msgs, std_srvs, sensor_msgs, geometry_msgs, nr_dual_arm_moveit_config, opencv-python, image_transport, realsense2_camera; desc=Webcam hand tracking and EXOTica-based arm teleoperation for the dual-
+- `arm_teleop/resource/arm_teleop` - script/text; 11 B; lines=1; text file
+- `arm_teleop/setup.cfg` - tooling config; 89 B; lines=4; text file
+- `arm_teleop/setup.py` - ament_python setup; 2.2 KB; lines=65; classes=DevelopCommand(1 methods); imports=glob, os, setuptools, sys
+### `bio_ik`
+- `bio_ik/CMakeLists.txt` - CMake build file; 4.3 KB; lines=188; text file
+- `bio_ik/Doxyfile` - script/text; 103.8 KB; lines=2427; text file
+- `bio_ik/LICENCE.txt` - text/config; 1.5 KB; lines=31; text file
+- `bio_ik/README.md` - Markdown doc; 24.9 KB; lines=545; headings=bio_ik, Disclaimer, Installation and Setup, Basic Usage
+- `bio_ik/bio_ik_kinematics_description.xml` - XML/UI config; 203 B; lines=4; text file
+- `bio_ik/doc/goals.pdf` - PDF doc; 20.5 KB; lines=0; not read as source
+- `bio_ik/doc/pr2_vt_0.png` - image asset; 115.0 KB; lines=0; not read as source
+- `bio_ik/doc/solvers.pdf` - PDF doc; 19.0 KB; lines=0; not read as source
+- `bio_ik/include/bio_ik/bio_ik.h` - C/C++ source; 1.9 KB; lines=48; approx code symbols=0
+- `bio_ik/include/bio_ik/frame.h` - C/C++ source; 7.9 KB; lines=260; approx code symbols=2
+- `bio_ik/include/bio_ik/goal.h` - C/C++ source; 5.3 KB; lines=130; approx code symbols=2
+- `bio_ik/include/bio_ik/goal_types.h` - C/C++ source; 24.2 KB; lines=719; approx code symbols=21
+- `bio_ik/include/bio_ik/robot_info.h` - C/C++ source; 4.9 KB; lines=126; approx code symbols=2
+- `bio_ik/package.xml` - ROS package manifest; 976 B; lines=34; package=bio_ik; deps=moveit_core, pluginlib, eigen, moveit_ros_planning, rclcpp, tf2, tf2_eigen, tf2_kdl, tf2_geometry_msgs, ament_cmake_ros; desc=BioIK for ROS 2
+- `bio_ik/src/forward_kinematics.h` - C/C++ source; 61.1 KB; lines=1504; approx code symbols=9
+- `bio_ik/src/goal_types.cpp` - C/C++ source; 12.2 KB; lines=273; approx code symbols=4
+- `bio_ik/src/ik_base.h` - C/C++ source; 8.4 KB; lines=215; approx code symbols=0
+- `bio_ik/src/ik_cppoptlib.cpp` - C/C++ source; 11.2 KB; lines=257; approx code symbols=1
+- `bio_ik/src/ik_evolution_1.cpp` - C/C++ source; 20.0 KB; lines=561; approx code symbols=0
+- `bio_ik/src/ik_evolution_2.cpp` - C/C++ source; 27.9 KB; lines=659; approx code symbols=0
+- `bio_ik/src/ik_gradient.cpp` - C/C++ source; 10.1 KB; lines=293; approx code symbols=0
+- `bio_ik/src/ik_neural.cpp` - C/C++ source; 25.6 KB; lines=690; approx code symbols=2
+- `bio_ik/src/ik_parallel.h` - C/C++ source; 8.8 KB; lines=278; approx code symbols=3
+- `bio_ik/src/ik_test.cpp` - C/C++ source; 4.8 KB; lines=137; approx code symbols=0
+- `bio_ik/src/kinematics_plugin.cpp` - C/C++ source; 20.7 KB; lines=617; approx code symbols=2
+- `bio_ik/src/problem.cpp` - C/C++ source; 12.2 KB; lines=342; approx code symbols=6
+- `bio_ik/src/problem.h` - C/C++ source; 5.2 KB; lines=144; approx code symbols=0
+- `bio_ik/src/utils.h` - C/C++ source; 18.0 KB; lines=468; approx code symbols=3
+- `bio_ik/test/utest.cpp` - C/C++ source; 3.7 KB; lines=120; approx code symbols=2
+### `camera_calibaration`
+- `camera_calibaration/aruco_ros/LICENSE` - script/text; 1.0 KB; lines=7; text file
+- `camera_calibaration/aruco_ros/README.md` - Markdown doc; 2.9 KB; lines=86; headings=Features, Applications, ROS API, Messages
+- `camera_calibaration/aruco_ros/aruco/CHANGELOG.rst` - RST doc; 3.8 KB; lines=139; text file
+- `camera_calibaration/aruco_ros/aruco/CMakeLists.txt` - CMake build file; 1.7 KB; lines=75; text file
+- `camera_calibaration/aruco_ros/aruco/cfg/ArucoThreshold.cfg` - tooling config; 556 B; lines=14; text file
+- `camera_calibaration/aruco_ros/aruco/include/aruco/aruco.h` - C/C++ source; 864 B; lines=25; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/aruco_cvversioning.h` - C/C++ source; 1.1 KB; lines=33; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/aruco_export.h` - C/C++ source; 1.0 KB; lines=34; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/cameraparameters.h` - C/C++ source; 5.0 KB; lines=142; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/cvdrawingutils.h` - C/C++ source; 1.5 KB; lines=43; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/debug.h` - C/C++ source; 4.6 KB; lines=127; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/dictionary.h` - C/C++ source; 5.5 KB; lines=191; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/dictionary_based.h` - C/C++ source; 2.0 KB; lines=68; approx code symbols=1
+- `camera_calibaration/aruco_ros/aruco/include/aruco/fractaldetector.h` - C/C++ source; 3.3 KB; lines=133; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/fractallabelers/fractallabeler.h` - C/C++ source; 1.4 KB; lines=52; approx code symbols=1
+- `camera_calibaration/aruco_ros/aruco/include/aruco/fractallabelers/fractalmarker.h` - C/C++ source; 1.2 KB; lines=65; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/fractallabelers/fractalmarkerset.h` - C/C++ source; 3.8 KB; lines=142; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/fractallabelers/fractalposetracker.h` - C/C++ source; 5.5 KB; lines=147; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/ippe.h` - C/C++ source; 19.8 KB; lines=360; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/levmarq.h` - C/C++ source; 12.3 KB; lines=386; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/marker.h` - C/C++ source; 5.3 KB; lines=191; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/markerdetector.h` - C/C++ source; 19.3 KB; lines=463; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/markerdetector_impl.h` - C/C++ source; 17.3 KB; lines=499; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/markerlabeler.h` - C/C++ source; 3.4 KB; lines=98; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/markermap.h` - C/C++ source; 6.1 KB; lines=215; approx code symbols=1
+- `camera_calibaration/aruco_ros/aruco/include/aruco/picoflann.h` - C/C++ source; 25.2 KB; lines=792; approx code symbols=2
+- `camera_calibaration/aruco_ros/aruco/include/aruco/posetracker.h` - C/C++ source; 6.2 KB; lines=189; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco/include/aruco/timers.h` - C/C++ source; 5.8 KB; lines=289; approx code symbols=1
+- `camera_calibaration/aruco_ros/aruco/package.xml` - ROS package manifest; 798 B; lines=23; package=aruco; deps=cv_bridge, eigen, ament_cmake; desc=The ARUCO Library has been developed by the Ava group of the Univerist
+- `camera_calibaration/aruco_ros/aruco/src/aruco/CMakeLists.txt` - CMake build file; 2.1 KB; lines=77; text file
+- `camera_calibaration/aruco_ros/aruco/src/aruco/cameraparameters.cpp` - C/C++ source; 16.0 KB; lines=558; approx code symbols=13
+- `camera_calibaration/aruco_ros/aruco/src/aruco/cvdrawingutils.cpp` - C/C++ source; 6.4 KB; lines=164; approx code symbols=3
+- `camera_calibaration/aruco_ros/aruco/src/aruco/debug.cpp` - C/C++ source; 1.3 KB; lines=63; approx code symbols=5
+- `camera_calibaration/aruco_ros/aruco/src/aruco/dictionary.cpp` - C/C++ source; 234.8 KB; lines=3715; approx code symbols=12
+- `camera_calibaration/aruco_ros/aruco/src/aruco/dictionary_based.cpp` - C/C++ source; 9.6 KB; lines=309; approx code symbols=8
+- `camera_calibaration/aruco_ros/aruco/src/aruco/fractaldetector.cpp` - C/C++ source; 5.9 KB; lines=185; approx code symbols=6
+- `camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractallabeler.cpp` - C/C++ source; 3.9 KB; lines=145; approx code symbols=5
+- `camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarker.cpp` - C/C++ source; 2.2 KB; lines=76; approx code symbols=2
+- `camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalmarkerset.cpp` - C/C++ source; 33.4 KB; lines=866; approx code symbols=20
+- `camera_calibaration/aruco_ros/aruco/src/aruco/fractallabelers/fractalposetracker.cpp` - C/C++ source; 32.9 KB; lines=1093; approx code symbols=9
+- `camera_calibaration/aruco_ros/aruco/src/aruco/ippe.cpp` - C/C++ source; 38.9 KB; lines=1300; approx code symbols=22
+- `camera_calibaration/aruco_ros/aruco/src/aruco/marker.cpp` - C/C++ source; 14.3 KB; lines=495; approx code symbols=16
+- `camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector.cpp` - C/C++ source; 14.0 KB; lines=464; approx code symbols=34
+- `camera_calibaration/aruco_ros/aruco/src/aruco/markerdetector_impl.cpp` - C/C++ source; 59.1 KB; lines=1851; approx code symbols=39
+- `camera_calibaration/aruco_ros/aruco/src/aruco/markerlabeler.cpp` - C/C++ source; 1.4 KB; lines=43; approx code symbols=2
+- `camera_calibaration/aruco_ros/aruco/src/aruco/markermap.cpp` - C/C++ source; 12.9 KB; lines=467; approx code symbols=14
+- `camera_calibaration/aruco_ros/aruco/src/aruco/posetracker.cpp` - C/C++ source; 18.5 KB; lines=595; approx code symbols=15
+- `camera_calibaration/aruco_ros/aruco_msgs/CHANGELOG.rst` - RST doc; 1.6 KB; lines=88; text file
+- `camera_calibaration/aruco_ros/aruco_msgs/CMakeLists.txt` - CMake build file; 653 B; lines=26; text file
+- `camera_calibaration/aruco_ros/aruco_msgs/msg/Marker.msg` - ROS interface; 90 B; lines=4; fields=std_msgs/Header header; uint32 id; geometry_msgs/PoseWithCovariance pose; float64 confidence
+- `camera_calibaration/aruco_ros/aruco_msgs/msg/MarkerArray.msg` - ROS interface; 51 B; lines=2; fields=std_msgs/Header header; aruco_msgs/Marker[] markers
+- `camera_calibaration/aruco_ros/aruco_msgs/package.xml` - ROS package manifest; 856 B; lines=29; package=aruco_msgs; deps=geometry_msgs, std_msgs, rosidl_default_runtime, rosidl_default_generators, ament_cmake; desc=The aruco_msgs package
+- `camera_calibaration/aruco_ros/aruco_ros/CHANGELOG.rst` - RST doc; 6.5 KB; lines=189; text file
+- `camera_calibaration/aruco_ros/aruco_ros/CMakeLists.txt` - CMake build file; 2.8 KB; lines=120; text file
+- `camera_calibaration/aruco_ros/aruco_ros/cfg/ArucoThreshold.cfg` - tooling config; 900 B; lines=18; text file
+- `camera_calibaration/aruco_ros/aruco_ros/etc/marker26_5cm.jpg` - image asset; 8.1 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/marker26_5cm_margin_1cm.jpg` - image asset; 6.2 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/marker26_5cm_margin_2cm.jpg` - image asset; 9.1 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/marker582_5cm.jpg` - image asset; 10.3 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/marker582_5cm_margin_2cm.jpg` - image asset; 6.9 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/marker_in_hand.jpg` - image asset; 11.9 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/marker_in_object.jpg` - image asset; 4.8 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/new_coordinates.png` - image asset; 23.5 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/reem_gazebo_floating_marker.png` - image asset; 9.2 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/etc/reem_gazebo_floating_marker_world.png` - image asset; 61.5 KB; lines=0; not read as source
+- `camera_calibaration/aruco_ros/aruco_ros/include/aruco_ros/aruco_ros_utils.hpp` - C/C++ source; 1.5 KB; lines=45; approx code symbols=0
+- `camera_calibaration/aruco_ros/aruco_ros/launch/double.launch.py` - ROS launch file; 2.9 KB; lines=93; funcs=launch_setup, generate_launch_description; imports=launch, launch_ros
+- `camera_calibaration/aruco_ros/aruco_ros/launch/marker_publisher.launch.py` - ROS launch file; 1.7 KB; lines=58; funcs=launch_setup, generate_launch_description; imports=launch, launch_ros
+- `camera_calibaration/aruco_ros/aruco_ros/launch/orbbec_single.launch.py` - ROS launch file; 2.6 KB; lines=79; funcs=generate_launch_description; imports=launch, launch_ros
+- `camera_calibaration/aruco_ros/aruco_ros/launch/single.launch.py` - ROS launch file; 2.5 KB; lines=80; funcs=launch_setup, generate_launch_description; imports=launch, launch_ros
+- `camera_calibaration/aruco_ros/aruco_ros/package.xml` - ROS package manifest; 1.2 KB; lines=37; package=aruco_ros; deps=cv_bridge, geometry_msgs, image_transport, rclcpp, tf2, tf2_ros, tf2_geometry_msgs, aruco, aruco_msgs, sensor_msgs, visualization_msgs, ament_cmake; desc=The ARUCO Library has been developed by the Ava group of the Univerist
+- `camera_calibaration/aruco_ros/aruco_ros/src/aruco_ros_utils.cpp` - C/C++ source; 4.5 KB; lines=140; approx code symbols=4
+- `camera_calibaration/aruco_ros/aruco_ros/src/marker_publish.cpp` - C/C++ source; 11.0 KB; lines=294; approx code symbols=2
+- `camera_calibaration/aruco_ros/aruco_ros/src/simple_double.cpp` - C/C++ source; 13.1 KB; lines=318; approx code symbols=3
+- `camera_calibaration/aruco_ros/aruco_ros/src/simple_single.cpp` - C/C++ source; 15.5 KB; lines=385; approx code symbols=2
+- `camera_calibaration/easy_handeye2/LICENSE.md` - Markdown doc; 7.4 KB; lines=163; headings=0. Additional Definitions, 1. Exception to Section 3 of the GNU GPL, 2. Conveying Modified Versions, 3. Object Code Incorporating Material from Library Header Files
+- `camera_calibaration/easy_handeye2/README.md` - Markdown doc; 11.0 KB; lines=221; headings=easy_handeye2: automated, hardware-independent Hand-Eye Calibration for ROS2, News, Use Cases, Getting started
+- `camera_calibaration/easy_handeye2/docs/img/00_cannot_calibrate_movements.png` - image asset; 16.4 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/00_cannot_calibrate_rviz.png` - image asset; 174.6 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/01_start_movements.png` - image asset; 15.7 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/01_start_rviz.png` - image asset; 153.3 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/01_start_sample.png` - image asset; 38.0 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/02_plan_movements.png` - image asset; 16.0 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/02_sample_sample.png` - image asset; 58.1 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/03_executed_movements.png` - image asset; 16.3 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/03_executed_sample.png` - image asset; 58.0 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/04_plan_show.png` - image asset; 155.5 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/05_calibrated_movements.png` - image asset; 75.9 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/05_calibrated_rviz.png` - image asset; 137.9 KB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/eye_on_base_aruco_pic.png` - image asset; 1.5 MB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/eye_on_base_ndi_pic.png` - image asset; 1.4 MB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/img/eye_on_hand_aruco_pic.png` - image asset; 2.5 MB; lines=0; not read as source
+- `camera_calibaration/easy_handeye2/docs/troubleshooting.md` - Markdown doc; 3.2 KB; lines=33; headings=Troubleshooting, Calibration frames, Sampling, Marker tracking
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/__init__.py` - Python source; 1.3 KB; lines=25; imports=os, pathlib
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/common_launch.py` - Python source; 659 B; lines=13; imports=launch
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_calibration.py` - Python source; 5.9 KB; lines=136; classes=HandeyeCalibrationParametersProvider(3 methods); funcs=filepath_for_calibration, _normalize_legacy_calibration, load_calibration, save_calibration; imports=easy_handeye2_msgs, os, pathlib, rclpy, rosidl_runtime_py, yaml
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_calibration_backend_opencv.py` - Python source; 3.8 KB; lines=96; classes=HandeyeCalibrationBackendOpenCV(3 methods); imports=cv2, easy_handeye2, geometry_msgs, numpy, transforms3d
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_calibration_commander.py` - Python source; 3.4 KB; lines=97; classes=HandeyeCalibrationCommander(6 methods); funcs=getchar, main; imports=easy_handeye2, rclpy
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_client.py` - Python source; 5.2 KB; lines=112; classes=HandeyeClient(14 methods); imports=easy_handeye2, easy_handeye2_msgs, rclpy, std_srvs
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_publisher.py` - Python source; 1.9 KB; lines=57; classes=HandeyePublisher(1 methods); funcs=main; imports=easy_handeye2, geometry_msgs, rclpy, tf2_ros
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_robot.py` - Python source; 8.5 KB; lines=210; classes=CalibrationMovements(11 methods); funcs=quaternion_from_euler, quaternion_multiply; imports=__future__, copy, geometry_msgs, itertools, math, moveit_commander, numpy, rclpy, transforms3d
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_rqt_calibrator.py` - Python source; 924 B; lines=27; classes=RqtHandeyeCalibrator(5 methods); imports=easy_handeye2, rqt_gui_py, rqt_py_common
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_rqt_calibrator_widget.py` - Python source; 10.6 KB; lines=238; classes=RqtHandeyeCalibratorWidget(16 methods); funcs=format_sample; imports=ament_index_python, easy_handeye2, math, numpy, pathlib, python_qt_binding, transforms3d
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_rqt_evaluator.py` - Python source; 897 B; lines=27; classes=RqtHandeyeEvaluator(5 methods); imports=easy_handeye2, rqt_gui_py, rqt_py_common
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_rqt_evaluator_widget.py` - Python source; 11.7 KB; lines=233; classes=RqtHandeyeEvaluatorWidget(10 methods); imports=ament_index_python, easy_handeye2, numpy, pathlib, python_qt_binding, rclpy, tf2_ros
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_sampler.py` - Python source; 7.3 KB; lines=173; classes=HandeyeSampler(10 methods); imports=easy_handeye2, easy_handeye2_msgs, os, pathlib, rclpy, rosidl_runtime_py, tf2_ros, typing, yaml
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_server.py` - Python source; 9.0 KB; lines=209; classes=HandeyeServer(15 methods); funcs=main; imports=easy_handeye2, easy_handeye2_msgs, itertools, rclpy, std_msgs
+- `camera_calibaration/easy_handeye2/easy_handeye2/easy_handeye2/handeye_server_robot.py` - Python source; 4.6 KB; lines=86; classes=HandeyeServerRobot(6 methods); funcs=main; imports=easy_handeye2, easy_handeye2_msgs, math, rclpy
+- `camera_calibaration/easy_handeye2/easy_handeye2/launch/calibrate.launch.py` - ROS launch file; 3.3 KB; lines=56; funcs=generate_launch_description; imports=easy_handeye2, launch, launch_ros
+- `camera_calibaration/easy_handeye2/easy_handeye2/launch/evaluate.launch.py` - ROS launch file; 746 B; lines=20; funcs=generate_launch_description; imports=launch, launch_ros
+- `camera_calibaration/easy_handeye2/easy_handeye2/launch/publish.launch.py` - ROS launch file; 707 B; lines=20; funcs=generate_launch_description; imports=launch, launch_ros
+- `camera_calibaration/easy_handeye2/easy_handeye2/package.xml` - ROS package manifest; 1.3 KB; lines=36; package=easy_handeye2; deps=geometry_msgs, std_msgs, std_srvs, easy_handeye2_msgs, rclpy, tf2_ros, python-transforms3d-pip, python3-opencv, python_qt_binding, rqt_gui, rqt_gui_py, ament_cmake_python; desc=Simple, hardware-independent ROS2 library for hand-eye calibration
+- `camera_calibaration/easy_handeye2/easy_handeye2/plugin_calibrator.xml` - XML/UI config; 782 B; lines=18; text file
+- `camera_calibaration/easy_handeye2/easy_handeye2/plugin_evaluator.xml` - XML/UI config; 809 B; lines=18; text file
+- `camera_calibaration/easy_handeye2/easy_handeye2/resource/easy_handeye2` - script/text; 0 B; lines=0; text file
+- `camera_calibaration/easy_handeye2/easy_handeye2/resource/rqt_handeye.ui` - XML/UI config; 2.5 KB; lines=97; text file
+- `camera_calibaration/easy_handeye2/easy_handeye2/resource/rqt_handeye_evaluator.ui` - XML/UI config; 3.3 KB; lines=107; text file
+- `camera_calibaration/easy_handeye2/easy_handeye2/resource/rqt_handeye_info.ui` - XML/UI config; 3.1 KB; lines=114; text file
+- `camera_calibaration/easy_handeye2/easy_handeye2/scripts/rqt_calibrator.py` - Python source; 182 B; lines=8; imports=rqt_gui, sys
+- `camera_calibaration/easy_handeye2/easy_handeye2/scripts/rqt_evaluator.py` - Python source; 179 B; lines=8; imports=rqt_gui, sys
+- `camera_calibaration/easy_handeye2/easy_handeye2/setup.cfg` - tooling config; 94 B; lines=4; text file
+- `camera_calibaration/easy_handeye2/easy_handeye2/setup.py` - ament_python setup; 1.3 KB; lines=38; imports=glob, os, setuptools
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/CMakeLists.txt` - CMake build file; 1.3 KB; lines=35; text file
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/msg/HandeyeCalibration.msg` - ROS interface; 92 B; lines=2; fields=easy_handeye2_msgs/HandeyeCalibrationParameters parameters; geometry_msgs/Transform transform
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/msg/HandeyeCalibrationParameters.msg` - ROS interface; 237 B; lines=10; fields=string name; string calibration_type; string robot_base_frame; string robot_effector_frame; string tracking_base_frame; string tracking_marker_frame
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/msg/Sample.msg` - ROS interface; 62 B; lines=2; fields=geometry_msgs/Transform robot; geometry_msgs/Transform tracking
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/msg/SampleList.msg` - ROS interface; 94 B; lines=2; fields=easy_handeye2_msgs/HandeyeCalibrationParameters parameters; easy_handeye2_msgs/Sample[] samples
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/msg/TargetPoseList.msg` - ROS interface; 230 B; lines=5; fields=easy_handeye2_msgs/HandeyeCalibrationParameters parameters; geometry_msgs/PoseStamped home_pose; geometry_msgs/PoseStamped[] target_poses; int64 current_target_pose_index
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/package.xml` - ROS package manifest; 860 B; lines=26; package=easy_handeye2_msgs; deps=std_msgs, geometry_msgs, rosidl_default_runtime, rosidl_default_generators, ament_cmake; desc=Message formats to perform a hand-eye calibration from sampled tf tran
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/calibration/ComputeCalibration.srv` - ROS interface; 45 B; lines=3; fields=---; bool valid; HandeyeCalibration calibration
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/calibration/ListAlgorithms.srv` - ROS interface; 48 B; lines=3; fields=---; string[] algorithms; string current_algorithm
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/calibration/LoadSamples.srv` - ROS interface; 35 B; lines=3; fields=---; bool success; SampleList samples
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/calibration/RemoveSample.srv` - ROS interface; 40 B; lines=3; fields=int8 sample_index; ---; SampleList samples
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/calibration/SaveCalibration.srv` - ROS interface; 41 B; lines=3; fields=---; bool success; std_msgs/String filepath
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/calibration/SaveSamples.srv` - ROS interface; 16 B; lines=2; fields=---; bool success
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/calibration/SetAlgorithm.srv` - ROS interface; 37 B; lines=3; fields=string new_algorithm; ---; bool success
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/calibration/TakeSample.srv` - ROS interface; 22 B; lines=2; fields=---; SampleList samples
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/robot_movements/CheckStartingPose.srv` - ROS interface; 69 B; lines=3; fields=---; bool can_calibrate; easy_handeye2_msgs/TargetPoseList target_poses
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/robot_movements/EnumerateTargetPoses.srv` - ROS interface; 50 B; lines=2; fields=---; easy_handeye2_msgs/TargetPoseList target_poses
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/robot_movements/ExecutePlan.srv` - ROS interface; 16 B; lines=2; fields=---; bool success
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/robot_movements/PlanToSelectedTargetPose.srv` - ROS interface; 16 B; lines=2; fields=---; bool success
+- `camera_calibaration/easy_handeye2/easy_handeye2_msgs/srv/robot_movements/SelectTargetPose.srv` - ROS interface; 87 B; lines=4; fields=int64 target_pose_index; ---; bool success; easy_handeye2_msgs/TargetPoseList target_poses
+### `disassembly_skill`
+- `disassembly_skill/DISASSEMBLY_SKILLS_REPORT.md` - Markdown doc; 39.2 KB; lines=1213; headings=Disassembly Skills Package Analysis Report, Current status, Scope, Package Overview
+- `disassembly_skill/README.md` - Markdown doc; 5.1 KB; lines=143; headings=disassembly_skill, What is current, Bringup sequence, Runtime command
+- `disassembly_skill/config/device_configs/hdd.yaml` - YAML config; 13.2 KB; lines=382; top-level keys=device, components, screw_zones, disassembly_sequence, metadata
+- `disassembly_skill/config/device_configs/laptop.yaml` - YAML config; 9.2 KB; lines=270; top-level keys=device, components, screw_zones, disassembly_sequence, metadata
+- `disassembly_skill/config/device_configs/mini_pc.yaml` - YAML config; 13.4 KB; lines=375; top-level keys=device, components, screw_zones, disassembly_sequence, metadata
+- `disassembly_skill/config/tags.yaml` - YAML config; 627 B; lines=20; top-level keys=apriltag
+- `disassembly_skill/disassembly_skill/__init__.py` - Python source; 0 B; lines=0; empty/module marker
+- `disassembly_skill/disassembly_skill/config_builder/__init__.py` - Python source; 45 B; lines=2; doc=Device configuration builder package.
+- `disassembly_skill/disassembly_skill/config_builder/config_builder_app.py` - Python source; 57.3 KB; lines=1312; doc=Device Config Builder — dark card UI matching device_config_builder.jsx design.; classes=_Tooltip(3 methods), ConfigBuilderApp(42 methods); funcs=_frame, _label, _entry, _combo, _btn, _info, _section_hdr, _divider, _apply_ttk_style, main; imports=__future__, disassembly_skill, pathlib, tkinter, typing
+- `disassembly_skill/disassembly_skill/config_builder/models/__init__.py` - Python source; 23 B; lines=2; doc=Builder models.
+- `disassembly_skill/disassembly_skill/config_builder/models/config_model.py` - Python source; 9.8 KB; lines=278; doc=Config builder data model — spec-aligned schema.; classes=DeviceConfigDocument(15 methods); funcs=default_step_params, default_config_dict; imports=__future__, copy, typing
+- `disassembly_skill/disassembly_skill/config_builder/styles.py` - Python source; 549 B; lines=26; doc=Tkinter styling constants for the device config builder.
+- `disassembly_skill/disassembly_skill/config_builder/utils/__init__.py` - Python source; 26 B; lines=2; doc=Builder utilities.
+- `disassembly_skill/disassembly_skill/config_builder/utils/constants.py` - Python source; 1.6 KB; lines=66; doc=Shared constants for device configuration tooling.
+- `disassembly_skill/disassembly_skill/config_builder/utils/validation.py` - Python source; 4.5 KB; lines=118; doc=Validation logic for device configurations (spec-aligned schema).; funcs=_as_list, _detect_cycle, validate_config; imports=__future__, collections, constants, typing
+- `disassembly_skill/disassembly_skill/config_builder/utils/yaml_export.py` - Python source; 1.7 KB; lines=51; doc=YAML import/export and JSON project save/load for device configs.; funcs=load_yaml, save_yaml, save_project, load_project; imports=__future__, datetime, json, pathlib, typing, yaml
+- `disassembly_skill/disassembly_skill/config_runner.py` - Python source; 44.1 KB; lines=1032; doc=config_runner.py — GUI-driven deterministic disassembly executor.; classes=RunnerGUI(9 methods), ConfigRunner(31 methods); funcs=main; imports=__future__, ament_index_python, copy, datetime, disassembly_skill, geometry_msgs, json, math, pathlib, rclpy
+- `disassembly_skill/disassembly_skill/debug_feed_republisher.py` - Python source; 1.9 KB; lines=65; classes=DebugFeedRepublisher(2 methods); funcs=main; imports=cv2, numpy, rclpy, sensor_msgs, sys
+- `disassembly_skill/disassembly_skill/device_config.py` - Python source; 9.1 KB; lines=265; doc=Typed device-config middleware for disassembly skills.; classes=DeviceInfo, Component, ScrewZone, SequenceStep(5 methods), DeviceConfig(7 methods); imports=__future__, dataclasses, disassembly_skill, pathlib, typing
+- `disassembly_skill/disassembly_skill/groq_master_agent.py` - Python source; 33.1 KB; lines=711; classes=Tool(1 methods), TColor, AgentState, GroqMasterAgentNode(24 methods); funcs=run_live_dashboard, print_stage, _const_or_name, parse_action, main; imports=ast, asyncio, disassembly_skill, inspect, json, langgraph, math, multiprocessing, openai, pathlib
+- `disassembly_skill/disassembly_skill/master_agent.py` - Python source; 42.8 KB; lines=868; classes=Tool(1 methods), TColor, AgentState, MasterAgentNode(26 methods); funcs=run_live_dashboard, print_stage, _const_or_name, parse_action, main; imports=ast, asyncio, disassembly_skill, inspect, json, langgraph, math, multiprocessing, openai, os
+- `disassembly_skill/disassembly_skill/motion_backend.py` - Python source; 1.6 KB; lines=43; classes=MotionBackend(2 methods); funcs=main; imports=dual_arm_moveit_config, geometry_msgs, rclpy, tf2_geometry_msgs
+- `disassembly_skill/disassembly_skill/object_flip_drop_skill.py` - Python source; 30.8 KB; lines=739; classes=FlipDropSkill(22 methods); funcs=main; imports=ament_index_python, disassembly_skill, geometry_msgs, math, os, rclpy, std_msgs, threading, time
+- `disassembly_skill/disassembly_skill/object_flip_skill.py` - Python source; 18.5 KB; lines=427; classes=ObjectFlipSkill(20 methods); funcs=main; imports=ament_index_python, disassembly_skill, geometry_msgs, math, os, rclpy, std_msgs, threading, time
+- `disassembly_skill/disassembly_skill/object_hold_skill.py` - Python source; 69.6 KB; lines=1536; classes=ObjectHoldSkill(38 methods); funcs=default_device_config_path, main; imports=ament_index_python, disassembly_skill, geometry_msgs, json, math, os, pathlib, rclpy, std_msgs, threading
+- `disassembly_skill/disassembly_skill/object_pickup_skill.py` - Python source; 66.1 KB; lines=1347; classes=PickupSkill(36 methods); funcs=default_device_config_path, main; imports=ament_index_python, disassembly_skill, geometry_msgs, json, math, os, pathlib, rclpy, std_msgs, threading
+- `disassembly_skill/disassembly_skill/test_exotica_planner.py` - Python source; 31.8 KB; lines=704; doc=test_exotica_planner.py — standalone ROS 2 test node for EXOTica planner.; classes=ExoticaPlannerTester(17 methods); funcs=main; imports=math, numpy, rclpy, threading, time, traceback
+- `disassembly_skill/disassembly_skill/unscrew_skill.py` - Python source; 147.4 KB; lines=3046; classes=UnscrewSkill(30 methods); funcs=main; imports=copy, disassembly_skill, geometry_msgs, json, math, rclpy, std_msgs, threading, time
+- `disassembly_skill/docs/config_builder_guide.md` - Markdown doc; 8.8 KB; lines=270; headings=Device Config Builder — User Guide, Overview, Layout, Step-by-step: creating a new HDD config
+- `disassembly_skill/launch/calibrated_disassembly_system.launch.py` - ROS launch file; 1.2 KB; lines=33; funcs=generate_launch_description; imports=ament_index_python, launch
+- `disassembly_skill/launch/disassembly_system.launch.py` - ROS launch file; 8.4 KB; lines=245; funcs=_log_error, _stage_exit_handlers, generate_launch_description; imports=ament_index_python, launch, launch_ros, pathlib
+- `disassembly_skill/launch/object_hold_skill.launch.py` - ROS launch file; 371 B; lines=15; funcs=generate_launch_description; imports=launch, launch_ros
+- `disassembly_skill/launch/vision_system.launch.py` - ROS launch file; 558 B; lines=17; funcs=generate_launch_description; imports=ament_index_python, launch
+- `disassembly_skill/package.xml` - ROS package manifest; 1.3 KB; lines=38; package=disassembly_skill; deps=rclpy, std_msgs, geometry_msgs, sensor_msgs, moveit_msgs, tf_transformations, tf2_geometry_msgs, std_srvs, dual_arm_moveit_config, launch, launch_ros, ament_index_python...; desc=TODO: Package description
+- `disassembly_skill/resource/disassembly_skill` - script/text; 0 B; lines=0; text file
+- `disassembly_skill/setup.cfg` - tooling config; 103 B; lines=4; text file
+- `disassembly_skill/setup.py` - ament_python setup; 3.4 KB; lines=89; classes=DevelopCommand(1 methods); funcs=package_files; imports=glob, os, setuptools, sys
+- `disassembly_skill/test/test_copyright.py` - Python source; 962 B; lines=25; funcs=test_copyright; imports=ament_copyright, pytest
+- `disassembly_skill/test/test_device_config.py` - Python source; 3.0 KB; lines=87; funcs=test_device_config_loads_example, test_to_llm_context_exposes_sequence_summary, test_validation_rejects_unscrew_without_hold, test_validation_rejects_invalid_ft300_arm, test_hdd_config_matches_pcb_first_hdd_flow; imports=disassembly_skill, pathlib, pytest
+- `disassembly_skill/test/test_flake8.py` - Python source; 884 B; lines=25; funcs=test_flake8; imports=ament_flake8, pytest
+- `disassembly_skill/test/test_pep257.py` - Python source; 803 B; lines=23; funcs=test_pep257; imports=ament_pep257, pytest
+### `dual_arm_moveit_config`
+- `dual_arm_moveit_config/.setup_assistant` - script/text; 302 B; lines=11; text file
+- `dual_arm_moveit_config/CMakeLists.txt` - CMake build file; 668 B; lines=31; text file
+- `dual_arm_moveit_config/README.md` - Markdown doc; 2.7 KB; lines=96; headings=dual_arm_moveit_config, Main runtime, Runtime split, Current controller model
+- `dual_arm_moveit_config/config/dual_arm_isaac_lula_robot_description.yaml` - YAML config; 10.2 KB; lines=359; top-level keys=api_version, cspace, default_q, acceleration_limits, jerk_limits, cspace_to_urdf_rules, collision_spheres
+- `dual_arm_moveit_config/config/dual_arm_world.srdf` - robot description; 7.3 KB; lines=130; links=2; joints=32; xacro_macros=0
+- `dual_arm_moveit_config/config/dual_arm_world.urdf.xacro` - robot description; 833 B; lines=22; links=1; joints=1; xacro_macros=0
+- `dual_arm_moveit_config/config/exotica/dual_arm_rrt_connect.xml` - XML/UI config; 675 B; lines=28; text file
+- `dual_arm_moveit_config/config/initial_positions.yaml` - YAML config; 335 B; lines=14; top-level keys=initial_positions
+- `dual_arm_moveit_config/config/joint_limits.yaml` - YAML config; 1.6 KB; lines=66; top-level keys=joint_limits
+- `dual_arm_moveit_config/config/kinematics.yaml` - YAML config; 566 B; lines=17; top-level keys=uf850_arm, xarm5_arm, xarm5_arm_no_slide
+- `dual_arm_moveit_config/config/moveit.rviz` - RViz config; 17.3 KB; lines=0; not read as source
+- `dual_arm_moveit_config/config/moveit_controllers.yaml` - YAML config; 1.2 KB; lines=51; top-level keys=trajectory_execution, moveit_controller_manager, moveit_simple_controller_manager
+- `dual_arm_moveit_config/config/ompl_planning.yaml` - YAML config; 489 B; lines=10; top-level keys=planning_plugin, start_state_max_bounds_error, jiggle_fraction, request_adapters
+- `dual_arm_moveit_config/config/orbbec_handeye.calib` - calibration file; 416 B; lines=20; text file
+- `dual_arm_moveit_config/config/orbbec_handeye_new.calib` - calibration file; 480 B; lines=20; text file
+- `dual_arm_moveit_config/config/pilz_cartesian_limits.yaml` - YAML config; 103 B; lines=5; top-level keys=cartesian_limits
+- `dual_arm_moveit_config/config/realsense_handeye.calib` - calibration file; 414 B; lines=20; text file
+- `dual_arm_moveit_config/config/ros2_control.xacro` - robot description; 5.5 KB; lines=131; links=0; joints=13; xacro_macros=2
+- `dual_arm_moveit_config/config/ros2_controllers.yaml` - YAML config; 2.2 KB; lines=105; top-level keys=controller_manager, joint_state_broadcaster, uf850_controller, xarm5_controller, xarm5_servo_controller, rg6_controller, slider_controller, uf850_servo_controller
+- `dual_arm_moveit_config/config/uf_servo.yaml` - YAML config; 1.2 KB; lines=36; top-level keys=use_gazebo, command_in_type, scale, butterworth_filter_coeff, cartesian_command_in_topic, joint_command_in_topic, command_out_topic, command_out_type, joint_topic, status_topic
+- `dual_arm_moveit_config/config/xarm_servo.yaml` - YAML config; 1.2 KB; lines=36; top-level keys=use_gazebo, command_in_type, scale, butterworth_filter_coeff, cartesian_command_in_topic, joint_command_in_topic, command_out_topic, command_out_type, joint_topic, status_topic
+- `dual_arm_moveit_config/dual_arm_moveit_config/__init__.py` - Python source; 68 B; lines=1; doc=Python helpers for the dual-arm MoveIt configuration package.
+- `dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py` - Python source; 7.8 KB; lines=206; doc=exotica_ik_server_node.py — Pre-warms both EXOTica single-arm planners and serve; classes=ExoticaIKServerNode(4 methods); funcs=main; imports=__future__, concurrent, json, rclpy, std_msgs, threading
+- `dual_arm_moveit_config/dual_arm_moveit_config/exotica_planner.py` - Python source; 62.2 KB; lines=1456; classes=ExoticaDualArmPlanner(8 methods), ExoticaDualArmPosePlanner(8 methods), ExoticaSingleArmPosePlanner(13 methods), RemoteExoticaIKClient(11 methods); imports=__future__, ament_index_python, builtin_interfaces, dual_arm_moveit_config, math, moveit_msgs, pathlib, tempfile, threading, trajectory_msgs
+- `dual_arm_moveit_config/dual_arm_moveit_config/motion_backend.py` - Python source; 98.2 KB; lines=2159; classes=MotionBackend(51 methods); imports=builtin_interfaces, controller_manager_msgs, dual_arm_moveit_config, geometry_msgs, json, math, moveit_msgs, os, rclpy, sensor_msgs
+- `dual_arm_moveit_config/dual_arm_moveit_config/runtime_config.py` - Python source; 660 B; lines=22; funcs=normalize_xacro_hardware_type, joint_topics_for_hardware, use_filtered_joint_states; imports=__future__
+- `dual_arm_moveit_config/hardware/isaac_state_relay.py` - Python source; 1.8 KB; lines=58; doc=Isaac Sim state relay for digital-twin (real+isaac) mode.; classes=IsaacStateRelay(2 methods); funcs=main; imports=rclpy, sensor_msgs
+- `dual_arm_moveit_config/hardware/joint_state_filter.py` - Python source; 3.1 KB; lines=85; doc=Joint state filter for Isaac mode.; classes=JointStateFilter(2 methods); funcs=main; imports=rclpy, sensor_msgs
+- `dual_arm_moveit_config/hardware/real_hardware.py` - Python source; 46.1 KB; lines=1064; classes=RGBridge(9 methods), ArmBridge(11 methods), SliderBridge(7 methods), RealHardware(8 methods); funcs=clamp, signed_16bit, throttle, main; imports=json, rclpy, sensor_msgs, std_msgs, threading, time
+- `dual_arm_moveit_config/hardware/teleop_bridge.py` - Python source; 13.2 KB; lines=334; classes=TeleopBridge(16 methods); funcs=main; imports=controller_manager_msgs, geometry_msgs, rclpy, sensor_msgs, std_msgs, std_srvs, trajectory_msgs
+- `dual_arm_moveit_config/launch/demo.launch.py` - ROS launch file; 15.5 KB; lines=365; funcs=launch_setup, generate_launch_description; imports=ament_index_python, dual_arm_moveit_config, launch, launch_ros, moveit_configs_utils, os, pathlib, yaml
+- `dual_arm_moveit_config/launch/dual_arm_exotica_stream.launch.py` - ROS launch file; 3.2 KB; lines=67; funcs=generate_launch_description; imports=launch, launch_ros, pathlib
+- `dual_arm_moveit_config/launch/exotica.launch.py` - ROS launch file; 2.9 KB; lines=67; funcs=launch_setup, generate_launch_description; imports=dual_arm_moveit_config, launch, launch_ros, pathlib
+- `dual_arm_moveit_config/launch/move_group.launch.py` - ROS launch file; 2.1 KB; lines=48; funcs=_launch_setup, generate_launch_description; imports=dual_arm_moveit_config, launch, moveit_configs_utils
+- `dual_arm_moveit_config/launch/moveit_rviz.launch.py` - ROS launch file; 2.8 KB; lines=75; funcs=_launch_setup, generate_launch_description; imports=dual_arm_moveit_config, launch, launch_ros, moveit_configs_utils, os, pathlib
+- `dual_arm_moveit_config/launch/rsp.launch.py` - ROS launch file; 1.4 KB; lines=32; funcs=_launch_setup, generate_launch_description; imports=dual_arm_moveit_config, launch, moveit_configs_utils
+- `dual_arm_moveit_config/launch/servo_teleop.launch.py` - ROS launch file; 1.3 KB; lines=29; funcs=generate_launch_description; imports=launch, pathlib
+- `dual_arm_moveit_config/launch/spawn_controllers.launch.py` - ROS launch file; 444 B; lines=11; funcs=generate_launch_description; imports=moveit_configs_utils
+- `dual_arm_moveit_config/launch/static_virtual_joint_tfs.launch.py` - ROS launch file; 460 B; lines=11; funcs=generate_launch_description; imports=moveit_configs_utils
+- `dual_arm_moveit_config/launch/warehouse_db.launch.py` - ROS launch file; 360 B; lines=10; funcs=generate_launch_description; imports=moveit_configs_utils
+- `dual_arm_moveit_config/package.xml` - ROS package manifest; 1.9 KB; lines=48; package=dual_arm_moveit_config; deps=controller_manager, controller_manager_msgs, ament_index_python, dual_arm_scene_description, exotica_core, exotica_ompl_solver, exotica_python, geometry_msgs, joint_state_broadcaster, joint_trajectory_controller, joy, moveit_configs_utils...; desc=MoveIt configuration package for the dual arm mimic scene.
+- `dual_arm_moveit_config/rviz/moveit.rviz` - RViz config; 11.6 KB; lines=0; not read as source
+### `dual_arm_scene_description`
+- `dual_arm_scene_description/CMakeLists.txt` - CMake build file; 336 B; lines=15; text file
+- `dual_arm_scene_description/doc/dual_arm_scene_kinematic_graph.png` - image asset; 81.3 KB; lines=0; not read as source
+- `dual_arm_scene_description/launch/display.launch.py` - ROS launch file; 1.4 KB; lines=46; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os
+- `dual_arm_scene_description/launch/display_mimic.launch.py` - ROS launch file; 1.2 KB; lines=41; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os
+- `dual_arm_scene_description/meshes/FT300.stl` - mesh asset; 1.5 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/base_link.stl` - mesh asset; 12.7 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/base_link_old.stl` - mesh asset; 12.7 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_Back_body.stl` - mesh asset; 2.9 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_Front_body.stl` - mesh asset; 604.4 KB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_L_finger.stl` - mesh asset; 1.1 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_L_inner_knuckle.stl` - mesh asset; 1.0 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_L_outer_knuckle.stl` - mesh asset; 924.9 KB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_R_finger.stl` - mesh asset; 1.1 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_R_inner_knuckle.stl` - mesh asset; 1.0 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_R_outer_knuckle.stl` - mesh asset; 924.4 KB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/rg6_base_link.stl` - mesh asset; 4.0 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/robot_base.stl` - mesh asset; 7.4 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/screwdriver_base_link.stl` - mesh asset; 3.1 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf850_base_link.stl` - mesh asset; 1001.1 KB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf850_link1.stl` - mesh asset; 1.0 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf850_link2.stl` - mesh asset; 1.7 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf850_link3.stl` - mesh asset; 1.3 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf850_link4.stl` - mesh asset; 1.2 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf850_link5.stl` - mesh asset; 510.5 KB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf850_link6.stl` - mesh asset; 1.0 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf850_mount.stl` - mesh asset; 216.1 KB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/uf_linear_slide.stl` - mesh asset; 4.0 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/xarm5_base_link.stl` - mesh asset; 482.4 KB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/xarm5_camera_stand.stl` - mesh asset; 1.8 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/xarm5_link1.stl` - mesh asset; 846.9 KB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/xarm5_link2.stl` - mesh asset; 2.8 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/xarm5_link3.stl` - mesh asset; 2.9 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/xarm5_link4.stl` - mesh asset; 3.2 MB; lines=0; not read as source
+- `dual_arm_scene_description/meshes/xarm5_link5.stl` - mesh asset; 610.4 KB; lines=0; not read as source
+- `dual_arm_scene_description/package.xml` - ROS package manifest; 723 B; lines=19; package=dual_arm_scene_description; deps=robot_state_publisher, joint_state_publisher_gui, rviz2, xacro, ament_cmake; desc=URDF description for dual_arm_scene_description generated from Onshape
+- `dual_arm_scene_description/rviz/display.rviz` - RViz config; 11.9 KB; lines=0; not read as source
+- `dual_arm_scene_description/urdf/dual_arm_scene.urdf` - robot description; 32.7 KB; lines=847; links=31; joints=32; xacro_macros=0
+- `dual_arm_scene_description/urdf/dual_arm_scene.xacro` - robot description; 35.6 KB; lines=849; links=31; joints=32; xacro_macros=2
+- `dual_arm_scene_description/urdf/dual_arm_scene_mimic.urdf` - robot description; 32.5 KB; lines=838; links=31; joints=30; xacro_macros=0
+- `dual_arm_scene_description/urdf/dual_arm_scene_mimic.xacro` - robot description; 32.2 KB; lines=837; links=31; joints=30; xacro_macros=0
+- `dual_arm_scene_description/usd/configuration/dual_arm_isaac_scene_base.usd` - USD scene asset; 492 B; lines=0; not read as source
+- `dual_arm_scene_description/usd/configuration/dual_arm_isaac_scene_physics.usd` - USD scene asset; 492 B; lines=0; not read as source
+- `dual_arm_scene_description/usd/configuration/dual_arm_isaac_scene_robot.usd` - USD scene asset; 492 B; lines=0; not read as source
+- `dual_arm_scene_description/usd/configuration/dual_arm_isaac_scene_sensor.usd` - USD scene asset; 492 B; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_isaac_scene.usd` - USD scene asset; 90.5 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_isaac_scene_v2.usd` - USD scene asset; 90.3 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/Materials/Materials.usd` - USD scene asset; 3.3 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/dual_arm_scene_base.usd` - USD scene asset; 64.9 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/dual_arm_scene_edit.usd` - USD scene asset; 744 B; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/FT300_JFD.usd` - USD scene asset; 2.3 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/base_link_JHH.usd` - USD scene asset; 23.6 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_Back_body_JFX.usd` - USD scene asset; 676.5 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_Front_body_JFT.usd` - USD scene asset; 208.9 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_L_finger_JFr.usd` - USD scene asset; 318.8 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_L_inner_knuckle_JFz.usd` - USD scene asset; 255.0 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_L_outer_knuckle_JFv.usd` - USD scene asset; 1.1 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_R_finger_JFH.usd` - USD scene asset; 319.2 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_R_inner_knuckle_JFP.usd` - USD scene asset; 254.9 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_R_outer_knuckle_JFL.usd` - USD scene asset; 1.1 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/rg6_base_link_JFD.usd` - USD scene asset; 4.6 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/robot_base_JFH.usd` - USD scene asset; 11.1 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/screwdriver_base_link_JFD.usd` - USD scene asset; 3.9 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf850_base_link_JFD.usd` - USD scene asset; 259.4 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf850_link1_JFL.usd` - USD scene asset; 180.3 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf850_link2_JFP.usd` - USD scene asset; 292.7 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf850_link3_JFT.usd` - USD scene asset; 235.6 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf850_link4_JFX.usd` - USD scene asset; 210.4 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf850_link5_JFH.usd` - USD scene asset; 82.7 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf850_link6_JFb.usd` - USD scene asset; 1.2 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf850_mount_JFD.usd` - USD scene asset; 91.1 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/uf_linear_slide_JFL.usd` - USD scene asset; 4.7 MB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/xarm5_base_link_JFD.usd` - USD scene asset; 186.1 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/xarm5_camera_stand_JFD.usd` - USD scene asset; 316.0 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/xarm5_link1_JFH.usd` - USD scene asset; 167.8 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/xarm5_link2_JFL.usd` - USD scene asset; 510.3 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/xarm5_link3_JFX.usd` - USD scene asset; 561.8 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/xarm5_link4_JFT.usd` - USD scene asset; 635.5 KB; lines=0; not read as source
+- `dual_arm_scene_description/usd/dual_arm_scene/parts/xarm5_link5_JFP.usd` - USD scene asset; 186.7 KB; lines=0; not read as source
+### `exotica`
+- `exotica/.ci/build_documentation.sh` - script/text; 62 B; lines=5; text file
+- `exotica/.ci/deploy_documentation.sh` - script/text; 1.2 KB; lines=29; text file
+- `exotica/.clang-format` - script/text; 241 B; lines=7; text file
+- `exotica/LICENSE` - script/text; 1.5 KB; lines=26; text file
+- `exotica/README.md` - Markdown doc; 5.4 KB; lines=89; headings=EXOTica 🏝️ [![ROS2-CI](https://github.com/ipab-slmc/exotica/workflows/ROS2-CI/badge.svg)](https://github.com/ipab-slmc/exotica/actions?query=workflow%3AROS2-CI), Prerequisites, Installation, From source
+- `exotica/apply_format.sh` - script/text; 108 B; lines=2; text file
+- `exotica/exotations/README.md` - Markdown doc; 146 B; lines=3; headings=EXOTica implementATIONS packages
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/CHANGELOG.rst` - RST doc; 1.1 KB; lines=47; text file
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/CMakeLists.txt` - CMake build file; 1.1 KB; lines=29; text file
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/exotica_plugins.xml` - XML/UI config; 257 B; lines=5; text file
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/include/exotica_cartpole_dynamics_solver/cartpole_dynamics_solver.h` - C/C++ source; 3.6 KB; lines=78; approx code symbols=0
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/init/cartpole_dynamics_solver.in` - text/config; 68 B; lines=3; text file
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/package.xml` - ROS package manifest; 519 B; lines=19; package=exotica_cartpole_dynamics_solver; deps=exotica_core, pluginlib, ament_cmake; desc=Cartpole dynamics solver plug-in for Exotica
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/resources/cartpole.srdf` - robot description; 842 B; lines=20; links=0; joints=3; xacro_macros=0
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/resources/cartpole.urdf` - robot description; 2.6 KB; lines=90; links=4; joints=3; xacro_macros=0
+- `exotica/exotations/dynamics_solvers/exotica_cartpole_dynamics_solver/src/cartpole_dynamics_solver.cpp` - C/C++ source; 9.8 KB; lines=175; approx code symbols=4
+- `exotica/exotations/dynamics_solvers/exotica_double_integrator_dynamics_solver/CHANGELOG.rst` - RST doc; 1.0 KB; lines=44; text file
+- `exotica/exotations/dynamics_solvers/exotica_double_integrator_dynamics_solver/CMakeLists.txt` - CMake build file; 1.0 KB; lines=27; text file
+- `exotica/exotations/dynamics_solvers/exotica_double_integrator_dynamics_solver/exotica_plugins.xml` - XML/UI config; 287 B; lines=5; text file
+- `exotica/exotations/dynamics_solvers/exotica_double_integrator_dynamics_solver/include/exotica_double_integrator_dynamics_solver/double_integrator_dynamics_solver.h` - C/C++ source; 2.6 KB; lines=57; approx code symbols=0
+- `exotica/exotations/dynamics_solvers/exotica_double_integrator_dynamics_solver/init/double_integrator_dynamics_solver.in` - text/config; 76 B; lines=3; text file
+- `exotica/exotations/dynamics_solvers/exotica_double_integrator_dynamics_solver/package.xml` - ROS package manifest; 505 B; lines=18; package=exotica_double_integrator_dynamics_solver; deps=exotica_core, pluginlib, ament_cmake; desc=Double integrator dynamics solver plug-in for Exotica
+- `exotica/exotations/dynamics_solvers/exotica_double_integrator_dynamics_solver/src/double_integrator_dynamics_solver.cpp` - C/C++ source; 3.5 KB; lines=84; approx code symbols=5
+- `exotica/exotations/dynamics_solvers/exotica_dynamics_solvers/CHANGELOG.rst` - RST doc; 741 B; lines=41; text file
+- `exotica/exotations/dynamics_solvers/exotica_dynamics_solvers/CMakeLists.txt` - CMake build file; 123 B; lines=5; text file
+- `exotica/exotations/dynamics_solvers/exotica_dynamics_solvers/package.xml` - ROS package manifest; 757 B; lines=20; package=exotica_dynamics_solvers; deps=exotica_cartpole_dynamics_solver, exotica_double_integrator_dynamics_solver, exotica_pendulum_dynamics_solver, exotica_pinocchio_dynamics_solver, exotica_quadrotor_dynamics_solver, ament_cmake; desc=Metapackage for all dynamics solvers bundled with core EXOTica.
+- `exotica/exotations/dynamics_solvers/exotica_pendulum_dynamics_solver/CHANGELOG.rst` - RST doc; 852 B; lines=43; text file
+- `exotica/exotations/dynamics_solvers/exotica_pendulum_dynamics_solver/CMakeLists.txt` - CMake build file; 1.0 KB; lines=28; text file
+- `exotica/exotations/dynamics_solvers/exotica_pendulum_dynamics_solver/exotica_plugins.xml` - XML/UI config; 257 B; lines=5; text file
+- `exotica/exotations/dynamics_solvers/exotica_pendulum_dynamics_solver/include/exotica_pendulum_dynamics_solver/pendulum_dynamics_solver.h` - C/C++ source; 3.3 KB; lines=73; approx code symbols=0
+- `exotica/exotations/dynamics_solvers/exotica_pendulum_dynamics_solver/init/pendulum_dynamics_solver.in` - text/config; 111 B; lines=4; text file
+- `exotica/exotations/dynamics_solvers/exotica_pendulum_dynamics_solver/package.xml` - ROS package manifest; 519 B; lines=19; package=exotica_pendulum_dynamics_solver; deps=exotica_core, pluginlib, ament_cmake; desc=Pendulum dynamics solver plug-in for Exotica
+- `exotica/exotations/dynamics_solvers/exotica_pendulum_dynamics_solver/src/pendulum_dynamics_solver.cpp` - C/C++ source; 3.4 KB; lines=88; approx code symbols=4
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/CHANGELOG.rst` - RST doc; 1.4 KB; lines=52; text file
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/CMakeLists.txt` - CMake build file; 1.6 KB; lines=43; text file
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/exotica_plugins.xml` - XML/UI config; 602 B; lines=8; text file
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/include/exotica_pinocchio_dynamics_solver/pinocchio_dynamics_solver.h` - C/C++ source; 3.4 KB; lines=76; approx code symbols=0
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/include/exotica_pinocchio_dynamics_solver/pinocchio_gravity_compensation_dynamics_solver.h` - C/C++ source; 3.6 KB; lines=80; approx code symbols=0
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/init/pinocchio_dynamics_solver.in` - text/config; 69 B; lines=3; text file
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/init/pinocchio_gravity_compensation_dynamics_solver.in` - text/config; 92 B; lines=3; text file
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/package.xml` - ROS package manifest; 524 B; lines=19; package=exotica_pinocchio_dynamics_solver; deps=exotica_core, pluginlib, pinocchio, ament_cmake; desc=Dynamics solver plug-in using Pinocchio for Exotica
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver.cpp` - C/C++ source; 5.5 KB; lines=123; approx code symbols=4
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver_assign_scene.cpp` - C/C++ source; 3.0 KB; lines=71; approx code symbols=1
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver_derivatives.cpp` - C/C++ source; 5.9 KB; lines=106; approx code symbols=3
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_dynamics_solver_inverse_dynamics.cpp` - C/C++ source; 2.0 KB; lines=44; approx code symbols=1
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_gravity_compensation_dynamics_solver.cpp` - C/C++ source; 5.8 KB; lines=128; approx code symbols=4
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_gravity_compensation_dynamics_solver_assign_scene.cpp` - C/C++ source; 2.8 KB; lines=68; approx code symbols=1
+- `exotica/exotations/dynamics_solvers/exotica_pinocchio_dynamics_solver/src/pinocchio_gravity_compensation_dynamics_solver_derivatives.cpp` - C/C++ source; 8.4 KB; lines=176; approx code symbols=3
+- `exotica/exotations/dynamics_solvers/exotica_quadrotor_dynamics_solver/CHANGELOG.rst` - RST doc; 959 B; lines=45; text file
+- `exotica/exotations/dynamics_solvers/exotica_quadrotor_dynamics_solver/CMakeLists.txt` - CMake build file; 1.1 KB; lines=28; text file
+- `exotica/exotations/dynamics_solvers/exotica_quadrotor_dynamics_solver/exotica_plugins.xml` - XML/UI config; 261 B; lines=5; text file
+- `exotica/exotations/dynamics_solvers/exotica_quadrotor_dynamics_solver/include/exotica_quadrotor_dynamics_solver/quadrotor_dynamics_solver.h` - C/C++ source; 3.4 KB; lines=78; approx code symbols=0
+- `exotica/exotations/dynamics_solvers/exotica_quadrotor_dynamics_solver/init/quadrotor_dynamics_solver.in` - text/config; 69 B; lines=3; text file
+- `exotica/exotations/dynamics_solvers/exotica_quadrotor_dynamics_solver/package.xml` - ROS package manifest; 489 B; lines=18; package=exotica_quadrotor_dynamics_solver; deps=exotica_core, pluginlib, ament_cmake; desc=Quadrotor dynamics solver plug-in for Exotica
+- `exotica/exotations/dynamics_solvers/exotica_quadrotor_dynamics_solver/src/quadrotor_dynamics_solver.cpp` - C/C++ source; 8.1 KB; lines=188; approx code symbols=4
+- `exotica/exotations/exotica_collision_scene_fcl_latest/CHANGELOG.rst` - RST doc; 2.2 KB; lines=58; text file
+- `exotica/exotations/exotica_collision_scene_fcl_latest/CMakeLists.txt` - CMake build file; 1.2 KB; lines=39; text file
+- `exotica/exotations/exotica_collision_scene_fcl_latest/exotica_plugins.xml` - XML/UI config; 569 B; lines=9; text file
+- `exotica/exotations/exotica_collision_scene_fcl_latest/include/exotica_collision_scene_fcl_latest/collision_scene_fcl_latest.h` - C/C++ source; 8.4 KB; lines=172; approx code symbols=0
+- `exotica/exotations/exotica_collision_scene_fcl_latest/init/collision_scene_fcl_latest.in` - text/config; 69 B; lines=3; text file
+- `exotica/exotations/exotica_collision_scene_fcl_latest/package.xml` - ROS package manifest; 618 B; lines=19; package=exotica_collision_scene_fcl_latest; deps=exotica_core, geometric_shapes, libfcl-dev, ament_cmake; desc=Collision checking and distance computation using the FCL library.
+- `exotica/exotations/exotica_collision_scene_fcl_latest/src/collision_scene_fcl_latest.cpp` - C/C++ source; 41.0 KB; lines=992; approx code symbols=26
+- `exotica/exotations/exotica_core_task_maps/CHANGELOG.rst` - RST doc; 3.9 KB; lines=103; text file
+- `exotica/exotations/exotica_core_task_maps/CMakeLists.txt` - CMake build file; 3.1 KB; lines=110; text file
+- `exotica/exotations/exotica_core_task_maps/LICENSE` - script/text; 1.5 KB; lines=26; text file
+- `exotica/exotations/exotica_core_task_maps/README.md` - Markdown doc; 1.4 KB; lines=47; headings=exotica_core_task_maps, TaskMaps that support analytical Hessians, TaskMap that do not yet have analytical Hessians (and thus default to Gauss-Newton approximation), TaskMaps known to have discontinuous gradients for NLPs
+- `exotica/exotations/exotica_core_task_maps/exotica_plugins.xml` - XML/UI config; 7.9 KB; lines=107; text file
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/avoid_look_at_sphere.h` - C/C++ source; 4.4 KB; lines=89; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/center_of_mass.h` - C/C++ source; 2.7 KB; lines=66; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/collision_check.h` - C/C++ source; 2.1 KB; lines=54; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/collision_distance.h` - C/C++ source; 2.8 KB; lines=70; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/continuous_joint_pose.h` - C/C++ source; 2.5 KB; lines=57; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/control_regularization.h` - C/C++ source; 3.1 KB; lines=65; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/convex_hull.h` - C/C++ source; 3.7 KB; lines=110; approx code symbols=3
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/distance.h` - C/C++ source; 2.2 KB; lines=49; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/distance_to_line_2d.h` - C/C++ source; 4.2 KB; lines=92; approx code symbols=2
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/eff_axis_alignment.h` - C/C++ source; 3.0 KB; lines=76; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/eff_box.h` - C/C++ source; 3.0 KB; lines=69; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/eff_frame.h` - C/C++ source; 2.6 KB; lines=61; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/eff_orientation.h` - C/C++ source; 2.6 KB; lines=60; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/eff_position.h` - C/C++ source; 2.3 KB; lines=49; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/eff_position_xy.h` - C/C++ source; 2.3 KB; lines=49; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/eff_velocity.h` - C/C++ source; 2.2 KB; lines=51; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/gaze_at_constraint.h` - C/C++ source; 2.9 KB; lines=66; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/interaction_mesh.h` - C/C++ source; 3.2 KB; lines=76; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/joint_acceleration_backward_difference.h` - C/C++ source; 3.6 KB; lines=75; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/joint_jerk_backward_difference.h` - C/C++ source; 3.5 KB; lines=77; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/joint_limit.h` - C/C++ source; 3.1 KB; lines=65; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/joint_pose.h` - C/C++ source; 2.7 KB; lines=61; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/joint_torque_minimization_proxy.h` - C/C++ source; 2.4 KB; lines=57; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/joint_velocity_backward_difference.h` - C/C++ source; 3.4 KB; lines=72; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/joint_velocity_limit.h` - C/C++ source; 2.8 KB; lines=64; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/joint_velocity_limit_constraint.h` - C/C++ source; 3.2 KB; lines=68; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/look_at.h` - C/C++ source; 2.9 KB; lines=68; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/manipulability.h` - C/C++ source; 2.4 KB; lines=57; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/point_to_line.h` - C/C++ source; 3.4 KB; lines=79; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/point_to_plane.h` - C/C++ source; 3.1 KB; lines=63; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/quasi_static.h` - C/C++ source; 2.5 KB; lines=62; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/smooth_collision_distance.h` - C/C++ source; 2.6 KB; lines=67; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/sphere_collision.h` - C/C++ source; 2.9 KB; lines=64; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/sum_of_penetrations.h` - C/C++ source; 2.3 KB; lines=62; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/include/exotica_core_task_maps/variable_size_collision_distance.h` - C/C++ source; 2.6 KB; lines=62; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/init/avoid_look_at_sphere.in` - text/config; 503 B; lines=11; text file
+- `exotica/exotations/exotica_core_task_maps/init/center_of_mass.in` - text/config; 82 B; lines=5; text file
+- `exotica/exotations/exotica_core_task_maps/init/collision_check.in` - text/config; 127 B; lines=6; text file
+- `exotica/exotations/exotica_core_task_maps/init/collision_distance.in` - text/config; 167 B; lines=6; text file
+- `exotica/exotations/exotica_core_task_maps/init/continuous_joint_pose.in` - text/config; 114 B; lines=5; text file
+- `exotica/exotations/exotica_core_task_maps/init/control_regularization.in` - text/config; 171 B; lines=6; text file
+- `exotica/exotations/exotica_core_task_maps/init/distance.in` - text/config; 47 B; lines=3; text file
+- `exotica/exotations/exotica_core_task_maps/init/distance_to_line_2d.in` - text/config; 469 B; lines=11; text file
+- `exotica/exotations/exotica_core_task_maps/init/eff_axis_alignment.in` - text/config; 55 B; lines=3; text file
+- `exotica/exotations/exotica_core_task_maps/init/eff_box.in` - text/config; 332 B; lines=10; text file
+- `exotica/exotations/exotica_core_task_maps/init/eff_frame.in` - text/config; 83 B; lines=5; text file
+- `exotica/exotations/exotica_core_task_maps/init/eff_orientation.in` - text/config; 89 B; lines=5; text file
+- `exotica/exotations/exotica_core_task_maps/init/eff_position.in` - text/config; 50 B; lines=3; text file
+- `exotica/exotations/exotica_core_task_maps/init/eff_position_xy.in` - text/config; 52 B; lines=3; text file
+- `exotica/exotations/exotica_core_task_maps/init/eff_velocity.in` - text/config; 50 B; lines=3; text file
+- `exotica/exotations/exotica_core_task_maps/init/frame_with_axis_and_direction.in` - text/config; 177 B; lines=6; text file
+- `exotica/exotations/exotica_core_task_maps/init/frame_with_box_limits.in` - text/config; 147 B; lines=7; text file
+- `exotica/exotations/exotica_core_task_maps/init/gaze_at_constraint.in` - text/config; 483 B; lines=11; text file
+- `exotica/exotations/exotica_core_task_maps/init/interaction_mesh.in` - text/config; 157 B; lines=6; text file
+- `exotica/exotations/exotica_core_task_maps/init/joint_acceleration_backward_difference.in` - text/config; 457 B; lines=11; text file
+- `exotica/exotations/exotica_core_task_maps/init/joint_jerk_backward_difference.in` - text/config; 449 B; lines=11; text file
+- `exotica/exotations/exotica_core_task_maps/init/joint_limit.in` - text/config; 88 B; lines=5; text file
+- `exotica/exotations/exotica_core_task_maps/init/joint_pose.in` - text/config; 159 B; lines=6; text file
+- `exotica/exotations/exotica_core_task_maps/init/joint_torque_minimization_proxy.in` - text/config; 123 B; lines=5; text file
+- `exotica/exotations/exotica_core_task_maps/init/joint_velocity_backward_difference.in` - text/config; 453 B; lines=11; text file
+- `exotica/exotations/exotica_core_task_maps/init/joint_velocity_limit.in` - text/config; 164 B; lines=8; text file
+- `exotica/exotations/exotica_core_task_maps/init/joint_velocity_limit_constraint.in` - text/config; 535 B; lines=15; text file
+- `exotica/exotations/exotica_core_task_maps/init/look_at.in` - text/config; 330 B; lines=9; text file
+- `exotica/exotations/exotica_core_task_maps/init/manipulability.in` - text/config; 498 B; lines=11; text file
+- `exotica/exotations/exotica_core_task_maps/init/point_to_line.in` - text/config; 647 B; lines=14; text file
+- `exotica/exotations/exotica_core_task_maps/init/point_to_plane.in` - text/config; 696 B; lines=15; text file
+- `exotica/exotations/exotica_core_task_maps/init/quasi_static.in` - text/config; 86 B; lines=5; text file
+- `exotica/exotations/exotica_core_task_maps/init/smooth_collision_distance.in` - text/config; 203 B; lines=7; text file
+- `exotica/exotations/exotica_core_task_maps/init/sphere.in` - text/config; 107 B; lines=6; text file
+- `exotica/exotations/exotica_core_task_maps/init/sphere_collision.in` - text/config; 160 B; lines=8; text file
+- `exotica/exotations/exotica_core_task_maps/init/sum_of_penetrations.in` - text/config; 167 B; lines=6; text file
+- `exotica/exotations/exotica_core_task_maps/init/variable_size_collision_distance.in` - text/config; 132 B; lines=5; text file
+- `exotica/exotations/exotica_core_task_maps/package.xml` - ROS package manifest; 682 B; lines=24; package=exotica_core_task_maps; deps=exotica_core, exotica_python, tf2_kdl, tf2_eigen, visualization_msgs, geometry_msgs, pybind11-dev, ament_cmake; desc=Core task maps for EXOTica
+- `exotica/exotations/exotica_core_task_maps/src/avoid_look_at_sphere.cpp` - C/C++ source; 6.5 KB; lines=171; approx code symbols=9
+- `exotica/exotations/exotica_core_task_maps/src/center_of_mass.cpp` - C/C++ source; 8.2 KB; lines=209; approx code symbols=6
+- `exotica/exotations/exotica_core_task_maps/src/collision_check.cpp` - C/C++ source; 2.2 KB; lines=58; approx code symbols=4
+- `exotica/exotations/exotica_core_task_maps/src/collision_distance.cpp` - C/C++ source; 5.5 KB; lines=130; approx code symbols=6
+- `exotica/exotations/exotica_core_task_maps/src/continuous_joint_pose.cpp` - C/C++ source; 4.4 KB; lines=118; approx code symbols=6
+- `exotica/exotations/exotica_core_task_maps/src/control_regularization.cpp` - C/C++ source; 4.8 KB; lines=132; approx code symbols=8
+- `exotica/exotations/exotica_core_task_maps/src/distance.cpp` - C/C++ source; 4.7 KB; lines=93; approx code symbols=4
+- `exotica/exotations/exotica_core_task_maps/src/distance_to_line_2d.cpp` - C/C++ source; 5.6 KB; lines=130; approx code symbols=5
+- `exotica/exotations/exotica_core_task_maps/src/eff_axis_alignment.cpp` - C/C++ source; 8.8 KB; lines=224; approx code symbols=9
+- `exotica/exotations/exotica_core_task_maps/src/eff_box.cpp` - C/C++ source; 6.7 KB; lines=169; approx code symbols=7
+- `exotica/exotations/exotica_core_task_maps/src/eff_frame.cpp` - C/C++ source; 4.5 KB; lines=107; approx code symbols=8
+- `exotica/exotations/exotica_core_task_maps/src/eff_orientation.cpp` - C/C++ source; 4.5 KB; lines=104; approx code symbols=8
+- `exotica/exotations/exotica_core_task_maps/src/eff_position.cpp` - C/C++ source; 3.5 KB; lines=76; approx code symbols=4
+- `exotica/exotations/exotica_core_task_maps/src/eff_position_xy.cpp` - C/C++ source; 3.6 KB; lines=79; approx code symbols=4
+- `exotica/exotations/exotica_core_task_maps/src/eff_velocity.cpp` - C/C++ source; 3.6 KB; lines=85; approx code symbols=3
+- `exotica/exotations/exotica_core_task_maps/src/exotica_core_task_maps_py/__init__.py` - Python source; 40 B; lines=1; imports=exotica_core_task_maps_py
+- `exotica/exotations/exotica_core_task_maps/src/gaze_at_constraint.cpp` - C/C++ source; 3.7 KB; lines=88; approx code symbols=4
+- `exotica/exotations/exotica_core_task_maps/src/interaction_mesh.cpp` - C/C++ source; 11.6 KB; lines=342; approx code symbols=14
+- `exotica/exotations/exotica_core_task_maps/src/joint_acceleration_backward_difference.cpp` - C/C++ source; 3.5 KB; lines=105; approx code symbols=5
+- `exotica/exotations/exotica_core_task_maps/src/joint_jerk_backward_difference.cpp` - C/C++ source; 3.5 KB; lines=106; approx code symbols=5
+- `exotica/exotations/exotica_core_task_maps/src/joint_limit.cpp` - C/C++ source; 6.5 KB; lines=171; approx code symbols=9
+- `exotica/exotations/exotica_core_task_maps/src/joint_pose.cpp` - C/C++ source; 4.3 KB; lines=123; approx code symbols=9
+- `exotica/exotations/exotica_core_task_maps/src/joint_torque_minimization_proxy.cpp` - C/C++ source; 3.6 KB; lines=86; approx code symbols=4
+- `exotica/exotations/exotica_core_task_maps/src/joint_velocity_backward_difference.cpp` - C/C++ source; 3.4 KB; lines=98; approx code symbols=5
+- `exotica/exotations/exotica_core_task_maps/src/joint_velocity_limit.cpp` - C/C++ source; 4.5 KB; lines=114; approx code symbols=5
+- `exotica/exotations/exotica_core_task_maps/src/joint_velocity_limit_constraint.cpp` - C/C++ source; 4.4 KB; lines=117; approx code symbols=5
+- `exotica/exotations/exotica_core_task_maps/src/look_at.cpp` - C/C++ source; 2.7 KB; lines=61; approx code symbols=3
+- `exotica/exotations/exotica_core_task_maps/src/manipulability.cpp` - C/C++ source; 2.4 KB; lines=66; approx code symbols=3
+- `exotica/exotations/exotica_core_task_maps/src/point_to_line.cpp` - C/C++ source; 9.9 KB; lines=259; approx code symbols=7
+- `exotica/exotations/exotica_core_task_maps/src/point_to_plane.cpp` - C/C++ source; 8.8 KB; lines=221; approx code symbols=7
+- `exotica/exotations/exotica_core_task_maps/src/quasi_static.cpp` - C/C++ source; 13.4 KB; lines=380; approx code symbols=10
+- `exotica/exotations/exotica_core_task_maps/src/smooth_collision_distance.cpp` - C/C++ source; 6.2 KB; lines=152; approx code symbols=6
+- `exotica/exotations/exotica_core_task_maps/src/sphere_collision.cpp` - C/C++ source; 6.5 KB; lines=168; approx code symbols=6
+- `exotica/exotations/exotica_core_task_maps/src/sum_of_penetrations.cpp` - C/C++ source; 3.4 KB; lines=92; approx code symbols=4
+- `exotica/exotations/exotica_core_task_maps/src/task_map_py.cpp` - C/C++ source; 7.0 KB; lines=130; approx code symbols=0
+- `exotica/exotations/exotica_core_task_maps/src/variable_size_collision_distance.cpp` - C/C++ source; 4.9 KB; lines=125; approx code symbols=6
+- `exotica/exotations/exotica_core_task_maps/test/test_maps.cpp` - C/C++ source; 62.0 KB; lines=1320; approx code symbols=9
+- `exotica/exotations/solvers/exotica_aico_solver/CHANGELOG.rst` - RST doc; 893 B; lines=44; text file
+- `exotica/exotations/solvers/exotica_aico_solver/CMakeLists.txt` - CMake build file; 1.1 KB; lines=43; text file
+- `exotica/exotations/solvers/exotica_aico_solver/LICENSE` - script/text; 1.5 KB; lines=26; text file
+- `exotica/exotations/solvers/exotica_aico_solver/exotica_plugins.xml` - XML/UI config; 425 B; lines=8; text file
+- `exotica/exotations/solvers/exotica_aico_solver/include/exotica_aico_solver/aico_solver.h` - C/C++ source; 13.3 KB; lines=252; approx code symbols=0
+- `exotica/exotations/solvers/exotica_aico_solver/include/exotica_aico_solver/bayesian_ik_solver.h` - C/C++ source; 10.9 KB; lines=210; approx code symbols=0
+- `exotica/exotations/solvers/exotica_aico_solver/include/exotica_aico_solver/incremental_gaussian.h` - C/C++ source; 4.4 KB; lines=168; approx code symbols=0
+- `exotica/exotations/solvers/exotica_aico_solver/include/exotica_aico_solver/math_operations.h` - C/C++ source; 2.4 KB; lines=55; approx code symbols=2
+- `exotica/exotations/solvers/exotica_aico_solver/init/aico_solver.in` - text/config; 76 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_aico_solver/init/approximate_inference_solver.in` - text/config; 733 B; lines=13; text file
+- `exotica/exotations/solvers/exotica_aico_solver/init/bayesian_ik_solver.in` - text/config; 81 B; lines=2; text file
+- `exotica/exotations/solvers/exotica_aico_solver/package.xml` - ROS package manifest; 446 B; lines=15; package=exotica_aico_solver; deps=exotica_core, ament_cmake; desc=Approximate Inference Control (AICO) solver for EXOTica
+- `exotica/exotations/solvers/exotica_aico_solver/src/aico_solver.cpp` - C/C++ source; 21.0 KB; lines=614; approx code symbols=15
+- `exotica/exotations/solvers/exotica_aico_solver/src/bayesian_ik_solver.cpp` - C/C++ source; 15.9 KB; lines=463; approx code symbols=15
+- `exotica/exotations/solvers/exotica_ddp_solver/CHANGELOG.rst` - RST doc; 2.5 KB; lines=77; text file
+- `exotica/exotations/solvers/exotica_ddp_solver/CMakeLists.txt` - CMake build file; 2.0 KB; lines=68; text file
+- `exotica/exotations/solvers/exotica_ddp_solver/exotica_plugins.xml` - XML/UI config; 986 B; lines=14; text file
+- `exotica/exotations/solvers/exotica_ddp_solver/include/exotica_ddp_solver/abstract_ddp_solver.h` - C/C++ source; 7.7 KB; lines=159; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ddp_solver/include/exotica_ddp_solver/analytic_ddp_solver.h` - C/C++ source; 2.5 KB; lines=55; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ddp_solver/include/exotica_ddp_solver/control_limited_ddp_solver.h` - C/C++ source; 2.4 KB; lines=53; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ddp_solver/include/exotica_ddp_solver/control_limited_feasibility_driven_ddp_solver.h` - C/C++ source; 2.6 KB; lines=55; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ddp_solver/include/exotica_ddp_solver/feasibility_driven_ddp_solver.h` - C/C++ source; 6.1 KB; lines=137; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ddp_solver/init/abstract_ddp_solver.in` - text/config; 843 B; lines=12; text file
+- `exotica/exotations/solvers/exotica_ddp_solver/init/analytic_ddp_solver.in` - text/config; 73 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_ddp_solver/init/control_limited_ddp_solver.in` - text/config; 490 B; lines=7; text file
+- `exotica/exotations/solvers/exotica_ddp_solver/init/control_limited_feasibility_driven_ddp_solver.in` - text/config; 298 B; lines=7; text file
+- `exotica/exotations/solvers/exotica_ddp_solver/init/feasibility_driven_ddp_solver.in` - text/config; 602 B; lines=7; text file
+- `exotica/exotations/solvers/exotica_ddp_solver/package.xml` - ROS package manifest; 570 B; lines=17; package=exotica_ddp_solver; deps=exotica_core, exotica_python, ament_cmake, ament_cmake_python; desc=DDP Solvers for EXOTica (Analytic, Control-Limited, Feasibility-Driven
+- `exotica/exotations/solvers/exotica_ddp_solver/src/abstract_ddp_solver.cpp` - C/C++ source; 15.0 KB; lines=385; approx code symbols=24
+- `exotica/exotations/solvers/exotica_ddp_solver/src/analytic_ddp_solver.cpp` - C/C++ source; 6.6 KB; lines=131; approx code symbols=2
+- `exotica/exotations/solvers/exotica_ddp_solver/src/control_limited_ddp_solver.cpp` - C/C++ source; 6.1 KB; lines=119; approx code symbols=2
+- `exotica/exotations/solvers/exotica_ddp_solver/src/control_limited_feasibility_driven_ddp_solver.cpp` - C/C++ source; 4.8 KB; lines=117; approx code symbols=3
+- `exotica/exotations/solvers/exotica_ddp_solver/src/ddp_solver_py.cpp` - C/C++ source; 4.5 KB; lines=78; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ddp_solver/src/exotica_ddp_solver_py/__init__.py` - Python source; 36 B; lines=1; imports=exotica_ddp_solver_py
+- `exotica/exotations/solvers/exotica_ddp_solver/src/feasibility_driven_ddp_solver.cpp` - C/C++ source; 23.6 KB; lines=705; approx code symbols=16
+- `exotica/exotations/solvers/exotica_ik_solver/CHANGELOG.rst` - RST doc; 1.4 KB; lines=55; text file
+- `exotica/exotations/solvers/exotica_ik_solver/CMakeLists.txt` - CMake build file; 1022 B; lines=36; text file
+- `exotica/exotations/solvers/exotica_ik_solver/LICENSE` - script/text; 1.5 KB; lines=26; text file
+- `exotica/exotations/solvers/exotica_ik_solver/exotica_plugins.xml` - XML/UI config; 253 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_ik_solver/include/exotica_ik_solver/ik_solver.h` - C/C++ source; 5.3 KB; lines=117; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ik_solver/init/ik_solver.in` - text/config; 1.0 KB; lines=14; text file
+- `exotica/exotations/solvers/exotica_ik_solver/package.xml` - ROS package manifest; 418 B; lines=15; package=exotica_ik_solver; deps=exotica_core, ament_cmake; desc=IK Solver for EXOTica
+- `exotica/exotations/solvers/exotica_ik_solver/src/ik_solver.cpp` - C/C++ source; 9.4 KB; lines=246; approx code symbols=3
+- `exotica/exotations/solvers/exotica_ilqg_solver/CHANGELOG.rst` - RST doc; 1.4 KB; lines=49; text file
+- `exotica/exotations/solvers/exotica_ilqg_solver/CMakeLists.txt` - CMake build file; 1.6 KB; lines=53; text file
+- `exotica/exotations/solvers/exotica_ilqg_solver/exotica_plugins.xml` - XML/UI config; 228 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_ilqg_solver/include/exotica_ilqg_solver/ilqg_solver.h` - C/C++ source; 3.7 KB; lines=80; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ilqg_solver/init/ilqg_solver.in` - text/config; 256 B; lines=7; text file
+- `exotica/exotations/solvers/exotica_ilqg_solver/package.xml` - ROS package manifest; 537 B; lines=17; package=exotica_ilqg_solver; deps=exotica_core, exotica_python, ament_cmake, ament_cmake_python; desc=ILQG Solver for EXOTica (Todorov and Li, 2004)
+- `exotica/exotations/solvers/exotica_ilqg_solver/src/exotica_ilqg_solver_py/__init__.py` - Python source; 37 B; lines=1; imports=exotica_ilqg_solver_py
+- `exotica/exotations/solvers/exotica_ilqg_solver/src/ilqg_solver.cpp` - C/C++ source; 12.9 KB; lines=326; approx code symbols=5
+- `exotica/exotations/solvers/exotica_ilqg_solver/src/ilqg_solver_py.cpp` - C/C++ source; 1.9 KB; lines=43; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ilqr_solver/CHANGELOG.rst` - RST doc; 1.1 KB; lines=45; text file
+- `exotica/exotations/solvers/exotica_ilqr_solver/CMakeLists.txt` - CMake build file; 1.6 KB; lines=53; text file
+- `exotica/exotations/solvers/exotica_ilqr_solver/exotica_plugins.xml` - XML/UI config; 228 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_ilqr_solver/include/exotica_ilqr_solver/ilqr_solver.h` - C/C++ source; 3.7 KB; lines=78; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ilqr_solver/init/ilqr_solver.in` - text/config; 214 B; lines=6; text file
+- `exotica/exotations/solvers/exotica_ilqr_solver/package.xml` - ROS package manifest; 537 B; lines=17; package=exotica_ilqr_solver; deps=exotica_core, exotica_python, ament_cmake, ament_cmake_python; desc=ILQR Solver for EXOTica (Li and Todorov, 2004)
+- `exotica/exotations/solvers/exotica_ilqr_solver/src/exotica_ilqr_solver_py/__init__.py` - Python source; 37 B; lines=1; imports=exotica_ilqr_solver_py
+- `exotica/exotations/solvers/exotica_ilqr_solver/src/ilqr_solver.cpp` - C/C++ source; 12.2 KB; lines=319; approx code symbols=5
+- `exotica/exotations/solvers/exotica_ilqr_solver/src/ilqr_solver_py.cpp` - C/C++ source; 1.9 KB; lines=43; approx code symbols=0
+- `exotica/exotations/solvers/exotica_levenberg_marquardt_solver/CHANGELOG.rst` - RST doc; 983 B; lines=45; text file
+- `exotica/exotations/solvers/exotica_levenberg_marquardt_solver/CMakeLists.txt` - CMake build file; 1.0 KB; lines=36; text file
+- `exotica/exotations/solvers/exotica_levenberg_marquardt_solver/exotica_plugins.xml` - XML/UI config; 263 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_levenberg_marquardt_solver/include/exotica_levenberg_marquardt_solver/levenberg_marquardt_solver.h` - C/C++ source; 2.8 KB; lines=57; approx code symbols=0
+- `exotica/exotations/solvers/exotica_levenberg_marquardt_solver/init/levenberg_marquardt_solver.in` - text/config; 387 B; lines=10; text file
+- `exotica/exotations/solvers/exotica_levenberg_marquardt_solver/package.xml` - ROS package manifest; 452 B; lines=15; package=exotica_levenberg_marquardt_solver; deps=exotica_core, ament_cmake; desc=Levenberg-Marquardt Solver for EXOTica
+- `exotica/exotations/solvers/exotica_levenberg_marquardt_solver/src/levenberg_marquardt_solver.cpp` - C/C++ source; 5.0 KB; lines=151; approx code symbols=2
+- `exotica/exotations/solvers/exotica_ompl_control_solver/CHANGELOG.rst` - RST doc; 1.0 KB; lines=45; text file
+- `exotica/exotations/solvers/exotica_ompl_control_solver/CMakeLists.txt` - CMake build file; 1.2 KB; lines=43; text file
+- `exotica/exotations/solvers/exotica_ompl_control_solver/exotica_plugins.xml` - XML/UI config; 417 B; lines=8; text file
+- `exotica/exotations/solvers/exotica_ompl_control_solver/include/exotica_ompl_control_solver/ompl_control_solver.h` - C/C++ source; 5.2 KB; lines=145; approx code symbols=2
+- `exotica/exotations/solvers/exotica_ompl_control_solver/include/exotica_ompl_control_solver/ompl_native_solvers.h` - C/C++ source; 2.5 KB; lines=58; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ompl_control_solver/init/control_kpiece_solver.in` - text/config; 84 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_ompl_control_solver/init/control_rrt_solver.in` - text/config; 81 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_ompl_control_solver/init/ompl_control_solver.in` - text/config; 265 B; lines=8; text file
+- `exotica/exotations/solvers/exotica_ompl_control_solver/package.xml` - ROS package manifest; 473 B; lines=16; package=exotica_ompl_control_solver; deps=exotica_core, ros-humble-ompl, ament_cmake; desc=OMPL Control Solver for EXOTica
+- `exotica/exotations/solvers/exotica_ompl_control_solver/src/ompl_control_solver.cpp` - C/C++ source; 7.5 KB; lines=198; approx code symbols=3
+- `exotica/exotations/solvers/exotica_ompl_control_solver/src/ompl_native_solvers.cpp` - C/C++ source; 2.5 KB; lines=57; approx code symbols=2
+- `exotica/exotations/solvers/exotica_ompl_solver/CHANGELOG.rst` - RST doc; 1.2 KB; lines=47; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/CMakeLists.txt` - CMake build file; 1.9 KB; lines=71; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/exotica_plugins.xml` - XML/UI config; 1.5 KB; lines=29; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/include/exotica_ompl_solver/ompl_exo.h` - C/C++ source; 10.9 KB; lines=343; approx code symbols=4
+- `exotica/exotations/solvers/exotica_ompl_solver/include/exotica_ompl_solver/ompl_native_solvers.h` - C/C++ source; 3.9 KB; lines=119; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ompl_solver/include/exotica_ompl_solver/ompl_solver.h` - C/C++ source; 3.8 KB; lines=93; approx code symbols=2
+- `exotica/exotations/solvers/exotica_ompl_solver/init/bkpiece.in` - text/config; 62 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/est.in` - text/config; 58 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/kpiece.in` - text/config; 61 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/lazy_prm.in` - text/config; 97 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/lbt_rrt.in` - text/config; 61 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/ompl_solver.in` - text/config; 1.5 KB; lines=26; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/prm.in` - text/config; 93 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/rrt.in` - text/config; 91 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/rrt_connect.in` - text/config; 65 B; lines=3; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/init/rrt_star.in` - text/config; 94 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_ompl_solver/package.xml` - ROS package manifest; 549 B; lines=18; package=exotica_ompl_solver; deps=exotica_core, exotica_python, ros-humble-ompl, ament_cmake, ament_cmake_python; desc=OMPL Solver for EXOTica
+- `exotica/exotations/solvers/exotica_ompl_solver/src/exotica_ompl_solver_py/__init__.py` - Python source; 37 B; lines=1; imports=exotica_ompl_solver_py
+- `exotica/exotations/solvers/exotica_ompl_solver/src/ompl_exo.cpp` - C/C++ source; 12.8 KB; lines=360; approx code symbols=19
+- `exotica/exotations/solvers/exotica_ompl_solver/src/ompl_native_solvers.cpp` - C/C++ source; 8.9 KB; lines=243; approx code symbols=27
+- `exotica/exotations/solvers/exotica_ompl_solver/src/ompl_py.cpp` - C/C++ source; 4.3 KB; lines=82; approx code symbols=0
+- `exotica/exotations/solvers/exotica_ompl_solver/src/ompl_solver.cpp` - C/C++ source; 11.1 KB; lines=264; approx code symbols=0
+- `exotica/exotations/solvers/exotica_scipy_solver/CHANGELOG.rst` - RST doc; 1.3 KB; lines=51; text file
+- `exotica/exotations/solvers/exotica_scipy_solver/CMakeLists.txt` - CMake build file; 243 B; lines=10; text file
+- `exotica/exotations/solvers/exotica_scipy_solver/package.xml` - ROS package manifest; 628 B; lines=21; package=exotica_scipy_solver; deps=exotica_core, python3-numpy, python3-scipy, ament_cmake, ament_cmake_python; desc=SciPy-based Python solvers for Exotica
+- `exotica/exotations/solvers/exotica_scipy_solver/src/exotica_scipy_solver/__init__.py` - Python source; 127 B; lines=3; imports=end_pose_solver, time_indexed_solver
+- `exotica/exotations/solvers/exotica_scipy_solver/src/exotica_scipy_solver/end_pose_solver.py` - Python source; 4.1 KB; lines=136; classes=SciPyEndPoseSolver(9 methods); imports=__future__, numpy, scipy, time
+- `exotica/exotations/solvers/exotica_scipy_solver/src/exotica_scipy_solver/time_indexed_solver.py` - Python source; 4.8 KB; lines=148; classes=SciPyTimeIndexedSolver(8 methods); imports=__future__, numpy, scipy, time
+- `exotica/exotations/solvers/exotica_time_indexed_rrt_connect_solver/CHANGELOG.rst` - RST doc; 1.2 KB; lines=48; text file
+- `exotica/exotations/solvers/exotica_time_indexed_rrt_connect_solver/CMakeLists.txt` - CMake build file; 1.1 KB; lines=38; text file
+- `exotica/exotations/solvers/exotica_time_indexed_rrt_connect_solver/exotica_plugins.xml` - XML/UI config; 279 B; lines=5; text file
+- `exotica/exotations/solvers/exotica_time_indexed_rrt_connect_solver/include/exotica_time_indexed_rrt_connect_solver/time_indexed_rrt_connect.h` - C/C++ source; 11.1 KB; lines=305; approx code symbols=1
+- `exotica/exotations/solvers/exotica_time_indexed_rrt_connect_solver/init/time_indexed_rrt_connect.in` - text/config; 363 B; lines=11; text file
+- `exotica/exotations/solvers/exotica_time_indexed_rrt_connect_solver/package.xml` - ROS package manifest; 497 B; lines=16; package=exotica_time_indexed_rrt_connect_solver; deps=exotica_core, ros-humble-ompl, ament_cmake; desc=Time-Indexed RRT-Connect Solver for EXOTica
+- `exotica/exotations/solvers/exotica_time_indexed_rrt_connect_solver/src/time_indexed_rrt_connect.cpp` - C/C++ source; 21.9 KB; lines=566; approx code symbols=19
+- `exotica/exotica/CHANGELOG.rst` - RST doc; 1.8 KB; lines=65; text file
+- `exotica/exotica/CMakeLists.txt` - CMake build file; 107 B; lines=6; text file
+- `exotica/exotica/doc/Code-Formatting.rst` - RST doc; 639 B; lines=18; text file
+- `exotica/exotica/doc/Common-Initialization-Step.rst` - RST doc; 2.3 KB; lines=56; text file
+- `exotica/exotica/doc/Documentation.rst` - RST doc; 1.6 KB; lines=29; text file
+- `exotica/exotica/doc/Doxyfile` - script/text; 103.8 KB; lines=2427; text file
+- `exotica/exotica/doc/Initializers.rst` - RST doc; 4.6 KB; lines=134; text file
+- `exotica/exotica/doc/Makefile` - script/text; 7.5 KB; lines=216; text file
+- `exotica/exotica/doc/ProblemNamingConvention.pdf` - PDF doc; 122.3 KB; lines=0; not read as source
+- `exotica/exotica/doc/Python-API.rst` - RST doc; 1.1 KB; lines=47; text file
+- `exotica/exotica/doc/Setting-up-ROSlaunch.rst` - RST doc; 4.6 KB; lines=118; text file
+- `exotica/exotica/doc/Setting-up-problems-and-solvers.rst` - RST doc; 9.5 KB; lines=258; text file
+- `exotica/exotica/doc/Styleguide-and-Naming-Convention.rst` - RST doc; 3.7 KB; lines=93; text file
+- `exotica/exotica/doc/Task_maps.rst` - RST doc; 7.4 KB; lines=185; text file
+- `exotica/exotica/doc/Visualisation.rst` - RST doc; 4.3 KB; lines=92; text file
+- `exotica/exotica/doc/XML-Parsing.rst` - RST doc; 2.3 KB; lines=65; text file
+- `exotica/exotica/doc/XML.rst` - RST doc; 5.2 KB; lines=145; text file
+- `exotica/exotica/doc/advanced/task_space_vector.rst` - RST doc; 3.8 KB; lines=13; text file
+- `exotica/exotica/doc/conf.py` - Python source; 2.0 KB; lines=62; empty/module marker
+- `exotica/exotica/doc/images/EXOTica_icon.png` - image asset; 35.8 KB; lines=0; not read as source
+- `exotica/exotica/doc/images/EXOTica_logo.png` - image asset; 40.5 KB; lines=0; not read as source
+- `exotica/exotica/doc/images/example.png` - image asset; 151.6 KB; lines=0; not read as source
+- `exotica/exotica/doc/images/kinematic_tree.png` - image asset; 61.3 KB; lines=0; not read as source
+- `exotica/exotica/doc/images/overview.png` - image asset; 87.3 KB; lines=0; not read as source
+- `exotica/exotica/doc/images/task_map_gaze_at_constraint.png` - image asset; 17.7 KB; lines=0; not read as source
+- `exotica/exotica/doc/images/taskmap_lookat.png` - image asset; 19.4 KB; lines=0; not read as source
+- `exotica/exotica/doc/images/taskspace.png` - image asset; 49.9 KB; lines=0; not read as source
+- `exotica/exotica/doc/index.rst` - RST doc; 1.6 KB; lines=86; text file
+- `exotica/exotica/doc/initialization.rst` - RST doc; 3.8 KB; lines=86; text file
+- `exotica/exotica/doc/installation.rst` - RST doc; 2.2 KB; lines=55; text file
+- `exotica/exotica/doc/manual_initialization.rst` - RST doc; 10.1 KB; lines=235; text file
+- `exotica/exotica/doc/overview.rst` - RST doc; 24.8 KB; lines=258; text file
+- `exotica/exotica/doc/own_robot.rst` - RST doc; 1.8 KB; lines=52; text file
+- `exotica/exotica/doc/problems/sampling_problem.rst` - RST doc; 1.5 KB; lines=21; text file
+- `exotica/exotica/doc/problems/unconstrained_end_pose_problem.rst` - RST doc; 3.2 KB; lines=45; text file
+- `exotica/exotica/doc/problems/unconstrained_time_indexed_problem.rst` - RST doc; 1.1 KB; lines=22; text file
+- `exotica/exotica/doc/quickstart_cpp.rst` - RST doc; 4.5 KB; lines=138; text file
+- `exotica/exotica/doc/quickstart_python.rst` - RST doc; 5.9 KB; lines=180; text file
+- `exotica/exotica/doc/task_maps/com.rst` - RST doc; 656 B; lines=12; text file
+- `exotica/exotica/doc/task_maps/eff_distance.rst` - RST doc; 353 B; lines=12; text file
+- `exotica/exotica/doc/task_maps/eff_frame.rst` - RST doc; 573 B; lines=12; text file
+- `exotica/exotica/doc/task_maps/eff_orientation.rst` - RST doc; 609 B; lines=12; text file
+- `exotica/exotica/doc/task_maps/eff_position.rst` - RST doc; 429 B; lines=12; text file
+- `exotica/exotica/doc/task_maps/joint_limits.rst` - RST doc; 671 B; lines=17; text file
+- `exotica/exotica/doc/task_maps/joint_pose.rst` - RST doc; 881 B; lines=14; text file
+- `exotica/exotica/doc/task_maps/sphere_collision.rst` - RST doc; 1.5 KB; lines=12; text file
+- `exotica/exotica/doc/using_exotica_cpp.rst` - RST doc; 8.2 KB; lines=218; text file
+- `exotica/exotica/package.xml` - ROS package manifest; 1.4 KB; lines=36; package=exotica; deps=exotica_core, exotica_python, exotica_core_task_maps, exotica_ik_solver, exotica_aico_solver, exotica_collision_scene_fcl_latest, exotica_levenberg_marquardt_solver, exotica_ompl_solver, exotica_time_indexed_rrt_connect_solver, ament_cmake; desc=The Extensible Optimization Toolset (EXOTica) is a library for definin
+- `exotica/exotica_core/CHANGELOG.rst` - RST doc; 5.3 KB; lines=100; text file
+- `exotica/exotica_core/CMakeLists.txt` - CMake build file; 4.8 KB; lines=181; text file
+- `exotica/exotica_core/LICENSE` - script/text; 1.5 KB; lines=26; text file
+- `exotica/exotica_core/cmake/add_initializer.cmake` - text/config; 5.7 KB; lines=142; text file
+- `exotica/exotica_core/cmake/exotica.cmake` - text/config; 46 B; lines=1; text file
+- `exotica/exotica_core/cmake/generate_initializers.py` - Python source; 17.3 KB; lines=669; funcs=to_camel_cased, to_underscores, eprint, eprint, constructor_argument_list, constructor_list, default_value, default_argument_value, is_required, default_constructor_list...; imports=__future__, os, re, sys
+- `exotica/exotica_core/include/exotica_core/collision_scene.h` - C/C++ source; 15.5 KB; lines=348; approx code symbols=2
+- `exotica/exotica_core/include/exotica_core/dynamics_solver.h` - C/C++ source; 12.7 KB; lines=272; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/exotica_core.h` - C/C++ source; 2.5 KB; lines=52; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/factory.h` - C/C++ source; 5.9 KB; lines=141; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/feedback_motion_solver.h` - C/C++ source; 2.0 KB; lines=45; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/kinematic_element.h` - C/C++ source; 5.3 KB; lines=161; approx code symbols=2
+- `exotica/exotica_core/include/exotica_core/kinematic_tree.h` - C/C++ source; 14.8 KB; lines=312; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/loaders/xml_loader.h` - C/C++ source; 3.7 KB; lines=95; approx code symbols=1
+- `exotica/exotica_core/include/exotica_core/motion_solver.h` - C/C++ source; 2.9 KB; lines=69; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/object.h` - C/C++ source; 2.7 KB; lines=90; approx code symbols=1
+- `exotica/exotica_core/include/exotica_core/planning_problem.h` - C/C++ source; 4.9 KB; lines=120; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/abstract_time_indexed_problem.h` - C/C++ source; 12.7 KB; lines=289; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/bounded_end_pose_problem.h` - C/C++ source; 3.0 KB; lines=77; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/bounded_time_indexed_problem.h` - C/C++ source; 4.8 KB; lines=95; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/dynamic_time_indexed_shooting_problem.h` - C/C++ source; 10.5 KB; lines=234; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/end_pose_problem.h` - C/C++ source; 3.6 KB; lines=91; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/sampling_problem.h` - C/C++ source; 3.2 KB; lines=86; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/time_indexed_problem.h` - C/C++ source; 2.5 KB; lines=54; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/time_indexed_sampling_problem.h` - C/C++ source; 3.7 KB; lines=91; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/unconstrained_end_pose_problem.h` - C/C++ source; 3.3 KB; lines=85; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/problems/unconstrained_time_indexed_problem.h` - C/C++ source; 5.0 KB; lines=101; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/property.h` - C/C++ source; 4.4 KB; lines=143; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/scene.h` - C/C++ source; 12.9 KB; lines=251; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/server.h` - C/C++ source; 7.1 KB; lines=202; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/setup.h` - C/C++ source; 6.2 KB; lines=144; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/task_map.h` - C/C++ source; 4.2 KB; lines=97; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/task_space_vector.h` - C/C++ source; 2.4 KB; lines=63; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/tasks.h` - C/C++ source; 6.5 KB; lines=180; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/tools.h` - C/C++ source; 4.6 KB; lines=160; approx code symbols=5
+- `exotica/exotica_core/include/exotica_core/tools/autodiff_chain_hessian.h` - C/C++ source; 8.6 KB; lines=232; approx code symbols=1
+- `exotica/exotica_core/include/exotica_core/tools/autodiff_chain_hessian_sparse.h` - C/C++ source; 9.0 KB; lines=240; approx code symbols=1
+- `exotica/exotica_core/include/exotica_core/tools/autodiff_chain_jacobian.h` - C/C++ source; 5.2 KB; lines=160; approx code symbols=1
+- `exotica/exotica_core/include/exotica_core/tools/autodiff_chain_jacobian_sparse.h` - C/C++ source; 5.4 KB; lines=168; approx code symbols=1
+- `exotica/exotica_core/include/exotica_core/tools/autodiff_scalar.h` - C/C++ source; 34.9 KB; lines=835; approx code symbols=7
+- `exotica/exotica_core/include/exotica_core/tools/box_qp.h` - C/C++ source; 9.5 KB; lines=273; approx code symbols=2
+- `exotica/exotica_core/include/exotica_core/tools/box_qp_old.h` - C/C++ source; 7.0 KB; lines=197; approx code symbols=2
+- `exotica/exotica_core/include/exotica_core/tools/conversions.h` - C/C++ source; 11.2 KB; lines=389; approx code symbols=20
+- `exotica/exotica_core/include/exotica_core/tools/exception.h` - C/C++ source; 3.4 KB; lines=83; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/tools/finitediff_chain_hessian.h` - C/C++ source; 8.0 KB; lines=230; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/tools/finitediff_chain_jacobian.h` - C/C++ source; 7.1 KB; lines=217; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/tools/finitediff_common.h` - C/C++ source; 1.7 KB; lines=42; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/tools/functor.h` - C/C++ source; 2.2 KB; lines=52; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/tools/printable.h` - C/C++ source; 5.1 KB; lines=98; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/tools/sparse_costs.h` - C/C++ source; 3.1 KB; lines=103; approx code symbols=9
+- `exotica/exotica_core/include/exotica_core/tools/test_helpers.h` - C/C++ source; 1.9 KB; lines=50; approx code symbols=1
+- `exotica/exotica_core/include/exotica_core/tools/timer.h` - C/C++ source; 2.3 KB; lines=65; approx code symbols=2
+- `exotica/exotica_core/include/exotica_core/tools/uncopyable.h` - C/C++ source; 1.9 KB; lines=47; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/trajectory.h` - C/C++ source; 2.4 KB; lines=63; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/version.h` - C/C++ source; 1.7 KB; lines=39; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/visualization_meshcat.h` - C/C++ source; 3.3 KB; lines=83; approx code symbols=0
+- `exotica/exotica_core/include/exotica_core/visualization_meshcat_types.h` - C/C++ source; 15.0 KB; lines=488; approx code symbols=7
+- `exotica/exotica_core/include/exotica_core/visualization_moveit.h` - C/C++ source; 2.2 KB; lines=57; approx code symbols=0
+- `exotica/exotica_core/init/attach_link.in` - text/config; 174 B; lines=7; text file
+- `exotica/exotica_core/init/bounded_end_pose_problem.in` - text/config; 318 B; lines=8; text file
+- `exotica/exotica_core/init/bounded_time_indexed_problem.in` - text/config; 389 B; lines=12; text file
+- `exotica/exotica_core/init/box_shape.in` - text/config; 135 B; lines=6; text file
+- `exotica/exotica_core/init/collision_scene.in` - text/config; 449 B; lines=11; text file
+- `exotica/exotica_core/init/cylinder_shape.in` - text/config; 156 B; lines=7; text file
+- `exotica/exotica_core/init/dynamic_time_indexed_shooting_problem.in` - text/config; 1.4 KB; lines=35; text file
+- `exotica/exotica_core/init/dynamics_solver.in` - text/config; 290 B; lines=8; text file
+- `exotica/exotica_core/init/end_pose_problem.in` - text/config; 635 B; lines=13; text file
+- `exotica/exotica_core/init/frame.in` - text/config; 205 B; lines=7; text file
+- `exotica/exotica_core/init/link.in` - text/config; 323 B; lines=9; text file
+- `exotica/exotica_core/init/mesh_shape.in` - text/config; 193 B; lines=7; text file
+- `exotica/exotica_core/init/motion_solver.in` - text/config; 84 B; lines=5; text file
+- `exotica/exotica_core/init/object.in` - text/config; 71 B; lines=5; text file
+- `exotica/exotica_core/init/octree_shape.in` - text/config; 141 B; lines=6; text file
+- `exotica/exotica_core/init/planning_problem.in` - text/config; 369 B; lines=11; text file
+- `exotica/exotica_core/init/sampling_problem.in` - text/config; 586 B; lines=10; text file
+- `exotica/exotica_core/init/scene.in` - text/config; 2.5 KB; lines=34; text file
+- `exotica/exotica_core/init/shape.in` - text/config; 170 B; lines=4; text file
+- `exotica/exotica_core/init/sphere_shape.in` - text/config; 128 B; lines=6; text file
+- `exotica/exotica_core/init/task.in` - text/config; 156 B; lines=6; text file
+- `exotica/exotica_core/init/task_map.in` - text/config; 199 B; lines=6; text file
+- `exotica/exotica_core/init/time_indexed_problem.in` - text/config; 1009 B; lines=18; text file
+- `exotica/exotica_core/init/time_indexed_sampling_problem.in` - text/config; 231 B; lines=6; text file
+- `exotica/exotica_core/init/trajectory.in` - text/config; 116 B; lines=6; text file
+- `exotica/exotica_core/init/unconstrained_end_pose_problem.in` - text/config; 269 B; lines=7; text file
+- `exotica/exotica_core/init/unconstrained_time_indexed_problem.in` - text/config; 281 B; lines=10; text file
+- `exotica/exotica_core/package.xml` - ROS package manifest; 1.2 KB; lines=40; package=exotica_core; deps=rclcpp, ament_index_cpp, tf2, tf2_ros, tf2_kdl, tf2_eigen_kdl, tf2_eigen, orocos_kdl_vendor, kdl_parser, moveit_core, moveit_ros_planning, moveit_msgs...; desc=EXOTica core library
+- `exotica/exotica_core/src/collision_scene.cpp` - C/C++ source; 4.0 KB; lines=83; approx code symbols=3
+- `exotica/exotica_core/src/dynamics_solver.cpp` - C/C++ source; 16.8 KB; lines=476; approx code symbols=0
+- `exotica/exotica_core/src/kinematic_tree.cpp` - C/C++ source; 57.0 KB; lines=1500; approx code symbols=57
+- `exotica/exotica_core/src/loaders/xml_loader.cpp` - C/C++ source; 9.1 KB; lines=260; approx code symbols=4
+- `exotica/exotica_core/src/motion_solver.cpp` - C/C++ source; 2.2 KB; lines=56; approx code symbols=3
+- `exotica/exotica_core/src/planning_problem.cpp` - C/C++ source; 11.1 KB; lines=340; approx code symbols=20
+- `exotica/exotica_core/src/problems/abstract_time_indexed_problem.cpp` - C/C++ source; 21.0 KB; lines=612; approx code symbols=49
+- `exotica/exotica_core/src/problems/bounded_end_pose_problem.cpp` - C/C++ source; 8.4 KB; lines=247; approx code symbols=12
+- `exotica/exotica_core/src/problems/bounded_time_indexed_problem.cpp` - C/C++ source; 7.8 KB; lines=218; approx code symbols=5
+- `exotica/exotica_core/src/problems/dynamic_time_indexed_shooting_problem.cpp` - C/C++ source; 33.5 KB; lines=937; approx code symbols=35
+- `exotica/exotica_core/src/problems/end_pose_problem.cpp` - C/C++ source; 13.4 KB; lines=409; approx code symbols=24
+- `exotica/exotica_core/src/problems/sampling_problem.cpp` - C/C++ source; 10.5 KB; lines=297; approx code symbols=17
+- `exotica/exotica_core/src/problems/time_indexed_problem.cpp` - C/C++ source; 5.6 KB; lines=144; approx code symbols=2
+- `exotica/exotica_core/src/problems/time_indexed_sampling_problem.cpp` - C/C++ source; 11.1 KB; lines=314; approx code symbols=18
+- `exotica/exotica_core/src/problems/unconstrained_end_pose_problem.cpp` - C/C++ source; 8.4 KB; lines=246; approx code symbols=14
+- `exotica/exotica_core/src/problems/unconstrained_time_indexed_problem.cpp` - C/C++ source; 7.0 KB; lines=194; approx code symbols=5
+- `exotica/exotica_core/src/property.cpp` - C/C++ source; 4.2 KB; lines=117; approx code symbols=14
+- `exotica/exotica_core/src/scene.cpp` - C/C++ source; 38.4 KB; lines=980; approx code symbols=55
+- `exotica/exotica_core/src/server.cpp` - C/C++ source; 5.1 KB; lines=156; approx code symbols=7
+- `exotica/exotica_core/src/setup.cpp` - C/C++ source; 6.4 KB; lines=173; approx code symbols=9
+- `exotica/exotica_core/src/task_map.cpp` - C/C++ source; 5.1 KB; lines=132; approx code symbols=8
+- `exotica/exotica_core/src/task_space_vector.cpp` - C/C++ source; 4.0 KB; lines=102; approx code symbols=2
+- `exotica/exotica_core/src/tasks.cpp` - C/C++ source; 22.1 KB; lines=608; approx code symbols=35
+- `exotica/exotica_core/src/tools.cpp` - C/C++ source; 7.3 KB; lines=226; approx code symbols=9
+- `exotica/exotica_core/src/tools/conversions.cpp` - C/C++ source; 6.4 KB; lines=180; approx code symbols=9
+- `exotica/exotica_core/src/tools/exception.cpp` - C/C++ source; 2.4 KB; lines=51; approx code symbols=0
+- `exotica/exotica_core/src/tools/printable.cpp` - C/C++ source; 2.6 KB; lines=57; approx code symbols=3
+- `exotica/exotica_core/src/trajectory.cpp` - C/C++ source; 4.4 KB; lines=142; approx code symbols=8
+- `exotica/exotica_core/src/version.cpp.in` - text/config; 1.7 KB; lines=33; text file
+- `exotica/exotica_core/src/visualization_meshcat.cpp` - C/C++ source; 15.3 KB; lines=360; approx code symbols=20
+- `exotica/exotica_core/src/visualization_moveit.cpp` - C/C++ source; 7.3 KB; lines=161; approx code symbols=2
+- `exotica/exotica_core/test/test_autodiff.cpp` - C/C++ source; 28.6 KB; lines=790; approx code symbols=6
+- `exotica/exotica_core/test/test_kinematics.cpp` - C/C++ source; 10.8 KB; lines=216; approx code symbols=3
+- `exotica/exotica_examples/CHANGELOG.rst` - RST doc; 1.7 KB; lines=58; text file
+- `exotica/exotica_examples/CMakeLists.txt` - CMake build file; 1.6 KB; lines=46; text file
+- `exotica/exotica_examples/README.md` - Markdown doc; 108 B; lines=3; headings=Examples
+- `exotica/exotica_examples/launch/cpp_aico.launch.py` - ROS launch file; 1.1 KB; lines=33; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/cpp_core.launch.py` - ROS launch file; 473 B; lines=18; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os
+- `exotica/exotica_examples/launch/cpp_ik_freebase.launch.py` - ROS launch file; 1.1 KB; lines=33; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/cpp_ik_minimal.launch.py` - ROS launch file; 1.1 KB; lines=33; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/cpp_init_generic.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/cpp_init_xml.launch.py` - ROS launch file; 1.1 KB; lines=33; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/cpp_ompl.launch.py` - ROS launch file; 1.1 KB; lines=33; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/cpp_ompl_freebase.launch.py` - ROS launch file; 1.1 KB; lines=33; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_aico.launch.py` - ROS launch file; 1013 B; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_aico_eff_velocity.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_aico_joint_velocity_limit.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_aico_trajectory.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_attach.launch.py` - ROS launch file; 1017 B; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_bayesian_ik.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_collision_distance.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik.launch.py` - ROS launch file; 1009 B; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_avoid_look_at_sphere.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_eff_axis_alignment.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_eff_box.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_gaze_at_constraint.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_interactive_tuning.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_joint_torque_minimization_proxy.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_joint_velocity_limit_constraint.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_levenberg_marquardt.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_look_at.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_manual_initialization.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_point_to_line.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_python_solver_constrained.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_talos.launch.py` - ROS launch file; 1017 B; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_trajectory.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_valkyrie.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ik_with_jnt_smoothing.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_lazy_prm.launch.py` - ROS launch file; 1021 B; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_manipulability.launch.py` - ROS launch file; 1021 B; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ompl.launch.py` - ROS launch file; 1013 B; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ompl_freebase.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ompl_freebase_dubins.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_ompl_projections.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_prm.launch.py` - ROS launch file; 1011 B; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_relative_trajectory.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_shapes.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_smooth_collision_distance.launch.py` - ROS launch file; 759 B; lines=25; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_sphere_collision.launch.py` - ROS launch file; 758 B; lines=25; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_time_indexed_sampling.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_time_indexed_sampling_freebase.launch.py` - ROS launch file; 1.0 KB; lines=32; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/python_trajectory_path_aligned.launch.py` - ROS launch file; 769 B; lines=25; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/launch/talos.launch.py` - ROS launch file; 842 B; lines=25; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os, pyexotica
+- `exotica/exotica_examples/package.xml` - ROS package manifest; 2.0 KB; lines=50; package=exotica_examples; deps=exotica_aico_solver, exotica_core, exotica_core_task_maps, exotica_ik_solver, rclcpp, exotica_cartpole_dynamics_solver, exotica_collision_scene_fcl_latest, exotica_ddp_solver, exotica_double_integrator_dynamics_solver, exotica_ilqg_solver, exotica_ilqr_solver, exotica_levenberg_marquardt_solver...; desc=Package containing examples and system tests for EXOTica.
+- `exotica/exotica_examples/resources/cone.mtl` - text/config; 124 B; lines=10; text file
+- `exotica/exotica_examples/resources/cone.obj` - text/config; 3.2 KB; lines=134; text file
+- `exotica/exotica_examples/resources/cone.stl` - mesh asset; 3.1 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/01_ilqr_cartpole.xml` - XML/UI config; 1.3 KB; lines=34; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/02_lwr_task_maps.xml` - XML/UI config; 4.1 KB; lines=96; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/03_ilqr_valkyrie.xml` - XML/UI config; 4.9 KB; lines=97; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/04_analytic_ddp_cartpole.xml` - XML/UI config; 1.4 KB; lines=35; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/05_analytic_ddp_lwr.xml` - XML/UI config; 1.4 KB; lines=35; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/06_analytic_ddp_valkyrie.xml` - XML/UI config; 2.1 KB; lines=37; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/07_control_limited_ddp_cartpole.xml` - XML/UI config; 3.2 KB; lines=53; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/08_control_limited_ddp_lwr.xml` - XML/UI config; 1.4 KB; lines=35; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/09_control_limited_ddp_valkyrie.xml` - XML/UI config; 4.4 KB; lines=93; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/10_ilqg_cartpole.xml` - XML/UI config; 1.7 KB; lines=53; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/11_ilqg_lwr.xml` - XML/UI config; 2.1 KB; lines=57; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/12_ilqg_valkyrie.xml` - XML/UI config; 2.2 KB; lines=39; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/13_control_limited_ddp_quadrotor.xml` - XML/UI config; 1.5 KB; lines=43; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/14_rrt_cartpole.xml` - XML/UI config; 1.4 KB; lines=37; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/15_rrt_quadrotor.xml` - XML/UI config; 1.5 KB; lines=40; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/16_kpiece_cartpole.xml` - XML/UI config; 1.5 KB; lines=38; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/17_quadrotor_collision_avoidance.xml` - XML/UI config; 4.6 KB; lines=99; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/18_ilqr_pendulum.xml` - XML/UI config; 1.3 KB; lines=34; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/19_ddp_quadrotor_sphere.xml` - XML/UI config; 2.3 KB; lines=65; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/20_sparse_ddp_pendulum.xml` - XML/UI config; 1.5 KB; lines=43; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/21_sparse_ddp_cartpole.xml` - XML/UI config; 1.7 KB; lines=43; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/22_boxfddp_cartpole.xml` - XML/UI config; 1.8 KB; lines=45; text file
+- `exotica/exotica_examples/resources/configs/dynamic_time_indexed/23_quadrotor_rotating_inplace.xml` - XML/UI config; 1.5 KB; lines=41; text file
+- `exotica/exotica_examples/resources/configs/example_aico.xml` - XML/UI config; 953 B; lines=37; text file
+- `exotica/exotica_examples/resources/configs/example_aico_eff_velocity.xml` - XML/UI config; 878 B; lines=32; text file
+- `exotica/exotica_examples/resources/configs/example_aico_eight.xml` - XML/UI config; 864 B; lines=35; text file
+- `exotica/exotica_examples/resources/configs/example_aico_joint_velocity_limit.xml` - XML/UI config; 1.3 KB; lines=40; text file
+- `exotica/exotica_examples/resources/configs/example_aico_trajectory.xml` - XML/UI config; 1.1 KB; lines=40; text file
+- `exotica/exotica_examples/resources/configs/example_bayesian_ik.xml` - XML/UI config; 846 B; lines=29; text file
+- `exotica/exotica_examples/resources/configs/example_distance.xml` - XML/UI config; 727 B; lines=24; text file
+- `exotica/exotica_examples/resources/configs/example_dynamic_time_indexed_problem.xml` - XML/UI config; 752 B; lines=22; text file
+- `exotica/exotica_examples/resources/configs/example_dynamic_time_indexed_problem_quadrotor.xml` - XML/UI config; 665 B; lines=21; text file
+- `exotica/exotica_examples/resources/configs/example_eff_axis_alignment.xml` - XML/UI config; 1007 B; lines=39; text file
+- `exotica/exotica_examples/resources/configs/example_ik.xml` - XML/UI config; 890 B; lines=34; text file
+- `exotica/exotica_examples/resources/configs/example_ik_avoid_look_at_sphere.xml` - XML/UI config; 1.6 KB; lines=55; text file
+- `exotica/exotica_examples/resources/configs/example_ik_constrained.xml` - XML/UI config; 1.8 KB; lines=50; text file
+- `exotica/exotica_examples/resources/configs/example_ik_eff_box.xml` - XML/UI config; 1.2 KB; lines=48; text file
+- `exotica/exotica_examples/resources/configs/example_ik_freebase.xml` - XML/UI config; 972 B; lines=35; text file
+- `exotica/exotica_examples/resources/configs/example_ik_gaze_at_constraint.xml` - XML/UI config; 920 B; lines=40; text file
+- `exotica/exotica_examples/resources/configs/example_ik_interactive_rho_tuning.xml` - XML/UI config; 1.4 KB; lines=45; text file
+- `exotica/exotica_examples/resources/configs/example_ik_joint_torque_minimization_proxy.xml` - XML/UI config; 1.4 KB; lines=44; text file
+- `exotica/exotica_examples/resources/configs/example_ik_joint_velocity_limit_constraint.xml` - XML/UI config; 1.1 KB; lines=38; text file
+- `exotica/exotica_examples/resources/configs/example_ik_levenberg_marquardt.xml` - XML/UI config; 869 B; lines=29; text file
+- `exotica/exotica_examples/resources/configs/example_ik_look_at.xml` - XML/UI config; 1.0 KB; lines=35; text file
+- `exotica/exotica_examples/resources/configs/example_ik_point_to_line.xml` - XML/UI config; 959 B; lines=32; text file
+- `exotica/exotica_examples/resources/configs/example_ik_python_solver_constrained.xml` - XML/UI config; 1.9 KB; lines=51; text file
+- `exotica/exotica_examples/resources/configs/example_ik_quasistatic_talos.xml` - XML/UI config; 2.8 KB; lines=65; text file
+- `exotica/exotica_examples/resources/configs/example_ik_quasistatic_valkyrie.xml` - XML/UI config; 2.7 KB; lines=64; text file
+- `exotica/exotica_examples/resources/configs/example_ik_trajectory.xml` - XML/UI config; 1.4 KB; lines=44; text file
+- `exotica/exotica_examples/resources/configs/example_ik_with_jnt_smoothing.xml` - XML/UI config; 1.8 KB; lines=49; text file
+- `exotica/exotica_examples/resources/configs/example_lazy_prm.xml` - XML/UI config; 976 B; lines=31; text file
+- `exotica/exotica_examples/resources/configs/example_manipulability.xml` - XML/UI config; 1.2 KB; lines=40; text file
+- `exotica/exotica_examples/resources/configs/example_manipulate_ik.xml` - XML/UI config; 1.2 KB; lines=38; text file
+- `exotica/exotica_examples/resources/configs/example_manipulate_ompl.xml` - XML/UI config; 878 B; lines=32; text file
+- `exotica/exotica_examples/resources/configs/example_ompl.xml` - XML/UI config; 904 B; lines=31; text file
+- `exotica/exotica_examples/resources/configs/example_ompl_freebase.xml` - XML/UI config; 1.1 KB; lines=35; text file
+- `exotica/exotica_examples/resources/configs/example_ompl_freebase_dubins.xml` - XML/UI config; 1.6 KB; lines=35; text file
+- `exotica/exotica_examples/resources/configs/example_ompl_projections.xml` - XML/UI config; 965 B; lines=31; text file
+- `exotica/exotica_examples/resources/configs/example_prm.xml` - XML/UI config; 918 B; lines=28; text file
+- `exotica/exotica_examples/resources/configs/example_relative_trajectory.xml` - XML/UI config; 1.1 KB; lines=39; text file
+- `exotica/exotica_examples/resources/configs/example_smooth_collision_distance.xml` - XML/UI config; 1.5 KB; lines=46; text file
+- `exotica/exotica_examples/resources/configs/example_sparseddp_valkyrie_l2.xml` - XML/UI config; 4.7 KB; lines=98; text file
+- `exotica/exotica_examples/resources/configs/example_sparseddp_valkyrie_pseudo_huber.xml` - XML/UI config; 4.5 KB; lines=97; text file
+- `exotica/exotica_examples/resources/configs/example_sphere_collision.xml` - XML/UI config; 2.9 KB; lines=63; text file
+- `exotica/exotica_examples/resources/configs/example_time_indexed_sampling.xml` - XML/UI config; 1.3 KB; lines=38; text file
+- `exotica/exotica_examples/resources/configs/example_time_indexed_sampling_freebase.xml` - XML/UI config; 1.3 KB; lines=37; text file
+- `exotica/exotica_examples/resources/configs/example_trajectory_constrained.xml` - XML/UI config; 2.0 KB; lines=56; text file
+- `exotica/exotica_examples/resources/configs/example_trajectory_path_aligned.xml` - XML/UI config; 4.4 KB; lines=105; text file
+- `exotica/exotica_examples/resources/lwr_collision_replacement.yaml` - YAML config; 627 B; lines=36; top-level keys=lwr_arm_7_link, lwr_arm_6_link, lwr_arm_5_link, lwr_arm_4_link, lwr_arm_3_link, lwr_arm_2_link, lwr_arm_1_link
+- `exotica/exotica_examples/resources/robots/lwr_simplified.srdf` - robot description; 4.3 KB; lines=49; links=0; joints=0; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/lwr_simplified.urdf` - robot description; 12.0 KB; lines=436; links=9; joints=8; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/lwr_simplified_freebase.srdf` - robot description; 4.8 KB; lines=62; links=0; joints=9; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/pendulum.srdf` - robot description; 802 B; lines=19; links=0; joints=2; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/pendulum.urdf` - robot description; 1.7 KB; lines=66; links=3; joints=2; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/planar_2d.srdf` - robot description; 1.4 KB; lines=24; links=1; joints=4; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/planar_2d.urdf` - robot description; 2.4 KB; lines=74; links=5; joints=4; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/quadrotor.srdf` - robot description; 507 B; lines=11; links=0; joints=1; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/quadrotor.urdf` - robot description; 1.2 KB; lines=33; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/quadrotor/quadrotor_base.dae` - mesh asset; 41.1 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/robots/quadrotor/quadrotor_base.stl` - mesh asset; 26.4 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/robots/quadrotor/quadrotor_base_convex_hull.stl` - mesh asset; 3.8 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/robots/rr_bot.srdf` - robot description; 1.2 KB; lines=21; links=1; joints=3; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/rr_bot.urdf` - robot description; 1.4 KB; lines=46; links=4; joints=3; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/talos.srdf` - robot description; 53.2 KB; lines=620; links=0; joints=90; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/talos.urdf` - robot description; 105.2 KB; lines=2726; links=60; joints=103; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/val_simplified.srdf` - robot description; 95.0 KB; lines=1076; links=0; joints=141; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/val_simplified.urdf` - robot description; 68.6 KB; lines=2008; links=84; joints=83; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/valkyrie_sim.srdf` - robot description; 127.8 KB; lines=1396; links=0; joints=86; xacro_macros=0
+- `exotica/exotica_examples/resources/robots/valkyrie_sim.urdf` - robot description; 111.1 KB; lines=3111; links=85; joints=116; xacro_macros=0
+- `exotica/exotica_examples/resources/rviz.rviz` - RViz config; 15.6 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_avoid_look_at_sphere.rviz` - RViz config; 7.4 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_distance.rviz` - RViz config; 7.1 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_eff_axis_alignment.rviz` - RViz config; 7.0 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_eff_box.rviz` - RViz config; 7.0 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_lookat.rviz` - RViz config; 7.0 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_path_tracking.rviz` - RViz config; 6.4 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_point_to_line.rviz` - RViz config; 7.4 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_relative_trajectory.rviz` - RViz config; 6.7 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_shapes.rviz` - RViz config; 6.7 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/rviz_sphere_collision.rviz` - RViz config; 5.7 KB; lines=0; not read as source
+- `exotica/exotica_examples/resources/scenes/example_box.scene` - text/config; 79 B; lines=9; text file
+- `exotica/exotica_examples/resources/scenes/example_distance.scene` - text/config; 91 B; lines=9; text file
+- `exotica/exotica_examples/resources/scenes/example_manipulate.scene` - text/config; 182 B; lines=23; text file
+- `exotica/exotica_examples/resources/scenes/example_moving_obstacle.scene` - text/config; 71 B; lines=9; text file
+- `exotica/exotica_examples/resources/scenes/example_moving_obstacle.traj` - text/config; 122 B; lines=4; text file
+- `exotica/exotica_examples/resources/scenes/example_static_obstacle.traj` - text/config; 122 B; lines=4; text file
+- `exotica/exotica_examples/resources/scenes/figure_eight.traj` - text/config; 5.2 KB; lines=104; text file
+- `exotica/exotica_examples/resources/scenes/g03_open_back_storage_shelf.scene` - text/config; 495 B; lines=44; text file
+- `exotica/exotica_examples/resources/scenes/kallax.scene` - text/config; 460 B; lines=44; text file
+- `exotica/exotica_examples/resources/talos.rviz` - RViz config; 6.4 KB; lines=0; not read as source
+- `exotica/exotica_examples/scripts/example_aico` - script/text; 736 B; lines=29; text file
+- `exotica/exotica_examples/scripts/example_aico_eff_velocity` - script/text; 765 B; lines=26; text file
+- `exotica/exotica_examples/scripts/example_aico_joint_velocity_limit` - script/text; 1.0 KB; lines=33; text file
+- `exotica/exotica_examples/scripts/example_aico_noros` - script/text; 653 B; lines=26; text file
+- `exotica/exotica_examples/scripts/example_aico_trajectory` - script/text; 511 B; lines=21; text file
+- `exotica/exotica_examples/scripts/example_attach` - script/text; 1.8 KB; lines=59; text file
+- `exotica/exotica_examples/scripts/example_bayesian_ik` - script/text; 852 B; lines=35; text file
+- `exotica/exotica_examples/scripts/example_collision_distance` - script/text; 647 B; lines=26; text file
+- `exotica/exotica_examples/scripts/example_compare_ddp_solvers_cartpole` - script/text; 2.7 KB; lines=74; text file
+- `exotica/exotica_examples/scripts/example_dynamic_time_indexed` - script/text; 4.5 KB; lines=122; text file
+- `exotica/exotica_examples/scripts/example_dynamic_time_indexed_problem` - script/text; 3.2 KB; lines=110; text file
+- `exotica/exotica_examples/scripts/example_dynamic_time_indexed_problem_quadrotor` - script/text; 2.5 KB; lines=88; text file
+- `exotica/exotica_examples/scripts/example_dynamic_time_indexed_stabilization` - script/text; 3.3 KB; lines=99; text file
+- `exotica/exotica_examples/scripts/example_fk` - script/text; 723 B; lines=24; text file
+- `exotica/exotica_examples/scripts/example_ik` - script/text; 815 B; lines=34; text file
+- `exotica/exotica_examples/scripts/example_ik_avoid_look_at_sphere` - script/text; 2.5 KB; lines=73; text file
+- `exotica/exotica_examples/scripts/example_ik_eff_axis_alignment` - script/text; 2.0 KB; lines=65; text file
+- `exotica/exotica_examples/scripts/example_ik_eff_box` - script/text; 1.8 KB; lines=62; text file
+- `exotica/exotica_examples/scripts/example_ik_gaze_at_constraint` - script/text; 2.4 KB; lines=77; text file
+- `exotica/exotica_examples/scripts/example_ik_interactive_cost_tuning` - script/text; 1.7 KB; lines=54; text file
+- `exotica/exotica_examples/scripts/example_ik_joint_torque_minimization_proxy` - script/text; 2.3 KB; lines=79; text file
+- `exotica/exotica_examples/scripts/example_ik_joint_velocity_limit_constraint` - script/text; 1.5 KB; lines=56; text file
+- `exotica/exotica_examples/scripts/example_ik_levenberg_marquardt` - script/text; 1.2 KB; lines=43; text file
+- `exotica/exotica_examples/scripts/example_ik_look_at` - script/text; 1.4 KB; lines=49; text file
+- `exotica/exotica_examples/scripts/example_ik_manual_initialization` - script/text; 2.6 KB; lines=80; text file
+- `exotica/exotica_examples/scripts/example_ik_noros` - script/text; 988 B; lines=34; text file
+- `exotica/exotica_examples/scripts/example_ik_point_to_line` - script/text; 1.3 KB; lines=44; text file
+- `exotica/exotica_examples/scripts/example_ik_python_solver_constrained` - script/text; 1.7 KB; lines=70; text file
+- `exotica/exotica_examples/scripts/example_ik_talos` - script/text; 1.1 KB; lines=40; text file
+- `exotica/exotica_examples/scripts/example_ik_trajectory` - script/text; 656 B; lines=28; text file
+- `exotica/exotica_examples/scripts/example_ik_valkyrie` - script/text; 1.1 KB; lines=42; text file
+- `exotica/exotica_examples/scripts/example_ik_with_jnt_smoothing` - script/text; 3.4 KB; lines=99; text file
+- `exotica/exotica_examples/scripts/example_lazy_prm` - script/text; 605 B; lines=21; text file
+- `exotica/exotica_examples/scripts/example_manipulability` - script/text; 880 B; lines=35; text file
+- `exotica/exotica_examples/scripts/example_meshcat` - script/text; 1.1 KB; lines=36; text file
+- `exotica/exotica_examples/scripts/example_minimal` - script/text; 161 B; lines=6; text file
+- `exotica/exotica_examples/scripts/example_ompl` - script/text; 306 B; lines=14; text file
+- `exotica/exotica_examples/scripts/example_ompl_freebase` - script/text; 315 B; lines=14; text file
+- `exotica/exotica_examples/scripts/example_ompl_freebase_dubins` - script/text; 322 B; lines=14; text file
+- `exotica/exotica_examples/scripts/example_ompl_freebase_noros` - script/text; 386 B; lines=14; text file
+- `exotica/exotica_examples/scripts/example_ompl_noros` - script/text; 252 B; lines=12; text file
+- `exotica/exotica_examples/scripts/example_ompl_projections` - script/text; 357 B; lines=13; text file
+- `exotica/exotica_examples/scripts/example_prm` - script/text; 854 B; lines=33; text file
+- `exotica/exotica_examples/scripts/example_relative_trajectory` - script/text; 3.4 KB; lines=80; text file
+- `exotica/exotica_examples/scripts/example_shapes` - script/text; 3.1 KB; lines=71; text file
+- `exotica/exotica_examples/scripts/example_smooth_collision_distance` - script/text; 1.3 KB; lines=45; text file
+- `exotica/exotica_examples/scripts/example_sparseddp_valkyrie` - script/text; 2.6 KB; lines=96; text file
+- `exotica/exotica_examples/scripts/example_sphere_collision` - script/text; 1.3 KB; lines=44; text file
+- `exotica/exotica_examples/scripts/example_time_indexed_sampling` - script/text; 383 B; lines=14; text file
+- `exotica/exotica_examples/scripts/example_time_indexed_sampling_freebase` - script/text; 410 B; lines=14; text file
+- `exotica/exotica_examples/scripts/example_trajectory_path_aligned` - script/text; 3.8 KB; lines=138; text file
+- `exotica/exotica_examples/scripts/run_examples` - script/text; 2.9 KB; lines=107; text file
+- `exotica/exotica_examples/src/core.cpp` - C/C++ source; 1.7 KB; lines=38; approx code symbols=1
+- `exotica/exotica_examples/src/exotica_examples_py/__init__.py` - Python source; 40 B; lines=1; imports=target_marker
+- `exotica/exotica_examples/src/exotica_examples_py/target_marker.py` - Python source; 4.3 KB; lines=103; classes=TargetMarker(3 methods); funcs=list_to_pose; imports=geometry_msgs, interactive_markers, pyexotica, visualization_msgs
+- `exotica/exotica_examples/src/generic.cpp` - C/C++ source; 5.7 KB; lines=128; approx code symbols=2
+- `exotica/exotica_examples/src/ik_minimal.cpp` - C/C++ source; 2.0 KB; lines=46; approx code symbols=1
+- `exotica/exotica_examples/src/planner.cpp` - C/C++ source; 4.0 KB; lines=112; approx code symbols=2
+- `exotica/exotica_examples/src/xml.cpp` - C/C++ source; 3.7 KB; lines=106; approx code symbols=2
+- `exotica/exotica_examples/src/xml_load_and_solve.cpp` - C/C++ source; 2.3 KB; lines=60; approx code symbols=1
+- `exotica/exotica_examples/test/resources/a_vs_b.srdf` - robot description; 218 B; lines=7; links=0; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/cube.obj` - text/config; 404 B; lines=20; text file
+- `exotica/exotica_examples/test/resources/icosphere.mtl` - text/config; 137 B; lines=10; text file
+- `exotica/exotica_examples/test/resources/icosphere.obj` - text/config; 2.2 KB; lines=128; text file
+- `exotica/exotica_examples/test/resources/mesh_vs_mesh_distance.urdf` - robot description; 1.3 KB; lines=46; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/mesh_vs_mesh_penetrating.urdf` - robot description; 1.3 KB; lines=47; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_box_vs_mesh_distance.urdf` - robot description; 1.2 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_box_vs_mesh_penetrating.urdf` - robot description; 1.2 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_box_vs_primitive_box_distance.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_box_vs_primitive_box_penetrating.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_box_vs_primitive_box_touching.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_box_vs_primitive_cylinder_distance.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_box_vs_primitive_cylinder_penetrating.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_cylinder_vs_mesh_distance.urdf` - robot description; 1.2 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_cylinder_vs_mesh_penetrating.urdf` - robot description; 1.2 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_cylinder_vs_primitive_cylinder_distance.urdf` - robot description; 1.2 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_cylinder_vs_primitive_cylinder_penetrating.urdf` - robot description; 1.2 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_mesh_distance.urdf` - robot description; 1.2 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_mesh_penetrating.urdf` - robot description; 1.2 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_primitive_box_distance.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_primitive_box_penetrating.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_primitive_box_touching.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_primitive_cylinder_distance.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_primitive_cylinder_penetrating.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_primitive_sphere_distance.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/primitive_sphere_vs_primitive_sphere_penetrating.urdf` - robot description; 1.1 KB; lines=48; links=2; joints=1; xacro_macros=0
+- `exotica/exotica_examples/test/resources/test_com_valkyrie.xml` - XML/UI config; 1.1 KB; lines=23; text file
+- `exotica/exotica_examples/test/resources/test_problems.xml` - XML/UI config; 8.1 KB; lines=254; text file
+- `exotica/exotica_examples/test/resources/test_scene.xml` - XML/UI config; 7.3 KB; lines=217; text file
+- `exotica/exotica_examples/test/resources/test_valkyrie_collisionscene_fcl_latest.xml` - XML/UI config; 1.1 KB; lines=29; text file
+- `exotica/exotica_examples/test/resources/uvsphere.mtl` - text/config; 137 B; lines=10; text file
+- `exotica/exotica_examples/test/resources/uvsphere.obj` - text/config; 22.7 KB; lines=1000; text file
+- `exotica/exotica_examples/test/test_initializers.cpp` - C/C++ source; 11.1 KB; lines=212; approx code symbols=5
+- `exotica/exotica_examples/test/test_problems.cpp` - C/C++ source; 20.3 KB; lines=600; approx code symbols=6
+- `exotica/exotica_python/CHANGELOG.rst` - RST doc; 2.5 KB; lines=68; text file
+- `exotica/exotica_python/CMakeLists.txt` - CMake build file; 1.4 KB; lines=51; text file
+- `exotica/exotica_python/package.xml` - ROS package manifest; 908 B; lines=31; package=exotica_python; deps=exotica_core, geometry_msgs, moveit_msgs, shape_msgs, rclcpp, ament_index_cpp, python3-matplotlib, python3-pyassimp, python3-tk, pybind11-dev, ament_cmake, ament_cmake_python; desc=Python bindings for EXOTica
+- `exotica/exotica_python/scripts/convert_moveit_scene_to_sdf` - script/text; 5.9 KB; lines=154; text file
+- `exotica/exotica_python/src/pyexotica.cpp` - C/C++ source; 98.1 KB; lines=1644; approx code symbols=10
+- `exotica/exotica_python/src/pyexotica/__init__.py` - Python source; 308 B; lines=10; imports=__future__, _pyexotica, interactive_cost_tuning, jupyter_meshcat, publish_trajectory, testing, tools
+- `exotica/exotica_python/src/pyexotica/interactive_cost_tuning.py` - Python source; 4.1 KB; lines=112; classes=InteractiveCostTuning(6 methods); imports=__future__, os, sys, time
+- `exotica/exotica_python/src/pyexotica/jupyter_meshcat.py` - Python source; 326 B; lines=9; funcs=show
+- `exotica/exotica_python/src/pyexotica/launch_helpers.py` - Python source; 598 B; lines=18; funcs=shutdown_on_exit; imports=launch
+- `exotica/exotica_python/src/pyexotica/planning_scene_utils.py` - Python source; 3.3 KB; lines=107; funcs=create_pose, create_sphere, create_box, create_mesh, create_plane; imports=geometry_msgs, moveit_msgs, pyexotica, shape_msgs
+- `exotica/exotica_python/src/pyexotica/publish_trajectory.py` - Python source; 2.5 KB; lines=72; funcs=sig_int_handler, publish_pose, publish_trajectory, publish_time_indexed_trajectory, plot; imports=__future__, matplotlib, signal, time
+- `exotica/exotica_python/src/pyexotica/testing.py` - Python source; 7.9 KB; lines=212; funcs=random_quaternion, random_state, explicit_euler, semiimplicit_euler, check_dynamics_solver_derivatives; imports=__future__, numpy, pyexotica, sys
+- `exotica/exotica_python/src/pyexotica/tools.py` - Python source; 4.1 KB; lines=112; funcs=check_trajectory_continuous_time, check_whether_trajectory_is_collision_free_by_subsampling, get_colliding_links, plot_task_cost_over_time; imports=__future__, collections, matplotlib, numpy, time
+- `exotica/exotica_python/test/test_mesh.py` - Python source; 2.1 KB; lines=57; classes=TestPythonMeshCreation(4 methods); funcs=validate_mesh; imports=pyexotica, unittest
+- `exotica/exotica_python/test/test_no_unknown_initializer_types.py` - Python source; 458 B; lines=16; classes=TestUnknownInitializerTypes(1 methods); imports=subprocess, unittest
+- `exotica/exotica_python/test/test_sparse_costs.py` - Python source; 1.3 KB; lines=43; funcs=num_diff_1d, check_derivative_1d, test_huber, test_smooth_l1; imports=__future__, numpy, pyexotica
+### `rq_fts_ros2_driver`
+- `rq_fts_ros2_driver/.clang-format` - script/text; 1.9 KB; lines=75; text file
+- `rq_fts_ros2_driver/.pre-commit-config.yaml` - YAML config; 2.1 KB; lines=72; top-level keys=repos
+- `rq_fts_ros2_driver/CONTRIBUTING.md` - Markdown doc; 4.2 KB; lines=21; headings=
+- `rq_fts_ros2_driver/LICENSE` - script/text; 1.3 KB; lines=23; text file
+- `rq_fts_ros2_driver/README.md` - Markdown doc; 5.2 KB; lines=170; headings=Robotiq Force Torque Sensor, Overview, Disclaimer, How to build
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/CMakeLists.txt` - CMake build file; 201 B; lines=8; text file
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/launch/view_ft300.launch.py` - ROS launch file; 2.5 KB; lines=87; funcs=launch_setup, generate_launch_description; imports=launch, launch_ros
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/launch/view_fts150.launch.py` - ROS launch file; 2.6 KB; lines=89; funcs=launch_setup, generate_launch_description; imports=launch, launch_ros
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/launch/view_robot.rviz` - RViz config; 6.7 KB; lines=0; not read as source
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/meshes/collision/mountings/robotiq_ft300-G-062-COUPLING_G-50-4M6-1D6_20181119.STL` - mesh asset; 15.1 KB; lines=0; not read as source
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/meshes/collision/robotiq_ft300.STL` - mesh asset; 19.6 KB; lines=0; not read as source
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/meshes/collision/robotiq_fts150.stl` - mesh asset; 28.0 KB; lines=0; not read as source
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/meshes/visual/mountings/robotiq_ft300-G-062-COUPLING_G-50-4M6-1D6_20181119.STL` - mesh asset; 493.2 KB; lines=0; not read as source
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/meshes/visual/robotiq_ft300.STL` - mesh asset; 2.8 MB; lines=0; not read as source
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/meshes/visual/robotiq_fts150.stl` - mesh asset; 163.8 KB; lines=0; not read as source
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/package.xml` - ROS package manifest; 1.1 KB; lines=27; package=robotiq_ft_sensor_description; deps=force_torque_sensor_broadcaster, forward_command_controller, joint_state_broadcaster, joint_trajectory_controller, joint_state_publisher_gui, robot_state_publisher, rviz2, xacro, ament_cmake; desc=Description Package for Robotiq Force Torque Sensor
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/urdf/example_use_robotiq_ft300.urdf.xacro` - robot description; 1.1 KB; lines=34; links=1; joints=0; xacro_macros=0
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/urdf/example_use_robotiq_fts150.urdf.xacro` - robot description; 1.1 KB; lines=34; links=1; joints=0; xacro_macros=0
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/urdf/robotiq_ft300.urdf.xacro` - robot description; 3.1 KB; lines=74; links=3; joints=3; xacro_macros=2
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/urdf/robotiq_ft300_adapter.urdf.xacro` - robot description; 804 B; lines=29; links=1; joints=1; xacro_macros=2
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/urdf/robotiq_fts.ros2_control.xacro` - robot description; 1015 B; lines=33; links=0; joints=0; xacro_macros=2
+- `rq_fts_ros2_driver/robotiq_ft_sensor_description/urdf/robotiq_fts150.urdf.xacro` - robot description; 2.1 KB; lines=54; links=3; joints=3; xacro_macros=2
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/CMakeLists.txt` - CMake build file; 2.7 KB; lines=86; text file
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/config/robotiq_controllers.yaml` - YAML config; 5.1 KB; lines=162; YAML with no obvious top-level keys
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/include/robotiq_ft_sensor_hardware/robotiq_ft_sensor_hardware.hpp` - C/C++ source; 6.1 KB; lines=178; approx code symbols=0
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/include/robotiq_ft_sensor_hardware/rq_int.h` - C/C++ source; 2.0 KB; lines=56; approx code symbols=0
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/include/robotiq_ft_sensor_hardware/rq_sensor_com.h` - C/C++ source; 2.5 KB; lines=70; approx code symbols=0
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/include/robotiq_ft_sensor_hardware/rq_sensor_state.h` - C/C++ source; 3.1 KB; lines=84; approx code symbols=0
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/include/robotiq_ft_sensor_hardware/wrench_simulator.hpp` - C/C++ source; 1.6 KB; lines=58; approx code symbols=2
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/launch/ft_sensor_standalone.launch.py` - ROS launch file; 1.4 KB; lines=37; funcs=launch_setup, generate_launch_description; imports=launch, launch_ros
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/launch/ft_test_sensor.launch.py` - ROS launch file; 604 B; lines=24; funcs=launch_setup, generate_launch_description; imports=launch, launch_ros
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/launch/robotiq_hardware.launch.py` - ROS launch file; 4.9 KB; lines=165; funcs=launch_setup, generate_launch_description; imports=launch, launch_ros
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/nodes/robotiq_ft_sensor_standalone_node.cpp` - C/C++ source; 9.4 KB; lines=298; approx code symbols=1
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/nodes/test_add_wrench_pub.cpp` - C/C++ source; 1.3 KB; lines=48; approx code symbols=3
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/nodes/test_robotiq_ft_sensor_node.cpp` - C/C++ source; 5.7 KB; lines=153; approx code symbols=1
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/package.xml` - ROS package manifest; 1.0 KB; lines=26; package=robotiq_ft_sensor_hardware; deps=rclcpp, pluginlib, hardware_interface, robotiq_ft_sensor_interfaces, geometry_msgs, ament_cmake; desc=Package for reading data for a Robotiq Force Torque Sensor
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/robotiq_ft_sensor_hardware.xml` - XML/UI config; 413 B; lines=9; text file
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/src/robotiq_ft_sensor_hardware.cpp` - C/C++ source; 7.7 KB; lines=226; approx code symbols=6
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/src/rq_sensor_com.cpp` - C/C++ source; 29.0 KB; lines=1197; approx code symbols=28
+- `rq_fts_ros2_driver/robotiq_ft_sensor_hardware/src/rq_sensor_state.cpp` - C/C++ source; 8.1 KB; lines=337; approx code symbols=13
+- `rq_fts_ros2_driver/robotiq_ft_sensor_interfaces/CMakeLists.txt` - CMake build file; 454 B; lines=14; text file
+- `rq_fts_ros2_driver/robotiq_ft_sensor_interfaces/msg/FTSensor.msg` - ROS interface; 86 B; lines=7; fields=float32 fx; float32 fy; float32 fz; float32 mx; float32 my; float32 mz
+- `rq_fts_ros2_driver/robotiq_ft_sensor_interfaces/package.xml` - ROS package manifest; 1.1 KB; lines=27; package=robotiq_ft_sensor_interfaces; deps=builtin_interfaces, std_msgs, rosidl_default_runtime, ament_cmake, rosidl_default_generators; desc=Interfaces Package for a Robotiq Force Torque Sensor
+- `rq_fts_ros2_driver/robotiq_ft_sensor_interfaces/srv/SensorAccessor.srv` - ROS interface; 255 B; lines=9; fields=uint8 COMMAND_GET_SERIAL_NUMBER=1; uint8 COMMAND_GET_FIRMWARE_VERSION=2; uint8 COMMAND_GET_PRODUCTION_YEAR=4; uint8 COMMAND_SET_ZERO=8; uint8 command_id; string command # deprecated, please use command_id with a value of COMMAND_*
+### `tool_camera_pkg`
+- `tool_camera_pkg/config/tool_camera_info.yaml` - YAML config; 707 B; lines=26; top-level keys=image_width, image_height, camera_name, camera_matrix, distortion_model, distortion_coefficients, rectification_matrix, projection_matrix
+- `tool_camera_pkg/launch/tool_camera.launch.py` - ROS launch file; 3.4 KB; lines=110; funcs=_canonical_device, _find_hd_camera_from_sysfs, _resolve_tool_camera_device, _launch_setup, generate_launch_description; imports=ament_index_python, glob, launch, launch_ros, os
+- `tool_camera_pkg/package.xml` - ROS package manifest; 687 B; lines=21; package=tool_camera_pkg; deps=rclpy, usb_cam; desc=TODO: Package description
+- `tool_camera_pkg/resource/tool_camera_pkg` - script/text; 0 B; lines=0; text file
+- `tool_camera_pkg/setup.cfg` - tooling config; 99 B; lines=4; text file
+- `tool_camera_pkg/setup.py` - ament_python setup; 914 B; lines=33; imports=setuptools
+- `tool_camera_pkg/test/test_copyright.py` - Python source; 962 B; lines=25; funcs=test_copyright; imports=ament_copyright, pytest
+- `tool_camera_pkg/test/test_flake8.py` - Python source; 884 B; lines=25; funcs=test_flake8; imports=ament_flake8, pytest
+- `tool_camera_pkg/test/test_pep257.py` - Python source; 803 B; lines=23; funcs=test_pep257; imports=ament_pep257, pytest
+- `tool_camera_pkg/tool_camera_pkg/__init__.py` - Python source; 0 B; lines=0; empty/module marker
+### `tool_controller`
+- `tool_controller/config/tool_params.yaml` - YAML config; 161 B; lines=6; top-level keys=tool_commander
+- `tool_controller/launch/tool_launch.py` - Python source; 559 B; lines=21; funcs=generate_launch_description; imports=ament_index_python, launch, launch_ros, os
+- `tool_controller/package.xml` - ROS package manifest; 757 B; lines=23; package=tool_controller; deps=rclpy, std_msgs, sensor_msgs, pyserial; desc=TODO: Package description
+- `tool_controller/resource/tool_controller` - script/text; 0 B; lines=0; text file
+- `tool_controller/setup.cfg` - tooling config; 99 B; lines=4; text file
+- `tool_controller/setup.py` - ament_python setup; 878 B; lines=30; imports=glob, os, setuptools
+- `tool_controller/test/test_copyright.py` - Python source; 962 B; lines=25; funcs=test_copyright; imports=ament_copyright, pytest
+- `tool_controller/test/test_flake8.py` - Python source; 884 B; lines=25; funcs=test_flake8; imports=ament_flake8, pytest
+- `tool_controller/test/test_pep257.py` - Python source; 803 B; lines=23; funcs=test_pep257; imports=ament_pep257, pytest
+- `tool_controller/tool_controller/__init__.py` - Python source; 0 B; lines=0; empty/module marker
+- `tool_controller/tool_controller/rpi_pico_main.py` - Python source; 2.0 KB; lines=80; funcs=set_servo_angle; imports=machine, sys, time
+- `tool_controller/tool_controller/tool_commander.py` - Python source; 6.0 KB; lines=196; classes=ToolCommander(7 methods); funcs=main; imports=glob, json, os, rclpy, serial, std_msgs
+### `vision_agent`
+- `vision_agent/config/camera_crop.yaml` - YAML config; 945 B; lines=29; top-level keys=camera_crop_republisher
+- `vision_agent/launch/orbbec_camera.launch.py` - ROS launch file; 2.5 KB; lines=57; funcs=generate_launch_description; imports=launch, launch_ros
+- `vision_agent/launch/start_vision.launch.py` - ROS launch file; 3.5 KB; lines=105; funcs=generate_launch_description; imports=launch, launch_ros
+- `vision_agent/launch/system_startup.launch.py` - ROS launch file; 1010 B; lines=27; funcs=generate_launch_description; imports=launch, launch_ros
+- `vision_agent/package.xml` - ROS package manifest; 803 B; lines=25; package=vision_agent; deps=rclpy, sensor_msgs, std_msgs, cv_bridge, opencv-python, numpy; desc=TODO: Package description
+- `vision_agent/resource/vision_agent` - script/text; 0 B; lines=0; text file
+- `vision_agent/setup.cfg` - tooling config; 93 B; lines=4; text file
+- `vision_agent/setup.py` - ament_python setup; 3.3 KB; lines=89; classes=DevelopCommand(1 methods); imports=glob, os, setuptools, sys
+- `vision_agent/test/test_copyright.py` - Python source; 962 B; lines=25; funcs=test_copyright; imports=ament_copyright, pytest
+- `vision_agent/test/test_flake8.py` - Python source; 884 B; lines=25; funcs=test_flake8; imports=ament_flake8, pytest
+- `vision_agent/test/test_pep257.py` - Python source; 803 B; lines=23; funcs=test_pep257; imports=ament_pep257, pytest
+- `vision_agent/vision_agent.egg-info/PKG-INFO` - script/text; 283 B; lines=13; text file
+- `vision_agent/vision_agent.egg-info/SOURCES.txt` - text/config; 906 B; lines=32; text file
+- `vision_agent/vision_agent.egg-info/dependency_links.txt` - text/config; 1 B; lines=1; text file
+- `vision_agent/vision_agent.egg-info/entry_points.txt` - text/config; 613 B; lines=12; text file
+- `vision_agent/vision_agent.egg-info/requires.txt` - text/config; 11 B; lines=1; text file
+- `vision_agent/vision_agent.egg-info/top_level.txt` - text/config; 13 B; lines=1; text file
+- `vision_agent/vision_agent.egg-info/zip-safe` - script/text; 1 B; lines=1; text file
+- `vision_agent/vision_agent/__init__.py` - Python source; 0 B; lines=0; empty/module marker
+- `vision_agent/vision_agent/agents/__init__.py` - Python source; 0 B; lines=0; empty/module marker
+- `vision_agent/vision_agent/agents/referee.py` - Python source; 577 B; lines=20; classes=RefereeAgent(2 methods); imports=ultralytics
+- `vision_agent/vision_agent/agents/rfdetr/__init__.py` - Python source; 25 B; lines=1; empty/module marker
+- `vision_agent/vision_agent/agents/rfdetr/scout.py` - Python source; 3.0 KB; lines=70; classes=ScoutAgent(2 methods); imports=PIL, cv2, numpy, rfdetr
+- `vision_agent/vision_agent/agents/rfdetr/scout_rtdetr.py` - Python source; 2.1 KB; lines=56; classes=ScoutAgent(2 methods); imports=cv2, numpy, ultralytics
+- `vision_agent/vision_agent/agents/rfdetr/sniper.py` - Python source; 2.6 KB; lines=71; classes=SniperAgent(2 methods); imports=PIL, cv2, rfdetr
+- `vision_agent/vision_agent/agents/scout.py` - Python source; 3.0 KB; lines=70; classes=ScoutAgent(2 methods); imports=PIL, cv2, numpy, rfdetr
+- `vision_agent/vision_agent/agents/scout_rtdetr.py` - Python source; 2.1 KB; lines=56; classes=ScoutAgent(2 methods); imports=cv2, numpy, ultralytics
+- `vision_agent/vision_agent/agents/sniper.py` - Python source; 2.6 KB; lines=71; classes=SniperAgent(2 methods); imports=PIL, cv2, rfdetr
+- `vision_agent/vision_agent/agents/yolo/__init__.py` - Python source; 38 B; lines=1; empty/module marker
+- `vision_agent/vision_agent/agents/yolo/scout.py` - Python source; 6.6 KB; lines=157; doc=YOLOv11l-seg Global Scout Agent.; classes=ScoutYolo(3 methods); imports=cv2, numpy
+- `vision_agent/vision_agent/agents/yolo/sniper.py` - Python source; 3.6 KB; lines=105; doc=YOLOv11s-seg Local Sniper Agent.; classes=SniperYolo(2 methods); imports=cv2, numpy
+- `vision_agent/vision_agent/camera_crop_republisher.py` - Python source; 27.6 KB; lines=620; doc=CameraCropRepublisher; classes=CameraCropRepublisher(14 methods); funcs=find_repo_root, main; imports=copy, cv2, cv_bridge, glob, numpy, os, rclpy, sensor_msgs, sys, threading
+- `vision_agent/vision_agent/classifier_node.py` - Python source; 3.7 KB; lines=119; classes=ClassifierVisionNode(7 methods); funcs=main; imports=concurrent, cv_bridge, json, rclpy, sensor_msgs, std_msgs, time, vision_agent
+- `vision_agent/vision_agent/common.py` - Python source; 11.9 KB; lines=322; classes=AngleStabilizer(2 methods), Point3DStabilizer(2 methods), StaticAnchorTracker(2 methods), DetectionStabilizer(3 methods); funcs=resolve_checkpoint_path, calculate_orientation_pca; imports=collections, cv2, math, os, rclpy, sys, vision_agent
+- `vision_agent/vision_agent/dashboard_node.py` - Python source; 26.4 KB; lines=612; classes=DashboardNode(26 methods); funcs=main; imports=cv2, cv_bridge, geometry_msgs, json, numpy, rclpy, sensor_msgs, std_msgs, time, vision_agent
+- `vision_agent/vision_agent/dashboard_window.py` - Python source; 42.3 KB; lines=1166; classes=DashboardDataNode(16 methods), Card(2 methods), VideoCard(3 methods), StatusCard(3 methods), TextCard(3 methods), DetectedPartsCard(3 methods), RobotStateCard(5 methods)...; funcs=_value_to_color, global_overlays, local_overlays, robot_model_summary, render_frame, main; imports=PIL, PyQt5, geometry_msgs, io, json, numpy, os, rclpy, sensor_msgs, std_msgs
+- `vision_agent/vision_agent/global_node.py` - Python source; 22.8 KB; lines=548; classes=GlobalVisionNode(14 methods); funcs=main; imports=concurrent, cv2, cv_bridge, json, math, numpy, rclpy, sensor_msgs, std_msgs, time
+- `vision_agent/vision_agent/local_node.py` - Python source; 9.0 KB; lines=255; classes=LocalVisionNode(11 methods); funcs=main; imports=concurrent, cv2, cv_bridge, json, rclpy, sensor_msgs, std_msgs, time, vision_agent
+- `vision_agent/vision_agent/runtime_env.py` - Python source; 1.4 KB; lines=45; funcs=_find_repo_root, setup_python_env; imports=glob, os, sys
+### `vision_training`
+- `vision_training/Project 1 (Segmentation)/rfdetr/global_model/best.onnx` - model artifact; 106.3 MB; lines=0; not read as source
+- `vision_training/Project 1 (Segmentation)/rfdetr/global_model/best.pt` - model artifact; 53.4 MB; lines=0; not read as source
+- `vision_training/Project 1 (Segmentation)/rfdetr/global_model/checkpoint_best_ema.pth` - model artifact; 386.1 MB; lines=0; not read as source
+- `vision_training/Project 1 (Segmentation)/rfdetr/global_model/checkpoint_best_ema_old.pt` - model artifact; 385.9 MB; lines=0; not read as source
+- `vision_training/Project 1 (Segmentation)/rfdetr/rfdetr-train.ipynb` - Jupyter notebook; 998.9 KB; lines=0; notebook too large to summarize
+- `vision_training/Project 1 (Segmentation)/rfdetr/yolov11-train.ipynb` - Jupyter notebook; 4.6 MB; lines=0; notebook too large to summarize
+- `vision_training/Project 2 (Tool-Screw)/rfdetr/local_model/best.onnx` - model artifact; 39.2 MB; lines=0; not read as source
+- `vision_training/Project 2 (Tool-Screw)/rfdetr/local_model/best.pt` - model artifact; 19.6 MB; lines=0; not read as source
+- `vision_training/Project 2 (Tool-Screw)/rfdetr/local_model/checkpoint_best_ema.pth` - model artifact; 364.6 MB; lines=0; not read as source
+- `vision_training/Project 2 (Tool-Screw)/rfdetr/local_model/checkpoint_best_ema_old.pt` - model artifact; 364.6 MB; lines=0; not read as source
+- `vision_training/Project 2 (Tool-Screw)/rfdetr/rfdetr-train.ipynb` - Jupyter notebook; 1.3 MB; lines=0; notebook too large to summarize
+- `vision_training/Project 2 (Tool-Screw)/rfdetr/yolov11-train.ipynb` - Jupyter notebook; 6.0 MB; lines=0; notebook too large to summarize
+- `vision_training/Project 3 (Classification)/yolo11/state_model/best.pt` - model artifact; 3.0 MB; lines=0; not read as source
+- `vision_training/Project 3 (Classification)/yolo11/yolo11-train.ipynb` - Jupyter notebook; 1.0 MB; lines=0; notebook too large to summarize
+- `vision_training/README.md` - Markdown doc; 0 B; lines=0; headings=
+- `vision_training/data_collection/collect_orbbec_camera_images.py` - Python source; 7.0 KB; lines=209; classes=OrbbecImageCollector(8 methods); funcs=_sanitize_python_path, find_repo_root, main; imports=cv2, cv_bridge, datetime, numpy, os, rclpy, sensor_msgs, sys
+- `vision_training/data_collection/collect_tool_camera_images.py` - Python source; 6.9 KB; lines=207; classes=ToolCameraImageCollector(8 methods); funcs=_sanitize_python_path, find_repo_root, main; imports=cv2, cv_bridge, datetime, numpy, os, rclpy, sensor_msgs, sys
+- `vision_training/image_prep.py` - Python source; 32.3 KB; lines=826; doc=Image Preparation Tool for RF-DETR; classes=ImagePrepApp(45 methods); funcs=_btn, _sep, main; imports=PIL, __future__, matplotlib, pathlib, tkinter
+- `vision_training/pyproject.toml` - tooling config; 529 B; lines=23; text file
+- `vision_training/test.py` - Python source; 5.3 KB; lines=146; funcs=run_single_anchor_workspace; imports=cv2, numpy
+- `vision_training/uv.lock` - tooling config; 531.0 KB; lines=0; text file

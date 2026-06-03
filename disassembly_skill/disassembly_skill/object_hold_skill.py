@@ -75,9 +75,11 @@ class ObjectHoldSkill(Node):
         self.DESCENT_STEP_M = 0.0005
         self.DESCENT_DISTANCE_M = 0.06
         self.DESCENT_RATE_HZ = 30.0
+        self.MIN_CONTACT_DESCENT_M = 0.030
         self.USE_TACTILE_DESCENT = True
         self.RETRACT_VELOCITY = 0.05
         self.CONTACT_RETRACT_M = 0.005
+        self.CONTACT_RETRACT_MIN_SUCCESS_M = 0.0025
         self.CONTACT_RETRACT_VELOCITY = 0.02
         self.POST_GRASP_RETRACT_SPEED = 0.1
         self.STRATEGY = "fixture_press"
@@ -188,6 +190,7 @@ class ObjectHoldSkill(Node):
         else:
             self.APPROACH_RPY_RAD = None
         self.DESCENT_DISTANCE_M = p.get('descent_distance_m', self.DESCENT_DISTANCE_M)
+        self.MIN_CONTACT_DESCENT_M = p.get('min_contact_descent_m', self.MIN_CONTACT_DESCENT_M)
         self.DESCENT_RATE_HZ = p.get('descent_rate_hz', self.DESCENT_RATE_HZ)
         self.DESCENT_STEP_M = p.get(
             'descent_step_m',
@@ -199,6 +202,10 @@ class ObjectHoldSkill(Node):
         self.HOVER_VELOCITY = p.get('hover_velocity', self.APPROACH_VELOCITY)
         self.GRIP_VELOCITY = p.get('grip_velocity', self.GRIP_VELOCITY)
         self.CONTACT_RETRACT_M = p.get('contact_retract_m', self.CONTACT_RETRACT_M)
+        self.CONTACT_RETRACT_MIN_SUCCESS_M = p.get(
+            'contact_retract_min_success_m',
+            self.CONTACT_RETRACT_MIN_SUCCESS_M,
+        )
         self.CONTACT_RETRACT_VELOCITY = p.get('contact_retract_velocity', self.CONTACT_RETRACT_VELOCITY)
         # Labels accepted as valid hold targets (used as vision-search fallback list)
         holdable_labels = p.get('holdable_labels', None)
@@ -413,20 +420,16 @@ class ObjectHoldSkill(Node):
             start_rad=None if current is None else float(current),
         )
 
-    def _retract_after_contact(self, distance_m=None):
-        """Lift the arm distance_m above the contact point using a single planned trajectory.
-
-        Reads the contact z once from TF, computes a fixed target_z = contact_z + distance_m,
-        and executes one EXOTica trajectory to that point.  No streaming — avoids stale-TF
-        jump artefacts that occurred with retract_z_exotica.
-        """
+    def _retract_after_contact(self, distance_m=None, q_dict=None, target_x=None, target_y=None):
+        """Lift the arm above contact with TF-verified EXOTica streaming and Servo fallback."""
         distance_m = abs(float(self.CONTACT_RETRACT_M if distance_m is None else distance_m))
         if distance_m <= 0.0:
             return True
 
-        # Stop any ongoing servo stream before reading position.
         self.uf850.stop_servo(timeout_sec=0.5)
-        time.sleep(0.15)  # let arm settle so TF is current
+        for _ in range(3):
+            self.uf850._hold_current_arm_position()
+            time.sleep(0.08)
 
         try:
             start_tf = self.uf850.tf_buffer.lookup_transform(
@@ -435,70 +438,400 @@ class ObjectHoldSkill(Node):
             sx = float(start_tf.transform.translation.x)
             sy = float(start_tf.transform.translation.y)
             sz = float(start_tf.transform.translation.z)
-            q = start_tf.transform.rotation
         except Exception as exc:
             self.get_logger().error(f"[hold] Contact retract TF lookup failed: {exc}")
             return False
 
-        target_z = sz + distance_m
         velocity = max(0.010, min(float(self.CONTACT_RETRACT_VELOCITY), 0.05))
+        max_lateral_drift = 0.006
+        min_expected = max(
+            0.0015,
+            min(float(self.CONTACT_RETRACT_MIN_SUCCESS_M), distance_m - 0.001),
+        )
+        hard_down_limit = -0.015
+
+        def _read_retract_tf():
+            tf = self.uf850.tf_buffer.lookup_transform(
+                self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+            )
+            return (
+                float(tf.transform.translation.x),
+                float(tf.transform.translation.y),
+                float(tf.transform.translation.z),
+                tf.transform.rotation,
+            )
+
+        def _wait_for_retract_settle(timeout_s=2.0, window_s=0.35, tolerance_m=0.0012):
+            samples = []
+            deadline = time.time() + float(timeout_s)
+            while rclpy.ok() and time.time() < deadline:
+                try:
+                    ex, ey, ez, q = _read_retract_tf()
+                except Exception:
+                    time.sleep(0.05)
+                    continue
+                now = time.time()
+                samples.append((now, ex, ey, ez, q))
+                samples = [s for s in samples if now - s[0] <= window_s]
+                if len(samples) >= 4:
+                    z_values = [s[3] for s in samples]
+                    xy_drift = max(math.hypot(s[1] - sx, s[2] - sy) for s in samples)
+                    if (max(z_values) - min(z_values)) <= tolerance_m and xy_drift <= max_lateral_drift:
+                        return samples[-1][1], samples[-1][2], samples[-1][3], samples[-1][4]
+                self.uf850._hold_current_arm_position()
+                time.sleep(0.05)
+            return _read_retract_tf()
+
+        def _verify_retract(label):
+            try:
+                ex, ey, ez, _ = _read_retract_tf()
+            except Exception as exc:
+                self.get_logger().warning(f"[hold] Contact retract verify TF failed after {label}: {exc}")
+                return False, 0.0
+            actual_dz = ez - sz
+            drift = math.hypot(ex - sx, ey - sy)
+            if actual_dz >= distance_m - 0.001:
+                self.get_logger().info(
+                    f"[hold] Contact retract done by {label}: actual dz={actual_dz*1000:.1f}mm "
+                    f"target={distance_m*1000:.1f}mm drift={drift*1000:.1f}mm"
+                )
+                return True, actual_dz
+            if drift > max_lateral_drift:
+                self.get_logger().error(
+                    f"[hold] Contact retract {label} lateral drift {drift*1000:.1f}mm exceeded "
+                    f"{max_lateral_drift*1000:.1f}mm."
+                )
+                return False, actual_dz
+            self.get_logger().warning(
+                f"[hold] Contact retract {label} incomplete: actual dz={actual_dz*1000:.1f}mm "
+                f"target={distance_m*1000:.1f}mm drift={drift*1000:.1f}mm"
+            )
+            return False, actual_dz
+
+        def _attempt_exotica_step_lift(start_x, start_y, start_z, start_q, attempt_label):
+            target_z = start_z + distance_m
+            command_x = start_x
+            command_y = start_y
+            if target_x is not None and abs(float(target_x) - start_x) <= 0.010:
+                command_x = float(target_x)
+            if target_y is not None and abs(float(target_y) - start_y) <= 0.010:
+                command_y = float(target_y)
+
+            planner = getattr(self.uf850, "_single_arm_exotica_planner", None)
+            if planner is None or not planner.available:
+                return False, 0.0, "NO_PLANNER"
+            if not self.uf850.state_received.wait(timeout=2.0):
+                return False, 0.0, "NO_JOINT_STATES"
+
+            if q_dict:
+                roll, pitch, yaw = self.uf850._quaternion_to_rpy(
+                    float(q_dict["qx"]), float(q_dict["qy"]),
+                    float(q_dict["qz"]), float(q_dict["qw"]),
+                )
+            else:
+                roll, pitch, yaw = self.uf850._quaternion_to_rpy(
+                    start_q.x, start_q.y, start_q.z, start_q.w
+                )
+
+            step_m = max(0.00025, min(velocity / 50.0, 0.0010))
+            loop_dt = 1.0 / 50.0
+            command_alpha = 0.45
+            max_joint_step_rad = 0.012
+            max_solver_failures = 8
+            no_progress_deadline = time.time() + 0.90
+            hard_timeout = time.time() + max(1.5, (distance_m / max(velocity, 1e-3)) * 6.0 + 0.5)
+            commanded_positions = {
+                name: float(self.uf850.current_joint_positions[name])
+                for name in self.uf850.current_joint_positions
+                if name in planner.controlled_joint_names
+            }
+            seed_positions = dict(commanded_positions)
+            commanded_z = start_z
+            best_dz = 0.0
+            consecutive_solver_failures = 0
+            last_log_t = 0.0
+            self.get_logger().info(
+                f"[hold] Contact retract EXOTica stepped lift {attempt_label}: "
+                f"start_z={start_z:.4f} target_z={target_z:.4f} step={step_m*1000:.2f}mm"
+            )
+
+            while rclpy.ok() and time.time() < hard_timeout:
+                try:
+                    ex, ey, ez, _ = _read_retract_tf()
+                except Exception as exc:
+                    self.get_logger().error(f"[hold] Contact retract EXOTica TF lost: {exc}")
+                    return False, best_dz, "TF_LOST"
+
+                actual_dz = ez - start_z
+                best_dz = max(best_dz, actual_dz)
+                drift = math.hypot(ex - start_x, ey - start_y)
+                if actual_dz >= distance_m - 0.001:
+                    self.uf850._hold_current_arm_position()
+                    self.get_logger().info(
+                        f"[hold] Contact retract done by EXOTica stepped lift: "
+                        f"actual dz={actual_dz*1000:.1f}mm target={distance_m*1000:.1f}mm "
+                        f"drift={drift*1000:.1f}mm"
+                    )
+                    return True, actual_dz, "DONE"
+                if actual_dz < hard_down_limit:
+                    self.uf850._hold_current_arm_position()
+                    self.get_logger().warning(
+                        f"[hold] Contact retract EXOTica moved downward {actual_dz*1000:.1f}mm; "
+                        "will re-settle/retry from current pose."
+                    )
+                    return False, best_dz, "MOVED_DOWN"
+                if drift > max_lateral_drift:
+                    self.uf850._hold_current_arm_position()
+                    self.get_logger().error(
+                        f"[hold] Contact retract EXOTica lateral drift {drift*1000:.1f}mm exceeded "
+                        f"{max_lateral_drift*1000:.1f}mm."
+                    )
+                    return False, best_dz, "DRIFT"
+                if best_dz < 0.001 and time.time() > no_progress_deadline:
+                    self.uf850._hold_current_arm_position()
+                    self.get_logger().warning(
+                        "[hold] Contact retract EXOTica made no upward TF progress; will re-settle/retry."
+                    )
+                    return False, best_dz, "NO_PROGRESS"
+
+                commanded_z = min(target_z, commanded_z + step_m)
+                target_joints = planner.solve_pose_goal_joint_positions(
+                    seed_positions,
+                    [command_x, command_y, commanded_z, roll, pitch, yaw],
+                )
+                if not target_joints:
+                    consecutive_solver_failures += 1
+                    if consecutive_solver_failures >= max_solver_failures:
+                        self.uf850._hold_current_arm_position()
+                        self.get_logger().warning(
+                            f"[hold] Contact retract EXOTica IK failed repeatedly: {planner.last_error}. "
+                            "Will re-settle/retry."
+                        )
+                        return False, best_dz, "IK_FAIL"
+                    time.sleep(loop_dt)
+                    continue
+
+                consecutive_solver_failures = 0
+                filtered_command = {}
+                for joint_name, solved_position in target_joints.items():
+                    previous = float(commanded_positions.get(joint_name, solved_position))
+                    delta = (float(solved_position) - previous) * command_alpha
+                    delta = max(-max_joint_step_rad, min(max_joint_step_rad, delta))
+                    filtered_command[joint_name] = previous + delta
+
+                self.uf850._publish_direct_joint_command(filtered_command, lookahead_s=0.12)
+                commanded_positions = dict(filtered_command)
+                seed_positions = dict(filtered_command)
+
+                now = time.time()
+                if now - last_log_t >= 0.5:
+                    self.get_logger().info(
+                        f"[hold] Contact retract EXOTica lifting: actual dz={actual_dz*1000:.1f}/"
+                        f"{distance_m*1000:.1f}mm commanded_z_delta={(commanded_z-start_z)*1000:.1f}mm "
+                        f"drift={drift*1000:.1f}mm"
+                    )
+                    last_log_t = now
+                time.sleep(loop_dt)
+
+            return False, best_dz, "TIMEOUT"
+
+        def _rebase_to_settled_pose(retry_index):
+            try:
+                nx, ny, nz, nq = _wait_for_retract_settle()
+            except Exception as exc:
+                self.get_logger().error(f"[hold] Contact retract settle TF failed: {exc}")
+                return None
+            dropped = nz - sz
+            if dropped < -0.030:
+                self.get_logger().error(
+                    f"[hold] Contact retract settled {dropped*1000:.1f}mm below initial contact; aborting."
+                )
+                return None
+            self.get_logger().warning(
+                f"[hold] Contact retract retry {retry_index}: rebasing lift from settled "
+                f"z={nz:.4f} (delta from initial {dropped*1000:.1f}mm)."
+            )
+            return nx, ny, nz, nq
+
+        # Contact can continue settling after the effort spike because trajectory
+        # commands and joint-state feedback are not perfectly synchronous. Always
+        # rebase to a settled TF pose and retry the 5 mm lift from there.
+        settled = _rebase_to_settled_pose(1)
+        if settled is None:
+            return False
+        sx, sy, sz, start_q = settled
+        target_z = sz + distance_m
         self.get_logger().info(
-            f"[hold] Contact retract: {self.ROBOT_EE_LINK} z={sz:.4f} → {target_z:.4f} "
+            f"[hold] Contact retract live Z lift: {self.ROBOT_EE_LINK} z={sz:.4f} → {target_z:.4f} "
             f"(+{distance_m*1000:.1f}mm) at {velocity*1000:.0f}mm/s"
         )
 
-        qd = {"qx": float(q.x), "qy": float(q.y), "qz": float(q.z), "qw": float(q.w)}
-        ok = self.uf850.move_to_pose_exotica(sx, sy, target_z, qd, velocity=velocity)
-        if not ok:
-            self.get_logger().error("[hold] Contact retract planned move failed.")
+        best_dz = 0.0
+        for retry_index in range(1, 4):
+            ok, actual_dz, reason = _attempt_exotica_step_lift(sx, sy, sz, start_q, f"{retry_index}/3")
+            best_dz = max(best_dz, actual_dz)
+            if ok:
+                return True
+            if reason == "DRIFT":
+                return False
+            if best_dz >= min_expected:
+                self.get_logger().warning(
+                    f"[hold] Contact retract reached acceptable dz={best_dz*1000:.1f}mm "
+                    f"(target {distance_m*1000:.1f}mm)."
+                )
+                return True
+            if retry_index < 3:
+                settled = _rebase_to_settled_pose(retry_index + 1)
+                if settled is None:
+                    return False
+                sx, sy, sz, start_q = settled
+                target_z = sz + distance_m
+                continue
+            self.get_logger().warning(
+                f"[hold] Contact retract EXOTica retries exhausted; best dz={best_dz*1000:.1f}mm. "
+                "Trying Servo fallback from current settled pose."
+            )
+
+        exotica_best_dz = best_dz
+        try:
+            sx, sy, sz, start_q = _wait_for_retract_settle(timeout_s=1.0)
+            target_z = sz + distance_m
+        except Exception:
+            pass
+
+        if not self.uf850.start_servo(timeout_sec=8.0):
+            self.get_logger().error("[hold] Contact retract failed to start Servo.")
             return False
 
-        self.wait_for_arm_settled(timeout=3.0)
-        try:
-            end_tf = self.uf850.tf_buffer.lookup_transform(
-                self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
-            )
-            actual_dz = float(end_tf.transform.translation.z) - sz
-        except Exception as exc:
-            self.get_logger().warning(f"[hold] Could not verify contact retract TF: {exc}")
-            return True
+        rate_hz = 50.0
+        dt = 1.0 / rate_hz
+        timeout = max(3.0, (distance_m / max(velocity, 1e-3)) * 6.0)
+        deadline = time.time() + timeout
+        switch_down_limit = -0.004
+        best_dz = exotica_best_dz
+        # Servo Z sign has varied with controller state on this stack. Probe
+        # the expected sign first, then automatically reverse if TF moves down.
+        z_signs = (1.0, -1.0)
 
-        self.get_logger().info(
-            f"[hold] Contact retract done: actual dz={actual_dz*1000:.1f}mm "
-            f"target={distance_m*1000:.1f}mm"
-        )
-        if actual_dz < 0.001:
-            self.get_logger().warning(
-                f"[hold] Contact retract moved {actual_dz*1000:.1f}mm — retrying live streamed Z lift."
-            )
-            retry_ok = self.uf850.retract_z_exotica(
-                distance_m=distance_m,
-                speed_mps=velocity,
-                rate_hz=50.0,
-            )
-            if not retry_ok:
-                self.get_logger().error("[hold] Contact retract streaming retry failed.")
-                return False
-            self.wait_for_arm_settled(timeout=3.0)
+        try:
+            for sign_index, z_sign in enumerate(z_signs, start=1):
+                if time.time() >= deadline:
+                    break
+                cmd_z = z_sign * velocity
+                sign_start_t = time.time()
+                last_log_t = 0.0
+                attempt_deadline = min(
+                    deadline,
+                    sign_start_t + max(1.5, (distance_m / max(velocity, 1e-3)) * 3.0),
+                )
+                self.get_logger().info(
+                    f"[hold] Contact retract attempt {sign_index}/{len(z_signs)}: "
+                    f"cmd_z={cmd_z*1000:.1f}mm/s"
+                )
+
+                while rclpy.ok() and time.time() < attempt_deadline:
+                    try:
+                        tf = self.uf850.tf_buffer.lookup_transform(
+                            self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+                        )
+                        x = float(tf.transform.translation.x)
+                        y = float(tf.transform.translation.y)
+                        z = float(tf.transform.translation.z)
+                    except Exception as exc:
+                        self.get_logger().error(f"[hold] Contact retract TF lost during lift: {exc}")
+                        return False
+
+                    actual_dz = z - sz
+                    best_dz = max(best_dz, actual_dz)
+                    drift = math.hypot(x - sx, y - sy)
+                    if actual_dz >= distance_m - 0.001:
+                        self.uf850._publish_zero_twist()
+                        self.get_logger().info(
+                            f"[hold] Contact retract done: actual dz={actual_dz*1000:.1f}mm "
+                            f"target={distance_m*1000:.1f}mm drift={drift*1000:.1f}mm "
+                            f"cmd_z={cmd_z*1000:.1f}mm/s"
+                        )
+                        return True
+                    if actual_dz >= min_expected:
+                        self.uf850._publish_zero_twist()
+                        self.get_logger().warning(
+                            f"[hold] Contact retract accepted Servo relief: "
+                            f"actual dz={actual_dz*1000:.1f}mm "
+                            f"(target {distance_m*1000:.1f}mm, minimum {min_expected*1000:.1f}mm)."
+                        )
+                        return True
+
+                    if actual_dz < hard_down_limit:
+                        self.uf850._publish_zero_twist()
+                        self.get_logger().error(
+                            f"[hold] Contact retract moved downward {actual_dz*1000:.1f}mm; aborting."
+                        )
+                        return False
+
+                    if drift > max_lateral_drift:
+                        self.uf850._publish_zero_twist()
+                        self.get_logger().error(
+                            f"[hold] Contact retract lateral drift {drift*1000:.1f}mm exceeded "
+                            f"{max_lateral_drift*1000:.1f}mm."
+                        )
+                        return False
+
+                    if (
+                        actual_dz < switch_down_limit
+                        and sign_index < len(z_signs)
+                        and time.time() - sign_start_t > 0.35
+                    ):
+                        self.uf850._publish_zero_twist()
+                        self.get_logger().warning(
+                            f"[hold] Contact retract cmd_z={cmd_z*1000:.1f}mm/s moved down "
+                            f"{actual_dz*1000:.1f}mm; reversing Servo Z direction."
+                        )
+                        time.sleep(0.15)
+                        break
+
+                    if not self.uf850.publish_servo_velocity(0.0, 0.0, cmd_z):
+                        self.get_logger().error("[hold] Contact retract Servo command failed.")
+                        return False
+
+                    now = time.time()
+                    if now - last_log_t >= 0.5:
+                        self.get_logger().info(
+                            f"[hold] Contact retract lifting: dz={actual_dz*1000:.1f}/"
+                            f"{distance_m*1000:.1f}mm cmd_z={cmd_z*1000:.1f}mm/s "
+                            f"drift={drift*1000:.1f}mm"
+                        )
+                        last_log_t = now
+                    time.sleep(dt)
+
+                self.uf850._publish_zero_twist()
+                time.sleep(0.10)
+
             try:
-                retry_tf = self.uf850.tf_buffer.lookup_transform(
+                end_tf = self.uf850.tf_buffer.lookup_transform(
                     self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
                 )
-                retry_dz = float(retry_tf.transform.translation.z) - sz
+                actual_dz = float(end_tf.transform.translation.z) - sz
             except Exception as exc:
-                self.get_logger().warning(f"[hold] Could not verify contact retract retry TF: {exc}")
-                return True
-            self.get_logger().info(
-                f"[hold] Contact retract retry done: actual dz={retry_dz*1000:.1f}mm "
-                f"target={distance_m*1000:.1f}mm"
-            )
-            if retry_dz < max(0.002, distance_m * 0.6):
-                self.get_logger().error(
-                    f"[hold] Contact retract unsafe/incomplete after retry: "
-                    f"actual dz={retry_dz*1000:.1f}mm."
-                )
+                self.get_logger().warning(f"[hold] Could not verify contact retract TF after timeout: {exc}")
                 return False
-        return True
+            best_dz = max(best_dz, actual_dz)
+            if actual_dz >= min_expected:
+                self.get_logger().warning(
+                    f"[hold] Contact retract timed out but reached acceptable dz="
+                    f"{actual_dz*1000:.1f}mm."
+                )
+                return True
+            self.get_logger().error(
+                f"[hold] Contact retract incomplete: actual dz={actual_dz*1000:.1f}mm "
+                f"best dz={best_dz*1000:.1f}mm (minimum {min_expected*1000:.1f}mm)."
+            )
+            return False
+        finally:
+            try:
+                self.uf850._publish_zero_twist()
+                self.uf850.stop_servo(timeout_sec=2.0)
+            except Exception as exc:
+                self.get_logger().warning(f"[hold] Contact retract Servo stop failed: {exc}")
 
     def _tactile_descent_to_contact(self, q_dict=None, joint_index=4, target_x=None, target_y=None):
         """Filtered EXOTica Z descent with effort stop.
@@ -511,9 +844,18 @@ class ObjectHoldSkill(Node):
         self.get_logger().info(
             f"[hold] Filtered tactile descent: distance={self.DESCENT_DISTANCE_M*1000:.1f}mm "
             f"step={self.DESCENT_STEP_M*1000:.2f}mm rate={self.DESCENT_RATE_HZ:.1f}Hz "
-            f"threshold={self.TORQUE_THRESHOLD:.2f}Nm"
+            f"threshold={self.TORQUE_THRESHOLD:.2f}Nm min_contact={self.MIN_CONTACT_DESCENT_M*1000:.1f}mm"
         )
-        return self.uf850.move_linear_z_with_effort_stop_exotica(
+        try:
+            start_tf = self.uf850.tf_buffer.lookup_transform(
+                self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+            )
+            start_z = float(start_tf.transform.translation.z)
+        except Exception as exc:
+            self.get_logger().error(f"[hold] Could not read TCP before tactile descent: {exc}")
+            return False
+
+        ok = self.uf850.move_linear_z_with_effort_stop_exotica(
             descent_distance_m=self.DESCENT_DISTANCE_M,
             step_m=self.DESCENT_STEP_M,
             threshold_nm=self.TORQUE_THRESHOLD,
@@ -524,8 +866,28 @@ class ObjectHoldSkill(Node):
             max_joint_step_rad=0.012,
             target_x=target_x,
             target_y=target_y,
-            settling_cycles=1,   # 1 cycle = 20ms stop latency; noise << threshold so safe
+            settling_cycles=3,
         )
+        if not ok:
+            return False
+
+        try:
+            end_tf = self.uf850.tf_buffer.lookup_transform(
+                self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time()
+            )
+            actual_descended = start_z - float(end_tf.transform.translation.z)
+        except Exception as exc:
+            self.get_logger().warning(f"[hold] Could not verify tactile descent distance: {exc}")
+            return True
+
+        if actual_descended < float(self.MIN_CONTACT_DESCENT_M):
+            self.get_logger().error(
+                f"[hold] Rejecting early torque spike: descended={actual_descended*1000:.1f}mm "
+                f"minimum={self.MIN_CONTACT_DESCENT_M*1000:.1f}mm. "
+                "This is likely settling/IK load, not object contact."
+            )
+            return False
+        return True
 
     def publish_state(self, s):
         self.state_update_pub.publish(String(data=s))
@@ -730,8 +1092,11 @@ class ObjectHoldSkill(Node):
         with self.data_lock:
             return next((t for t in self.latest_targets if label.lower() in t.get('label', '').lower()), None)
 
-    def _run_hold_sequence(self, part_id, target_label, interactive):
-        target_data = self._get_target_by_id(part_id)
+    def _run_hold_sequence(self, part_id, target_label, interactive, target_data_override=None):
+        # Caller-provided snapshot bypasses stale-ID issues (e.g. master_agent).
+        target_data = target_data_override if target_data_override and target_data_override.get('xyz') else None
+        if target_data is None:
+            target_data = self._get_target_by_id(part_id)
 
         # Fallback: ID may be stale — match by label in the current live vision snapshot.
         if not target_data or 'xyz' not in target_data:
@@ -927,9 +1292,9 @@ class ObjectHoldSkill(Node):
             print(f"[DIAG] {self.ROBOT_EE_LINK} COMMANDED: ({hover_x:.4f}, {hover_y:.4f}, {hover_z:.4f})")
             print(f"[DIAG] TCP error: dx={ax-hover_x:.4f} dy={ay-hover_y:.4f} dz={az-hover_z:.4f} m | norm={hover_err:.4f} m")
             print(f"[DIAG] Object in base_link: ({wx:.4f}, {wy:.4f}, {wz:.4f})")
-            _MAX_HOVER_CORRECTIONS = 3
+            _MAX_HOVER_CORRECTIONS = 5
             _HOVER_CORRECTION_VEL = 0.12   # m/s — fast enough to generate a real trajectory
-            _HOVER_ABORT_THRESHOLD = 0.055  # 55 mm — abort only if all corrections fail
+            _HOVER_ABORT_THRESHOLD = 0.010  # require verified hover before tactile descent
             if hover_err > 0.018:
                 for _corr_i in range(_MAX_HOVER_CORRECTIONS):
                     self.get_logger().warning(
@@ -986,7 +1351,7 @@ class ObjectHoldSkill(Node):
                     print("[ERROR] Tactile descent ended without joint-5 contact spike. Aborting hold.")
                     return False
                 print("[lateral_clamp] Contact confirmed — retracting 5mm before gripper close...")
-                if not self._retract_after_contact():
+                if not self._retract_after_contact(q_dict=qd, target_x=hover_x, target_y=hover_y):
                     print("[ERROR] Contact retract failed or did not move upward. Aborting hold.")
                     return False
             else:
@@ -1017,7 +1382,7 @@ class ObjectHoldSkill(Node):
                 print("[ERROR] Tactile Z-descent failed before side contact.")
                 return False
             print("[lateral_clamp] Contact confirmed — retracting 5mm before gripper close...")
-            if not self._retract_after_contact():
+            if not self._retract_after_contact(q_dict=qd):
                 print("[ERROR] Contact retract failed or did not move upward. Aborting hold.")
                 return False
 
@@ -1070,7 +1435,7 @@ class ObjectHoldSkill(Node):
             return False
         if self.STRATEGY == "top_down_clamp":
             print("[top_down_clamp] Contact confirmed — retracting 5mm before gripper close...")
-            if not self._retract_after_contact():
+            if not self._retract_after_contact(q_dict=qd, target_x=hover_x, target_y=hover_y):
                 print("[ERROR] Contact retract failed or did not move upward. Aborting hold.")
                 return False
             print("Closing gripper for top_down_clamp...")
@@ -1082,7 +1447,7 @@ class ObjectHoldSkill(Node):
         self.publish_state("HOLDING")
         return True
 
-    def execute_hold(self, part_id, target_label, interactive=True, hold_step=None):
+    def execute_hold(self, part_id, target_label, interactive=True, hold_step=None, target_data_override=None):
         print(f"\n[START] {target_label} Hold Sequence on ID: {part_id}")
         if self.device_cfg is not None:
             self._apply_hold_config(self.device_cfg, target_label=target_label, hold_step=hold_step)
@@ -1103,7 +1468,8 @@ class ObjectHoldSkill(Node):
         self.publish_state("MOVING")
         success = False
         try:
-            success = self._run_hold_sequence(part_id, target_label, interactive)
+            success = self._run_hold_sequence(part_id, target_label, interactive,
+                                              target_data_override=target_data_override)
         except Exception as e:
             self.get_logger().error(f"Crashed: {e}")
         finally:

@@ -4,6 +4,8 @@ import threading
 import time
 
 import rclpy
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float32, String
@@ -320,6 +322,21 @@ class ArmBridge:
         # is triggered on the next send without polling on every command.
         self._mode_ok = False
 
+        # Async send thread: decouples SDK TCP calls from handle_joint_command.
+        # handle_joint_command runs at 100 Hz (10 ms period). Each blocking
+        # set_servo_angle_j call takes 2-10 ms; two arms in sequence = 4-20 ms.
+        # Under load (high CPU / network congestion) the callback queue fills,
+        # commands are dropped in bursts, and both arms jerk simultaneously.
+        # Moving SDK calls to a dedicated per-arm thread makes the callback
+        # always return in < 0.1 ms so the queue never overflows.
+        self._async_pos: list | None = None          # latest target, or None
+        self._async_lock = threading.Lock()
+        self._async_event = threading.Event()
+        self._async_thread = threading.Thread(
+            target=self._async_send_loop, daemon=True, name=f"{name}_send"
+        )
+        self._async_thread.start()
+
         if XArmAPI is None:
             self.logger.warning(f"{name}: xArm SDK unavailable, using shadow state")
             return
@@ -405,7 +422,7 @@ class ArmBridge:
                 )
             self._call_api("motion_enable", True)
             self._call_api("set_mode", desired_mode)
-            time.sleep(0.05)
+            time.sleep(0.010)  # 10ms — let firmware process mode change (was 50ms, caused 5-cmd jerk)
             self._call_api("set_state", 0)
         return True
 
@@ -477,33 +494,62 @@ class ArmBridge:
                 self.logger.warning(f"{self.name}: failed to read live joint state: {exc}")
             return list(self.shadow_positions), list(self.shadow_velocities), list(self.shadow_efforts), False
 
+    def schedule_send(self, positions: list) -> None:
+        """Non-blocking: store the latest command for the async send thread.
+
+        Only the most-recent command is kept.  If the send thread is busy
+        (e.g. inside _ensure_ready_for_command recovery) the intermediate
+        positions are intentionally dropped — the arm will jump to the
+        latest position, which is correct (we always want the freshest cmd).
+        """
+        with self._async_lock:
+            self._async_pos = list(positions)
+        self._async_event.set()
+
+    def _async_send_loop(self) -> None:
+        """Background thread per arm: drains _async_pos and calls send_positions."""
+        while True:
+            # Wait up to 10 ms for a new command (keeps loop responsive without spin).
+            self._async_event.wait(timeout=0.010)
+            self._async_event.clear()
+            with self._async_lock:
+                positions = self._async_pos
+                self._async_pos = None
+            if positions is not None:
+                self.send_positions(positions)
+
     def send_positions(self, positions):
         if self.api is None:
             self.shadow_positions = [float(value) for value in positions]
             return False
 
+        # Clamp joint positions to hardware-safe limits first.
+        filtered = []
+        clamp_applied = False
+        for index, value in enumerate(positions):
+            lower, upper = self.joint_limits[index]
+            safe_lower = lower + ARM_JOINT_LIMIT_MARGIN_RAD
+            safe_upper = upper - ARM_JOINT_LIMIT_MARGIN_RAD
+            clamped_value = clamp(float(value), safe_lower, safe_upper)
+            if abs(clamped_value - float(value)) > 1e-6:
+                clamp_applied = True
+            filtered.append(clamped_value)
+        if clamp_applied and throttle(self._log_state, "joint_limit_clamp", 1.0):
+            self.logger.warning(
+                f"{self.name}: clamped joint command to hardware-safe limits: {filtered}"
+            )
+
+        # Recover only when the SDK signalled an error on the last send (_mode_ok=False).
+        # The api.mode poll is intentionally NOT checked here — the SDK background thread
+        # can read a transient stale value during mode transitions, causing spurious
+        # _ensure_ready_for_command calls that stall this thread for 10-18ms and cause
+        # visible position jumps.  Proactive mode drift is caught by _maybe_recover_arm_modes
+        # running at 2 Hz in the publish_state timer thread.
+        if not self._mode_ok:
+            self._ensure_ready_for_command(desired_mode=1)
+            self._mode_ok = True
+
         with self.lock:
-            filtered = []
-            clamp_applied = False
-            for index, value in enumerate(positions):
-                lower, upper = self.joint_limits[index]
-                safe_lower = lower + ARM_JOINT_LIMIT_MARGIN_RAD
-                safe_upper = upper - ARM_JOINT_LIMIT_MARGIN_RAD
-                clamped_value = clamp(float(value), safe_lower, safe_upper)
-                if abs(clamped_value - float(value)) > 1e-6:
-                    clamp_applied = True
-                filtered.append(clamped_value)
-            if clamp_applied and throttle(self._log_state, "joint_limit_clamp", 1.0):
-                self.logger.warning(
-                    f"{self.name}: clamped joint command to hardware-safe limits: {filtered}"
-                )
-            # Only run the 2-network-call recovery check when the mode is
-            # known bad (after a failed command).  This removes 2 blocking
-            # SDK round-trips from every 100 Hz command cycle, eliminating
-            # the primary source of command-timing jitter.
-            if not self._mode_ok or getattr(self.api, "mode", None) != 1:
-                self._ensure_ready_for_command(desired_mode=1)
-                self._mode_ok = True
             try:
                 code, _ = self._call_api(
                     "set_servo_angle_j",
@@ -687,12 +733,37 @@ class SliderBridge:
 class RealHardware(Node):
     def __init__(self):
         super().__init__("real_hardware_bridge")
+
+        # Two SEPARATE MutuallyExclusiveCallbackGroup instances.
+        # A MutuallyExclusiveCallbackGroup prevents a callback from running
+        # concurrently with ITSELF (same group), but two different groups CAN
+        # run simultaneously in a MultiThreadedExecutor.
+        #
+        # Why NOT ReentrantCallbackGroup for the timer:
+        #   If publish_state takes slightly longer than its 20 ms period (e.g.
+        #   25 ms due to SDK latency), ReentrantCallbackGroup lets the NEXT
+        #   timer firing start while the previous one is still running.  Both
+        #   calls then make SDK reads simultaneously, which the SDK serialises
+        #   internally → 8 calls instead of 4 → 40 ms → third stacks → 12 calls
+        #   → 60 ms → cascade.  This is the root cause of the progressive jerk
+        #   that worsens with uptime even without any skill execution.
+        #
+        # With MutuallyExclusiveCallbackGroup:
+        #   If publish_state takes 25 ms the timer simply fires at ~40 Hz instead
+        #   of 50 Hz.  No stacking, no cascade.  The command subscriber is in a
+        #   DIFFERENT group so it can still run during state reads.
+        self._state_cb_group = MutuallyExclusiveCallbackGroup()    # publish_state timer
+        self._command_cb_group = MutuallyExclusiveCallbackGroup()  # joint command subs
+
         self.joint_state_pub = self.create_publisher(JointState, "/robot_joint_states", 10)
         self.gripper_state_pub = self.create_publisher(String, "/rg6/state", 10)
         self.grip_detected_pub = self.create_publisher(Bool, "/rg6/grip_detected", 10)
-        self.create_subscription(JointState, "/robot_joint_commands", self.handle_joint_command, 10)
-        self.create_subscription(JointState, "/robot_joint_velocity_commands", self.handle_joint_velocity_command, 10)
-        self.create_subscription(Float32, "/rg6/force_command", self.handle_gripper_force, 10)
+        self.create_subscription(JointState, "/robot_joint_commands", self.handle_joint_command, 10,
+                                 callback_group=self._command_cb_group)
+        self.create_subscription(JointState, "/robot_joint_velocity_commands", self.handle_joint_velocity_command, 10,
+                                 callback_group=self._command_cb_group)
+        self.create_subscription(Float32, "/rg6/force_command", self.handle_gripper_force, 10,
+                                 callback_group=self._command_cb_group)
 
         self.xarm = ArmBridge(XARM_IP, "xarm5", XARM_JOINTS, self.get_logger(), stream_mode=1)
         self.uf = ArmBridge(UF850_IP, "uf850", UF850_JOINTS, self.get_logger(), stream_mode=1)
@@ -708,8 +779,28 @@ class RealHardware(Node):
         self.start_time = time.time()
         self.startup_timeout_warned = False
         self._log_state = {}
+        # Heartbeat: timestamp of last forced-through deduplication reset.
+        # Kept separate from _last_command_t (which fires on every message).
+        self._last_heartbeat_t = time.time()
 
-        self.create_timer(STATE_PUBLISH_PERIOD_S, self.publish_state)
+        # --- Slider read throttling ---
+        # slider.read_position() makes 2 SDK calls to the xArm controller on
+        # every publish_state invocation (100 extra calls/second at 50 Hz).
+        # The slider position rarely changes; reading at 10 Hz is sufficient.
+        self._slider_read_counter = 0
+        self._slider_read_every_n = 5  # read slider every 5th timer cycle (10 Hz)
+
+        # --- Proactive idle arm-mode recovery ---
+        # After a long idle (vision/MoveIt running but no skill executing),
+        # the xArm/UF850 controller may spontaneously change its internal mode.
+        # The SDK background thread updates api.mode accordingly.  If we detect
+        # this BEFORE the next trajectory starts (instead of mid-trajectory),
+        # we avoid the initial recovery jerk.
+        self._last_command_t = time.time()       # updated each handle_joint_command
+        self._last_mode_recovery_t = time.time() # when we last proactively recovered
+
+        self.create_timer(STATE_PUBLISH_PERIOD_S, self.publish_state,
+                          callback_group=self._state_cb_group)
 
     def rad_to_width_mm(self, value: float) -> float:
         normalized = (clamp(value, RAD_OPEN, RAD_CLOSE) - RAD_CLOSE) / (RAD_OPEN - RAD_CLOSE)
@@ -723,6 +814,7 @@ class RealHardware(Node):
         self.rg6.set_force(msg.data)
 
     def handle_joint_command(self, msg: JointState):
+        self._last_command_t = time.time()  # track recency of commands for idle detection
         command_map = {
             name: msg.position[index]
             for index, name in enumerate(msg.name)
@@ -745,14 +837,18 @@ class RealHardware(Node):
                 self.last_xarm_command is None
                 or any(abs(target - last) > ARM_COMMAND_EPS_RAD for target, last in zip(xarm_targets, self.last_xarm_command))
             ) and all(abs(target - current) < MAX_RAD_JUMP for target, current in zip(xarm_targets, self.xarm.shadow_positions)):
-                self.xarm.send_positions(xarm_targets)
+                # schedule_send is non-blocking: the actual set_servo_angle_j
+                # TCP call happens in xarm._async_send_loop on a dedicated thread.
+                # This keeps handle_joint_command under 0.1 ms so the 100 Hz
+                # subscription queue never overflows under CPU/network load.
+                self.xarm.schedule_send(xarm_targets)
                 self.last_xarm_command = list(xarm_targets)
 
             if (
                 self.last_uf_command is None
                 or any(abs(target - last) > ARM_COMMAND_EPS_RAD for target, last in zip(uf_targets, self.last_uf_command))
             ) and all(abs(target - current) < MAX_RAD_JUMP for target, current in zip(uf_targets, self.uf.shadow_positions)):
-                self.uf.send_positions(uf_targets)
+                self.uf.schedule_send(uf_targets)
                 self.last_uf_command = list(uf_targets)
         else:
             self.last_xarm_command = list(xarm_targets)
@@ -804,15 +900,74 @@ class RealHardware(Node):
             self.xarm.send_velocities(xarm_velocities, duration_s=0.15)
             self.uf.send_velocities(uf_velocities, duration_s=0.15)
 
+    def _maybe_recover_arm_modes(self) -> None:
+        """Keep stream_mode alive and proactively recover if it was lost.
+
+        Fix A (heartbeat): every 150 ms reset last_xarm_command / last_uf_command
+          so the next handle_joint_command passes dedup and sends one real
+          set_servo_angle_j, keeping firmware stream_mode alive during holds.
+
+        Fix B (proactive mode recovery): check api.mode at 2 Hz from this timer
+          thread — NEVER from send_positions.  Checking api.mode inside
+          send_positions caused spurious _ensure_ready_for_command calls (SDK
+          background thread reads a momentary stale value) which stalled the async
+          send thread for 10-18 ms and produced visible position jumps during
+          both trajectory execution and the force-relief servo loop inside
+          _continue_unscrew_until_released.  Running recovery here keeps the
+          send path zero-latency.
+        """
+        now = time.time()
+
+        # --- Fix A: heartbeat ---------------------------------------------------
+        if now - self._last_heartbeat_t >= 0.15:
+            self._last_heartbeat_t = now
+            self.last_xarm_command = None
+            self.last_uf_command = None
+            return  # forced send happens in next handle_joint_command (≤10 ms)
+
+        # --- Fix B: proactive mode recovery (2 Hz, runs during active motion) ---
+        # Rate-limit to 500 ms so we make at most 2 SDK round-trips per second.
+        # No idle threshold — mode can drift during sustained trajectory/servo runs.
+        if now - self._last_mode_recovery_t < 0.5:
+            return
+        self._last_mode_recovery_t = now
+
+        for arm in (self.xarm, self.uf):
+            if arm.api is None:
+                continue
+            cached_mode = getattr(arm.api, "mode", None)
+            if not arm._mode_ok or (cached_mode is not None and cached_mode != arm.stream_mode):
+                if throttle(self._log_state, f"{arm.name}_mode_recover", 5.0):
+                    self.get_logger().warning(
+                        f"{arm.name}: proactive mode recovery "
+                        f"(cached mode={cached_mode}, _mode_ok={arm._mode_ok})"
+                    )
+                arm._ensure_ready_for_command(desired_mode=arm.stream_mode)
+                arm._mode_ok = True
+
     def publish_state(self):
         xarm_positions, xarm_velocities, xarm_efforts, xarm_valid = self.xarm.read_state()
         uf_positions, uf_velocities, uf_efforts, uf_valid = self.uf.read_state()
-        slider_position, slider_valid = self.slider.read_position()
-        self.slider_position = slider_position
+
+        # Read the slider at 10 Hz (every 5th timer cycle) rather than 50 Hz.
+        # slider.read_position() makes 2 blocking SDK calls to the xArm
+        # controller — the same connection used by xarm.read_state() and by
+        # handle_joint_command.  Throttling it halves the xArm SDK call load.
+        self._slider_read_counter += 1
+        if self._slider_read_counter >= self._slider_read_every_n:
+            self._slider_read_counter = 0
+            slider_position, slider_valid = self.slider.read_position()
+            self.slider_position = slider_position
+        else:
+            slider_valid = self.slider.available and self.slider.on_zero
+
         # rg6.refresh_state() and rg6.process_pending_command() are called
         # from the RGBridge background poll thread at 20 Hz to avoid blocking
         # this 50 Hz timer callback with sequential Modbus round-trips.
         self.slider.process_pending_command()
+
+        # Proactively restore arm mode if controllers drifted during long idle.
+        self._maybe_recover_arm_modes()
 
         live_sources = []
         if xarm_valid:
@@ -883,10 +1038,21 @@ class RealHardware(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = RealHardware()
+    # Use a multi-threaded executor so the 50 Hz publish_state timer (which
+    # makes two blocking SDK TCP calls) never delays the 100 Hz
+    # handle_joint_command subscriber.  Progressive TCP latency buildup
+    # caused both arms to jerk simultaneously because the single-threaded
+    # executor serialised reads and writes — each slow read pushed commands
+    # further and further out of sync.  With 4 threads the timer and command
+    # subscriber run in parallel; SDK calls per arm are still serialised by
+    # ArmBridge.lock inside send_positions.
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     finally:
         node.rg6.stop()
+        executor.shutdown()
         node.destroy_node()
         try:
             rclpy.shutdown()

@@ -28,8 +28,14 @@ from vision_agent.common import (
     PATH_SNIPER,
     PERF_LOG_INTERVAL_SEC,
     PROCESSING_RATE_HZ,
+    DetectionStabilizer,
 )
-from vision_agent.agents.sniper import SniperAgent
+from vision_agent.common import VISION_BACKEND
+
+if VISION_BACKEND == "yolo":
+    from vision_agent.agents.yolo.sniper import SniperYolo as SniperAgent
+else:
+    from vision_agent.agents.sniper import SniperAgent
 
 # Raw fallback: usb_cam namespace → /tool_cam/image_raw
 _LOCAL_COLOR_RAW_TOPIC = LOCAL_COLOR_TOPIC.replace("/compressed", "")
@@ -46,6 +52,9 @@ class LocalVisionNode(Node):
         self._active_source = None
         self.frame_counter = 0
         self.last_sniper_data = {"screws": [], "screw_heads": [], "tool_tips": [], "holes": [], "crosshair": []}
+        # Temporal filter: require a detection to appear in 3 of 5 consecutive
+        # inference frames before reporting it (eliminates single-frame false positives).
+        self.det_stabilizer = DetectionStabilizer(window=5, min_hits=3, iou_thresh=0.35)
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.sniper_future = None
         self._perf_time = time.time()
@@ -102,10 +111,53 @@ class LocalVisionNode(Node):
         result = self.sniper.target(frame)
         return result, time.perf_counter() - t0
 
+    @staticmethod
+    def _suppress_hole_masked_screws(dets: dict) -> dict:
+        """Remove 'screws' whose bounding box contains a stable 'hole' center.
+
+        When the model detects a large 'screw' bbox that wraps a 'hole' detection,
+        the screw is a false positive — the hole is the ground truth. Suppressing
+        it prevents the alignment loop from servo-ing toward an already-removed position.
+        """
+        holes = dets.get("holes", [])
+        screws = dets.get("screws", [])
+        if not holes or not screws:
+            return dets
+
+        hole_centers = []
+        for h in holes:
+            b = h.get("box")
+            if b and len(b) >= 4:
+                hole_centers.append(((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0))
+
+        if not hole_centers:
+            return dets
+
+        filtered = []
+        for screw in screws:
+            sb = screw.get("box")
+            if not sb or len(sb) < 4:
+                filtered.append(screw)
+                continue
+            masked = any(
+                sb[0] <= hcx <= sb[2] and sb[1] <= hcy <= sb[3]
+                for hcx, hcy in hole_centers
+            )
+            if not masked:
+                filtered.append(screw)
+
+        result = dict(dets)
+        result["screws"] = filtered
+        return result
+
     def _poll_future(self):
         if self.sniper_future and self.sniper_future.done():
             try:
-                self.last_sniper_data, elapsed = self.sniper_future.result()
+                raw_data, elapsed = self.sniper_future.result()
+                # Apply temporal persistence filter — suppresses single-frame false positives.
+                stable = self.det_stabilizer.update(raw_data)
+                # Remove 'screws' that wrap a stable hole detection.
+                self.last_sniper_data = self._suppress_hole_masked_screws(stable)
                 self._record_stage_time(elapsed)
             except Exception as e:
                 self.get_logger().error(f"Sniper Error: {e}")

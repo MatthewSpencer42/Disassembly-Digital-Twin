@@ -14,17 +14,17 @@ components:
     label: case
     type: chassis
     removable: false
-    notes: "Main structural base. Always secure this before unscrewing, pickup, flip, or flip_drop."
+    notes: "Main structural base. Always secure this before unscrewing, pickup, flip, or pickup."
   pcb:
     label: pcb
     type: board
     removable: true
-    notes: "Logic board on the first accessible side. This is the only part intended for pickup."
+    notes: "Logic board on the first accessible side. Picked up after pcb_screw unscrewed."
   lid:
     label: lid
     type: lid
     removable: true
-    notes: "Detach after lid screws are removed. Clear it with flip_drop, not pickup."
+    notes: "Picked up after lid screws are removed (HDD flipped to lid side)."
 
 screw_zones:
   pcb_screw:
@@ -42,49 +42,19 @@ screw_zones:
     notes: "Second screw zone exposed after the HDD is flipped."
 
 disassembly_sequence:
-  - step: 1
-    action: hold
-    label: "Clamp HDD sideways for PCB side"
-    target: case
-    depends_on_steps: []
-    reveals:
-      - pcb_screw
-      - pcb
-    parameters:
-      strategy: lateral_clamp
-      # Labels accepted as valid hold targets (searched in order when primary label is absent)
-      holdable_labels: [case, lid]
-      grip_width_mm: 101.6
-      approach_axis: "+x"
-      flip_approach: false
-      tilt_deg: 0.0
-      gripper_open_deg: 35.0
-      gripper_close_deg: -35.0
-      gripper_close_force_n: 100.0
-      torque_threshold_nm: 3.0
-      use_tactile_descent: true
-      descent_speed_mps: 0.030
-      descent_rate_hz: 50.0
-      descent_step_m: 0.00060
-      hover_x_offset_m: 0.015
-      hover_y_offset_m: 0.0
-      hover_z_offset: 0.05
-      approach_rpy_deg: [12.0, -82.0, 74.0]
-      descent_distance_m: 0.12
-      final_z_offset_m: 0.0
-      approach_velocity: 0.50
-      hover_velocity: 0.50
-      grip_velocity: 0.03
 
-  - step: 2
+  # ── Step 1: Unscrew lid screws ────────────────────────────────────────────
+  - step: 1
     action: unscrew
-    label: "Remove PCB screws"
-    target: pcb_screw
-    depends_on_steps: [1]
+    label: "Remove lid screws"
+    target: lid_screw
+    depends_on_steps: []
     reveals: []
     parameters:
       screw_type: torx
-      screw_count: 4
+      screw_count: 6
+      # Interactive Skip is used to reject false-positive screw detections.
+      user_skip_counts_as_resolved: true
       engagement_depth_mm: 5.0
       descent_max_distance_m: 0.060
       initial_torque_nm: 0.5
@@ -98,10 +68,9 @@ disassembly_sequence:
       align_only_debug: false
       descent_only_debug: false
       coarse_position_tolerance_m: 0.010
-      # Fixed coarse approach height (overrides depth-derived hover_z).
-      # Run with coarse_only_debug: true, read the "[DIAG] hover_z" line
-      # for each screw, then set this to a consistent safe value (e.g. 0.980).
-      coarse_hover_z_m: ~            # null = depth-derived (noisy); set once calibrated
+      # Fixed screwdriver_tcp height from RViz; avoids depth-derived hover drift.
+      coarse_hover_z_m: 0.98624
+      coarse_velocity: 0.20
       screw_camera_z_min_m: 0.45
       screw_camera_z_max_m: 0.65
       screw_world_z_min_m: 0.90
@@ -136,7 +105,7 @@ disassembly_sequence:
       pre_descent_align_tolerance_px: 65.0
       pre_descent_align_timeout_s: 45.0
       pre_descent_align_stable_cycles: 1
-      final_align_tolerance_px: 5.0
+      final_align_tolerance_px: 3.0
       final_align_timeout_s: 20.0
       final_align_max_radius_m: 0.012
       final_align_stable_cycles: 1
@@ -144,10 +113,11 @@ disassembly_sequence:
       final_align_min_speed_mps: 0.002
       final_align_error_filter_alpha: 0.15
       unscrew_probe_duration_s: 0.50
-      unscrew_probe_force_increase_n: 0.15
+      unscrew_probe_force_increase_n: 0.30
       unscrew_min_spin_s: 1.0
       unscrew_max_spin_s: 4.0
-      unscrew_release_force_ratio: 0.35
+      unscrew_release_force_ratio: 0.50
+      unscrew_release_debounce_s: 0.15    # s, sustained below release_level triggers success
       unscrew_force_ideal_delta_n: 0.15
       unscrew_force_deadband_n: 0.04
       unscrew_z_relief_gain_mps_per_n: 0.003
@@ -155,16 +125,17 @@ disassembly_sequence:
       unscrew_z_relief_max_m: 0.030
       tool_release_settle_s: 0.50
       tool_grab_settle_s: 0.50
-    notes: "Unscrew remains generic; this zone ordering makes it HDD-specific."
+      skip_final_align_on_contact: true   # FT contact → go straight to unscrew
+      use_screw_gripper: true
+    notes: "Lid-side screws — first step before picking up the lid."
 
-  - step: 3
+  # ── Step 2: Pick up lid ───────────────────────────────────────────────────
+  - step: 2
     action: pickup
-    label: "Extract PCB"
-    target: pcb
-    depends_on_steps: [2]
-    reveals:
-      - lid_screw
-      - lid
+    label: "Extract lid"
+    target: lid
+    depends_on_steps: []
+    reveals: []
     parameters:
       grasp_type: precision
       grip_width_mm: 80.0
@@ -172,15 +143,25 @@ disassembly_sequence:
       gripper_close_deg: -35.0
       gripper_open_min_width_mm: 120.0
       gripper_close_force_n: 40.0
+      # Close to 90 mm physical gap for lid grasp.
+      grip_close_width_mm: 85.0
+      # Fingers pre-positioned to 120mm during descent so they clear the lid edges.
+      # Must be wider than grip_close_width_mm (85mm).
+      pre_descent_gripper_width_mm: 120.0
+      # Rotate joint6 by 90° at pre-grasp stop (30mm above part) before descent.
+      wrist_joint6_deg: 90.0
       approach_axis: "+z"
-      lift_height_mm: 50.0
-      lift_speed_mps: 0.01
-      precondition_retract_m: 0.10
+      lift_height_mm: 20.0
+      lift_speed_mps: 0.05
+      precondition_retract_m: 0.20
       move_xarm5_clearance: false
-      approach_x_offset_m: -0.02
-      approach_y_offset_m: 0.015
-      approach_z_offset_m: 0.0
-      hover_velocity: 0.50
+      approach_x_offset_m: 0.0
+      approach_y_offset_m: 0.0
+      # −20 mm below vision centroid Z.
+      approach_z_offset_m: -0.020
+      approach_rpy_deg:
+      home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
+      hover_velocity: 0.25
       descent_distance_m: 0.080
       descent_step_m: 0.0005
       descent_rate_hz: 25.0
@@ -189,18 +170,23 @@ disassembly_sequence:
       torque_threshold_nm: 3.0
       contact_retract_m: 0.005
       contact_retract_velocity: 0.02
-      post_grasp_retract_m: 0.030
+      post_grasp_retract_m: 0.040
       drop_x: 0.92
       drop_y: -0.36
       drop_z: 0.99
-      skip_if_not_detected: true   # skip gracefully when PCB not visible (already removed / occluded)
-    notes: "Pickup target and approach offsets are config-driven; current HDD sequence uses it for PCB extraction."
+      skip_if_not_detected: true
+      z_extra_descent_mm: 0
+    notes: >
+      Lid removed first before flipping to expose PCB side.
+      grip_close_width_mm 90 mm for lid grasp.
+      wrist_joint6_deg 90 — tune once grasp geometry is confirmed.
 
-  - step: 4
+  # ── Step 3: Hold case for flip ────────────────────────────────────────────
+  - step: 3
     action: hold
-    label: "Re-secure chassis after PCB pickup"
+    label: "Clamp chassis for flip"
     target: case
-    depends_on_steps: [3]
+    depends_on_steps: []
     reveals: []
     parameters:
       strategy: lateral_clamp
@@ -217,6 +203,8 @@ disassembly_sequence:
       descent_speed_mps: 0.030
       descent_rate_hz: 50.0
       descent_step_m: 0.00060
+      min_contact_descent_m: 0.030
+      contact_retract_min_success_m: 0.0025
       hover_x_offset_m: 0.015
       hover_y_offset_m: 0.0
       hover_z_offset: 0.05
@@ -224,64 +212,37 @@ disassembly_sequence:
       descent_distance_m: 0.12
       final_z_offset_m: 0.0
       approach_velocity: 0.50
-      hover_velocity: 0.50
+      hover_velocity: 0.25
       grip_velocity: 0.03
 
-
-  - step: 5
+  # ── Step 4: Flip HDD ──────────────────────────────────────────────────────
+  - step: 4
     action: flip
-    label: "Flip HDD to lid side"
+    label: "Flip HDD to PCB side"
     target: case
-    depends_on_steps: [4]
+    depends_on_steps: []
     reveals:
-      - lid_screw
+      - pcb_screw
+      - pcb
     parameters:
       retract_height_m: 0.10
       gripper_close_force_n: 100.0
       torque_threshold_nm: 3.0
       rotation_deg: 180
-    notes: "Matches the HDD-specific flip assumption from dev_ws."
+    notes: "Flips to expose PCB side after lid is removed."
 
-  - step: 6
-    action: hold
-    label: "Re-secure chassis after flip"
-    target: case
-    depends_on_steps: [5]
-    reveals: []
-    parameters:
-      strategy: lateral_clamp
-      holdable_labels: [case, lid]
-      grip_width_mm: 101.6
-      approach_axis: "+x"
-      flip_approach: false
-      tilt_deg: 0.0
-      gripper_open_deg: 35.0
-      gripper_close_deg: -35.0
-      gripper_close_force_n: 100.0
-      torque_threshold_nm: 3.0
-      use_tactile_descent: true
-      descent_speed_mps: 0.030
-      descent_rate_hz: 50.0
-      descent_step_m: 0.00060
-      hover_x_offset_m: 0.015
-      hover_y_offset_m: 0.0
-      hover_z_offset: 0.05
-      approach_rpy_deg: [12.0, -82.0, 74.0]
-      descent_distance_m: 0.12
-      final_z_offset_m: 0.0
-      approach_velocity: 0.50
-      hover_velocity: 0.50
-      grip_velocity: 0.03
-
-  - step: 7
+  # ── Step 5: Unscrew PCB screws ────────────────────────────────────────────
+  - step: 5
     action: unscrew
-    label: "Remove lid screws"
-    target: lid_screw
-    depends_on_steps: [6]
+    label: "Remove PCB screws"
+    target: pcb_screw
+    depends_on_steps: []
     reveals: []
     parameters:
       screw_type: torx
-      screw_count: 6
+      screw_count: 4
+      # Interactive Skip is used to reject false-positive screw detections.
+      user_skip_counts_as_resolved: true
       engagement_depth_mm: 5.0
       descent_max_distance_m: 0.060
       initial_torque_nm: 0.5
@@ -295,10 +256,9 @@ disassembly_sequence:
       align_only_debug: false
       descent_only_debug: false
       coarse_position_tolerance_m: 0.010
-      # Fixed coarse approach height (overrides depth-derived hover_z).
-      # Run with coarse_only_debug: true, read the "[DIAG] hover_z" line
-      # for each screw, then set this to a consistent safe value (e.g. 0.980).
-      coarse_hover_z_m: ~            # null = depth-derived (noisy); set once calibrated
+      # Fixed screwdriver_tcp height from RViz; avoids depth-derived hover drift.
+      coarse_hover_z_m: 0.98624
+      coarse_velocity: 0.20
       screw_camera_z_min_m: 0.45
       screw_camera_z_max_m: 0.65
       screw_world_z_min_m: 0.90
@@ -333,7 +293,7 @@ disassembly_sequence:
       pre_descent_align_tolerance_px: 65.0
       pre_descent_align_timeout_s: 45.0
       pre_descent_align_stable_cycles: 1
-      final_align_tolerance_px: 5.0
+      final_align_tolerance_px: 3.0
       final_align_timeout_s: 20.0
       final_align_max_radius_m: 0.012
       final_align_stable_cycles: 1
@@ -341,10 +301,11 @@ disassembly_sequence:
       final_align_min_speed_mps: 0.002
       final_align_error_filter_alpha: 0.15
       unscrew_probe_duration_s: 0.50
-      unscrew_probe_force_increase_n: 0.15
+      unscrew_probe_force_increase_n: 0.30
       unscrew_min_spin_s: 1.0
       unscrew_max_spin_s: 4.0
-      unscrew_release_force_ratio: 0.35
+      unscrew_release_force_ratio: 0.50
+      unscrew_release_debounce_s: 0.15    # s, sustained below release_level triggers success
       unscrew_force_ideal_delta_n: 0.15
       unscrew_force_deadband_n: 0.04
       unscrew_z_relief_gain_mps_per_n: 0.003
@@ -352,35 +313,70 @@ disassembly_sequence:
       unscrew_z_relief_max_m: 0.030
       tool_release_settle_s: 0.50
       tool_grab_settle_s: 0.50
-    notes: "Run on the lid-facing side after the PCB is gone and the HDD has been flipped."
+      skip_final_align_on_contact: true   # FT contact → go straight to unscrew
+      use_screw_gripper: true
+    notes: "PCB-side screws — run after flipping."
 
-  - step: 8
-    action: flip_drop
-    label: "Flip-drop loose top lid"
-    target: lid
-    depends_on_steps: [7]
+  # ── Step 6: Pick up PCB ───────────────────────────────────────────────────
+  - step: 6
+    action: pickup
+    label: "Extract PCB"
+    target: pcb
+    depends_on_steps: []
     reveals: []
     parameters:
-      retract_height_m: 0.05
-      retract_velocity: 0.30
-      retract_step_m: 0.025
-      gripper_close_force_n: 100.0
-      use_pickup_drop_xyz: true
-      pickup_drop_z_offset_m: 0.04
-      intermediate_x: 0.92
-      intermediate_y: -0.36
-      intermediate_z: 0.99
-      drop_transfer_velocity: 0.40
-      drop_transfer_step_m: 0.050
-      drop_min_reachable_y: -0.54
-      drop_accept_x_tolerance_m: 0.05
-      drop_accept_y_tolerance_m: 0.06
-      drop_accept_z_tolerance_m: 0.08
-      wrist_rotation_velocity: 0.15
-    notes: "The lid is a non-delicate module, so clear it with flip_drop."
+      grasp_type: precision
+      grip_width_mm: 80.0
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_open_min_width_mm: 120.0
+      gripper_close_force_n: 40.0
+      # Close to 40 mm physical gap (partial close) instead of fully shut.
+      # Prevents crushing the PCB under its own weight on a soft grasp.
+      grip_close_width_mm: 40.0
+      # Fingers pre-positioned to 80mm during descent (wider than 40mm target).
+      pre_descent_gripper_width_mm: 80.0
+      # Joint-6 wrist rotation applied at pre-grasp stop (before descent); 0 = no rotation.
+      wrist_joint6_deg: 0.0
+      approach_axis: "+z"
+      lift_height_mm: 20.0
+      lift_speed_mps: 0.05
+      precondition_retract_m: 0.20
+      move_xarm5_clearance: false
+      approach_x_offset_m: -0.02
+      approach_y_offset_m: 0.015
+      approach_z_offset_m: 0.005
+      # Use the homed/current rg6_tcp orientation for PCB pickup. Forcing
+      # [180, 0, 0] is not reachable at the HDD PCB hover pose on UF850.
+      approach_rpy_deg:
+      # Fallback from RViz UF850 home rg6_tcp orientation (xyzw). The skill
+      # latches live home TF first; this is used only if TF is unavailable.
+      home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
+      hover_velocity: 0.25
+      descent_distance_m: 0.080
+      descent_step_m: 0.0005
+      descent_rate_hz: 25.0
+      accept_max_depth_without_contact: true
+      descent_accept_ratio: 0.85
+      torque_threshold_nm: 3.0
+      contact_retract_m: 0.005
+      contact_retract_velocity: 0.02
+      post_grasp_retract_m: 0.040
+      drop_x: 0.92
+      drop_y: -0.36
+      drop_z: 0.99
+      skip_if_not_detected: true   # skip gracefully when PCB not visible (already removed / occluded)
+      z_extra_descent_mm: 0         # stop at detected Z centroid (HDD PCB sits flush)
+    notes: >
+      grip_close_width_mm 40 mm: partial close to avoid crushing the PCB.
+      wrist_joint6_deg 0 for now — tune once grasp geometry is confirmed.
 
 metadata:
-  version: 1
+  version: 3
   author: adip
   created_with: disassembly_skill.device_config_builder
-  notes: "Single HDD config for this workspace, intentionally aligned to the old dev_ws HDD disassembly behavior."
+  notes: >
+    HDD 6-step sequence (updated): unscrew lid_screw → pickup lid → hold →
+    flip → unscrew pcb_screw → pickup pcb.
+    Lid side processed first, then flip to access PCB side.
+    All parameter values unchanged from version 2.

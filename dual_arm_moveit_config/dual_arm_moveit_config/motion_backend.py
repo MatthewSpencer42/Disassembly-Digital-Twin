@@ -25,6 +25,9 @@ from dual_arm_moveit_config.exotica_planner import ExoticaDualArmPlanner, Exotic
 
 
 class MotionBackend:
+    _servo_state_lock = threading.Lock()
+    _servo_active_by_namespace = {}
+
     _RG6_RAD_OPEN = -0.625
     _RG6_RAD_CLOSE = 0.625
     _RG6_MM_OPEN = 160.0
@@ -252,6 +255,18 @@ class MotionBackend:
     def _servo_supported(self) -> bool:
         return self.servo_pub is not None and self._servo_start_client is not None and self._servo_stop_client is not None
 
+    def _shared_servo_active(self) -> bool:
+        if self.servo_namespace is None:
+            return False
+        with MotionBackend._servo_state_lock:
+            return bool(MotionBackend._servo_active_by_namespace.get(self.servo_namespace, False))
+
+    def _set_shared_servo_active(self, active: bool) -> None:
+        if self.servo_namespace is None:
+            return
+        with MotionBackend._servo_state_lock:
+            MotionBackend._servo_active_by_namespace[self.servo_namespace] = bool(active)
+
     def _publish_zero_twist(self):
         if self.servo_pub is None:
             return
@@ -285,30 +300,62 @@ class MotionBackend:
     def _ensure_servo_mode(self, timeout_sec: float = 5.0) -> bool:
         if not self._servo_supported():
             return False
-        if self._in_servo_mode:
+        if self._in_servo_mode and self._shared_servo_active():
             return True
-        # MoveIt Servo is configured to publish JointTrajectory commands into the
-        # normal trajectory controllers. Do not switch to the separate
-        # JointGroupPositionController path; that path drops motion on the real
-        # TopicBasedSystem bridge.
+
+        # Servo state is global to the process/arm, while each skill owns a
+        # separate MotionBackend. Reset the real Servo node before starting so a
+        # stale state bit in another skill cannot leave competing commands active.
         if self._servo_stop_client is not None:
             self._call_trigger_sync(self._servo_stop_client, 1.0, "stop_servo")
             time.sleep(0.1)
         if not self._call_trigger_sync(self._servo_start_client, timeout_sec, "start_servo"):
+            self._in_servo_mode = False
+            self._set_shared_servo_active(False)
             return False
         self._in_servo_mode = True
+        self._set_shared_servo_active(True)
         for _ in range(10):
             self._publish_zero_twist()
             time.sleep(0.03)
         return True
 
     def _ensure_trajectory_mode(self, timeout_sec: float = 5.0) -> bool:
-        self._publish_zero_twist()
-        if not self._in_servo_mode:
+        if not self._servo_supported():
             return True
+
+        # Fast path: if the shared servo-active flag (updated by every backend
+        # instance for this arm) says servo is off AND this instance's own flag
+        # also agrees, there is nothing to stop. Skipping the stop_servo service
+        # call (+ the zero-twist drain) removes ~100-200 ms of overhead that was
+        # previously paid before EVERY trajectory move, even when servo had never
+        # been started. Over a multi-step disassembly sequence the cumulative
+        # delay caused progressive timing drift between command intervals and JTC
+        # expectations, which manifested as jerk that worsened with run time.
+        if not self._shared_servo_active() and not self._in_servo_mode:
+            return True
+
+        # Servo is (or may be) active — drain any residual velocity command and
+        # call stop_servo so the controller returns to trajectory-accept mode.
+        for _ in range(5):
+            self._publish_zero_twist()
+            time.sleep(0.01)
         if self._servo_stop_client is not None:
-            self._call_trigger_sync(self._servo_stop_client, timeout_sec, "stop_servo")
+            self._call_trigger_sync(self._servo_stop_client, min(float(timeout_sec), 1.5), "stop_servo")
         self._in_servo_mode = False
+        self._set_shared_servo_active(False)
+        for _ in range(5):
+            self._publish_zero_twist()
+            time.sleep(0.01)
+        # Re-anchor the JTC at the actual joint feedback position.
+        # After servo exits, the JTC's internal tracking may have drifted from
+        # the real hardware position.  Sending a hold-current-position command
+        # forces the controller to resync before the next trajectory fires.
+        # Sleep 0.15 s > lookahead_s (0.1 s) so the JTC fully processes the
+        # hold point before the next trajectory action arrives.  Sleeping exactly
+        # equal to lookahead_s was a timing race on loaded systems.
+        self._hold_current_arm_position()
+        time.sleep(0.15)
         return True
 
     def _switch_controller_mode(self, target_mode: str, timeout_sec: float = 5.0) -> bool:
@@ -738,6 +785,39 @@ class MotionBackend:
             pt.velocities = [v * scale for v in pt.velocities]
             pt.accelerations = [a * scale * scale for a in pt.accelerations]
 
+    # Max single-joint arc (start → goal) before a trajectory is flagged as unsafe.
+    # 200° (3.49 rad) covers all legitimate coarse moves; 360° wraps are rejected.
+    _MAX_SAFE_JOINT_ARC_RAD = math.radians(200.0)
+
+    def _validate_trajectory_arc(self, trajectory) -> tuple[bool, str]:
+        """Check that no joint travels more than _MAX_SAFE_JOINT_ARC_RAD (start→goal).
+
+        Returns (is_safe: bool, detail_message: str).
+        Uses start and end waypoints only; EXOTica single-arm trajectories are
+        straight-line quintic interpolations so intermediate joints are bounded.
+        """
+        pts = trajectory.joint_trajectory.points
+        joint_names = trajectory.joint_trajectory.joint_names
+        if len(pts) < 2 or not joint_names:
+            return True, "trivial/empty trajectory"
+
+        start_pos = list(pts[0].positions)
+        goal_pos = list(pts[-1].positions)
+
+        large_arc_joints = []
+        for i, name in enumerate(joint_names):
+            if i >= len(start_pos) or i >= len(goal_pos):
+                break
+            delta = abs(float(goal_pos[i]) - float(start_pos[i]))
+            if delta > self._MAX_SAFE_JOINT_ARC_RAD:
+                large_arc_joints.append(
+                    f"{name}: {math.degrees(delta):.1f}°"
+                )
+
+        if large_arc_joints:
+            return False, "large-arc joints detected: " + ", ".join(large_arc_joints)
+        return True, ""
+
     def _execute_robot_trajectory(self, trajectory) -> bool:
         pts = len(trajectory.joint_trajectory.points)
         joints = trajectory.joint_trajectory.joint_names
@@ -750,6 +830,16 @@ class MotionBackend:
             f"[{self.backend_kind}] Executing trajectory: {pts} points, "
             f"{len(joints)} joints [{', '.join(joints)}], duration={dur_s:.2f}s"
         )
+
+        # Safety gate: reject trajectories where any joint sweeps > 200°.
+        arc_ok, arc_detail = self._validate_trajectory_arc(trajectory)
+        if not arc_ok:
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] ⚠️ Trajectory REJECTED by arc-safety check: "
+                f"{arc_detail}. This trajectory would likely cause the arm to swing "
+                f"near the camera or other obstacles. Caller should retry with a new IK seed."
+            )
+            return False
 
         if os.environ.get("DISASSEMBLY_PUBLISH_DISPLAY_TRAJECTORY", "0") == "1":
             display_msg = DisplayTrajectory()
@@ -798,14 +888,13 @@ class MotionBackend:
         return success
 
     def _execute_trajectory_direct(self, trajectory) -> bool:
-        """Stream a pre-planned trajectory to the arm controller at the trajectory's own rate.
+        """Stream a pre-planned trajectory by publishing the full waypoint set to the JTC.
 
-        Replaces the JTC execute_trajectory action for single-arm real-hardware moves.
-        The execute_trajectory path can feed TopicBasedSystem at 100Hz; Python SDK
-        timing jitter then makes commands arrive in bursts. Here we replay each
-        quintic waypoint at its intended wall-clock time as single-point controller
-        trajectories with lookahead, which is the same smoother path used by the
-        realtime EXOTica streaming helpers.
+        Sends all waypoints in a single multi-point JointTrajectory message so the C++
+        JTC executes them at 100 Hz with accurate timing.  The previous approach of
+        replaying each waypoint individually with Python time.sleep caused stepped /
+        lurching motion after several skill steps because Python scheduler jitter made
+        the sleep overshoot, creating visible pauses between waypoints.
         """
         pts = trajectory.joint_trajectory.points
         names = list(trajectory.joint_trajectory.joint_names)
@@ -822,25 +911,35 @@ class MotionBackend:
             f"[{self.backend_kind}] Direct trajectory stream: {len(pts)} pts, "
             f"{len(arm_names)} joints, duration={dur_s:.2f}s"
         )
-        t0 = time.time()
-        last_t = 0.0
-        for pt in pts:
-            point_t = pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9
-            t_target = t0 + point_t
-            wait_s = t_target - time.time()
-            if wait_s > 0.001:
-                time.sleep(wait_s)
-            interval = max(point_t - last_t, 0.02)
-            lookahead = max(0.14, min(0.50, interval * 1.8))
-            self._publish_direct_joint_command(
-                {arm_names[i]: float(pt.positions[arm_idx[i]]) for i in range(len(arm_names))},
-                lookahead_s=lookahead,
-            )
-            last_t = point_t
 
-        # Settle: keep sending the final target until the arm arrives.
+        # Build and publish the full trajectory in one JTC message.
+        full_traj = JointTrajectory()
+        full_traj.header.stamp = self.node.get_clock().now().to_msg()
+        full_traj.joint_names = arm_names
+        for pt in pts:
+            np_pt = JointTrajectoryPoint()
+            np_pt.positions = [float(pt.positions[arm_idx[i]]) for i in range(len(arm_names))]
+            vels = list(pt.velocities) if pt.velocities else []
+            np_pt.velocities = [
+                float(vels[arm_idx[i]]) if arm_idx[i] < len(vels) else 0.0
+                for i in range(len(arm_names))
+            ]
+            accs = list(pt.accelerations) if pt.accelerations else []
+            np_pt.accelerations = [
+                float(accs[arm_idx[i]]) if arm_idx[i] < len(accs) else 0.0
+                for i in range(len(arm_names))
+            ]
+            np_pt.time_from_start = pt.time_from_start
+            full_traj.points.append(np_pt)
+        t0 = time.time()
+        self._joint_traj_stream_pub.publish(full_traj)
+
+        # Settle: poll until the arm reaches the final target.
+        # Do NOT publish single-point hold commands while the trajectory is still
+        # executing — doing so would replace the multi-point trajectory in the JTC.
+        # After dur_s the JTC holds at the final point; then we reinforce with holds.
         target = {arm_names[i]: float(pts[-1].positions[arm_idx[i]]) for i in range(len(arm_names))}
-        deadline = time.time() + 5.0
+        deadline = t0 + dur_s + 5.0
         while rclpy.ok() and time.time() < deadline:
             err = max(
                 abs(float(self.current_joint_positions.get(n, target[n])) - target[n])
@@ -851,7 +950,8 @@ class MotionBackend:
                     f"[{self.backend_kind}] Direct trajectory settled (err={err:.4f}rad)"
                 )
                 return True
-            self._publish_direct_joint_command(target, lookahead_s=0.25)
+            if time.time() > t0 + dur_s:
+                self._publish_direct_joint_command(target, lookahead_s=0.25)
             time.sleep(0.05)
 
         self.node.get_logger().warning(
@@ -886,7 +986,7 @@ class MotionBackend:
                 self.node.get_logger().info(
                     f"[{self.backend_kind}] EXOTica RRT-Connect produced {pts}-point trajectory in {time.time()-t0:.2f}s"
                 )
-                return self._execute_robot_trajectory(trajectory)
+                return self._execute_trajectory_direct(trajectory)
             self.node.get_logger().warning(
                 f"[{self.backend_kind}] EXOTica dual-arm planning failed after {time.time()-t0:.2f}s, "
                 f"falling back to MoveIt OMPL: {self._exotica_planner.last_error}"
@@ -1069,43 +1169,53 @@ class MotionBackend:
             + (" (5-DOF: orientation may have residual error)" if self.is_xarm5 else "")
         )
         t0 = time.time()
-        trajectory = self._single_arm_exotica_planner.plan_pose_trajectory(
-            self.current_joint_positions,
-            [float(x), float(y), float(z), float(roll), float(pitch), float(yaw)],
-            velocity_scaling=velocity,
-        )
-        if trajectory is not None:
-            pts = len(trajectory.joint_trajectory.points)
-            self.node.get_logger().info(
-                f"[{self.backend_kind}] EXOTica IK solved in {time.time()-t0:.3f}s, "
-                f"generated {pts}-point quintic trajectory"
-            )
-            return self._execute_robot_trajectory(trajectory)
 
-        self.node.get_logger().warning(
-            f"[{self.backend_kind}] move_to_pose_exotica: EXOTica IK FAILED after {time.time()-t0:.3f}s "
-            f"({self._single_arm_exotica_planner.last_error})."
-            + (" Trying yaw perturbations (5-DOF xArm5)." if self.is_xarm5 else " Falling back to MoveIt IK.")
-        )
+        def _try_plan_and_execute(pose_rpy, label: str) -> bool | None:
+            """Plan and execute once.  Returns True/False on arc-safe trajectory,
+            None when IK itself returned no trajectory."""
+            traj = self._single_arm_exotica_planner.plan_pose_trajectory(
+                self.current_joint_positions,
+                [float(v) for v in pose_rpy],
+                velocity_scaling=velocity,
+            )
+            if traj is None:
+                return None
+            pts = len(traj.joint_trajectory.points)
+            arc_ok, arc_detail = self._validate_trajectory_arc(traj)
+            self.node.get_logger().info(
+                f"[{self.backend_kind}] {label}: IK solved in {time.time()-t0:.3f}s, "
+                f"{pts}-pt trajectory  {'✓ arc-safe' if arc_ok else '⚠ arc-unsafe: ' + arc_detail}"
+            )
+            if not arc_ok:
+                # Arc-unsafe: trajectory rejected by the execute call; signal retry.
+                return None
+            return self._execute_robot_trajectory(traj)
+
+        # --- Attempt 1: nominal pose ---
+        base_pose_rpy = [float(x), float(y), float(z), float(roll), float(pitch), float(yaw)]
+        result = _try_plan_and_execute(base_pose_rpy, "nominal")
+        if result is True:
+            return True
+
+        # --- IK failed or arc-unsafe: retry with random re-seeding (xArm5 only) or fallback ---
         if self.is_xarm5:
-            for yaw_deg in (15, -15, 30, -30, 45, -45, 90, -90, 180):
+            yaw_options = (15, -15, 30, -30, 45, -45, 90, -90, 180)
+            for yaw_deg in yaw_options:
                 yaw_p = math.radians(yaw_deg)
-                t1 = time.time()
-                traj_p = self._single_arm_exotica_planner.plan_pose_trajectory(
-                    self.current_joint_positions,
+                result = _try_plan_and_execute(
                     [float(x), float(y), float(z), float(roll), float(pitch), yaw_p],
-                    velocity_scaling=velocity,
+                    f"yaw_offset={yaw_deg}°",
                 )
-                if traj_p is not None:
-                    pts = len(traj_p.joint_trajectory.points)
-                    self.node.get_logger().info(
-                        f"[{self.backend_kind}] EXOTica IK solved with yaw_offset={yaw_deg}° "
-                        f"in {time.time()-t1:.3f}s, generated {pts}-point quintic trajectory"
-                    )
-                    return self._execute_robot_trajectory(traj_p)
+                if result is True:
+                    return True
             self.node.get_logger().warning(
-                f"[{self.backend_kind}] move_to_pose_exotica: all yaw perturbations failed. "
+                f"[{self.backend_kind}] move_to_pose_exotica: all yaw perturbations exhausted. "
                 "Falling back to MoveIt IK."
+            )
+        else:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] move_to_pose_exotica: EXOTica IK/arc failed after "
+                f"{time.time()-t0:.3f}s. Falling back to MoveIt IK."
             )
         return self.move_to_pose_robust(x, y, z, q_dict=q_dict, velocity=velocity, frame_id=frame_id)
 
@@ -1224,21 +1334,7 @@ class MotionBackend:
             return False
 
         self._rescale_trajectory_velocity(result.solution, velocity)
-        goal = ExecuteTrajectory.Goal()
-        goal.trajectory = result.solution
-        if not self._execute_client.wait_for_server(timeout_sec=10.0):
-            return False
-        send_future = self._execute_client.send_goal_async(goal)
-        if not self._wait_for_future(send_future, 20.0):
-            return False
-        goal_handle = send_future.result()
-        if not goal_handle or not goal_handle.accepted:
-            return False
-        result_future = goal_handle.get_result_async()
-        if not self._wait_for_future(result_future, 60.0):
-            return False
-        exec_result = result_future.result()
-        return bool(exec_result and exec_result.result.error_code.val == 1)
+        return self._execute_trajectory_direct(result.solution)
 
     def publish_servo_velocity(self, dx: float, dy: float, dz: float) -> bool:
         """Publish one servo velocity command (non-blocking, no zero-stop after)."""
@@ -1346,6 +1442,7 @@ class MotionBackend:
         max_solver_failures: int = 8,
         target_x: float | None = None,
         target_y: float | None = None,
+        contact_grace_m: float = 0.0,
     ) -> bool:
         self.node.get_logger().info(
             f"[{self.backend_kind}] move_linear_z_with_effort_stop_exotica: "
@@ -1353,6 +1450,12 @@ class MotionBackend:
             f"threshold={threshold_nm:.2f}Nm joint_index={joint_index} "
             f"rate={rate_hz}Hz alpha={command_alpha}"
         )
+        if not self._ensure_trajectory_mode(timeout_sec=1.5):
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] move_linear_z_with_effort_stop_exotica: "
+                "failed to stop Servo before direct joint streaming"
+            )
+            return False
         if self._single_arm_exotica_planner is None or not self._single_arm_exotica_planner.available:
             self.node.get_logger().warning(
                 f"[{self.backend_kind}] EXOTica stepped tactile descent unavailable "
@@ -1443,18 +1546,31 @@ class MotionBackend:
         _last_progress_log = time.time()
 
         stable_contact_cycles = 0
+        grace_m = max(0.0, float(contact_grace_m))
+        baseline_alpha = 0.15   # EMA weight for baseline update during grace period
         while rclpy.ok():
             effort = self.current_joint_efforts.get(joint_name, baseline) if effort_available else baseline
             spike = abs(effort - baseline)
-            if effort_available and spike > threshold_nm:
+            travelled = start_z - commanded_z
+
+            # ── Grace period: arm is accelerating from standstill ──────────────
+            # Dynamic torque transients during the first `grace_m` of travel are
+            # expected and should NOT count as contact.  Instead, continuously
+            # update the baseline so that it reflects the moving-arm load.
+            in_grace = effort_available and (grace_m > 0.0) and (travelled < grace_m)
+            if in_grace:
+                # EMA update: blend current effort into baseline
+                baseline = (1.0 - baseline_alpha) * baseline + baseline_alpha * effort
+                stable_contact_cycles = 0  # never accumulate during grace
+            elif effort_available and spike > threshold_nm:
                 stable_contact_cycles += 1
                 self.node.get_logger().info(
                     f"[{self.backend_kind}] Contact spike detected: {spike:.3f}Nm > {threshold_nm}Nm "
                     f"(cycle {stable_contact_cycles}/{settling_cycles})"
                 )
                 if stable_contact_cycles >= max(1, int(settling_cycles)):
-                    self._hold_current_arm_position()
-                    travelled_mm = (start_z - commanded_z) * 1000
+                    self._publish_direct_joint_command(commanded_positions, lookahead_s=0.12)
+                    travelled_mm = travelled * 1000
                     self.node.get_logger().info(
                         f"[{self.backend_kind}] Tactile descent CONTACT confirmed on {joint_name}: "
                         f"spike={spike:.3f}Nm, travelled={travelled_mm:.1f}mm, "
@@ -1467,14 +1583,14 @@ class MotionBackend:
             # Periodic progress log every 0.5s
             now = time.time()
             if now - _last_progress_log >= 0.5:
-                travelled_mm = (start_z - commanded_z) * 1000
+                travelled_mm = travelled * 1000
+                grace_tag = f" [grace {grace_m*1000:.0f}mm]" if in_grace else ""
                 self.node.get_logger().info(
                     f"[{self.backend_kind}] Descending: travelled={travelled_mm:.1f}/{target_depth*1000:.1f}mm "
-                    f"effort={effort:.3f}Nm baseline={baseline:.3f}Nm spike={spike:.3f}Nm"
+                    f"effort={effort:.3f}Nm baseline={baseline:.3f}Nm spike={spike:.3f}Nm{grace_tag}"
                 )
                 _last_progress_log = now
 
-            travelled = start_z - commanded_z
             if travelled >= target_depth - 1e-4:
                 break
 
@@ -1569,6 +1685,12 @@ class MotionBackend:
             f"axis={axis} dist={distance_m*1000:.1f}mm step={step_m*1000:.2f}mm "
             f"threshold={threshold_nm:.2f}Nm joint_index={joint_index}"
         )
+        if not self._ensure_trajectory_mode(timeout_sec=1.5):
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] move_linear_axis_with_effort_stop_exotica: "
+                "failed to stop Servo before direct joint streaming"
+            )
+            return False
 
         if self._single_arm_exotica_planner is None or not self._single_arm_exotica_planner.available:
             self.node.get_logger().warning(
@@ -1652,7 +1774,7 @@ class MotionBackend:
                     f"(cycle {stable_contact_cycles}/{settling_cycles})"
                 )
                 if stable_contact_cycles >= max(1, int(settling_cycles)):
-                    self._hold_current_arm_position()
+                    self._publish_direct_joint_command(commanded_positions, lookahead_s=0.12)
                     self.node.get_logger().info(
                         f"[{self.backend_kind}] Lateral CONTACT confirmed: "
                         f"spike={spike:.3f}Nm, travelled={travelled*1000:.1f}mm, "
@@ -1756,6 +1878,12 @@ class MotionBackend:
         if self._single_arm_exotica_planner is None or not self._single_arm_exotica_planner.available:
             self.node.get_logger().error(
                 f"[{self.backend_kind}] move_cartesian_realtime_exotica: EXOTica unavailable"
+            )
+            return "IK_FAIL"
+        if not self._ensure_trajectory_mode(timeout_sec=1.5):
+            self.node.get_logger().error(
+                f"[{self.backend_kind}] move_cartesian_realtime_exotica: "
+                "failed to stop Servo before direct joint streaming"
             )
             return "IK_FAIL"
 

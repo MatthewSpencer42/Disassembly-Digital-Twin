@@ -1,0 +1,375 @@
+device:
+  class: mini_pc
+  model: mini_pc_generic
+  dimensions_mm:
+    length: 200.0
+    width: 200.0
+    height: 60.0
+  material: mixed
+  fixturing: none
+  notes: >
+    Mini-PC lies flat on the work surface — no clamping arm needed.
+    Sequence: pickup heat_sink → unscrew hdd_holder_screw →
+    pickup hdd_holder → unscrew core_holder_Screw → pickup core_holder.
+    Pickup uses detection centroid; fine-tune approach_rpy_deg and
+    offsets once grasp geometry is confirmed.
+
+components:
+  heat_sink:
+    label: heat_sink
+    type: shield
+    removable: true
+    notes: "Passive heat spreader on top of the mini-PC. Lifted off first (no screws)."
+  hdd_holder:
+    label: hdd_holder
+    type: bracket
+    removable: true
+    notes: "Bracket retaining the HDD. Removed after its screws are taken out."
+  core_holder:
+    label: core_holder
+    type: bracket
+    removable: true
+    notes: "Bracket securing the CPU/core module. Exposed after HDD holder is removed."
+
+screw_zones:
+  hdd_holder_screw:
+    parent_component: hdd_holder
+    screw_count: 1
+    screw_type: phillips
+    depends_on_removal_of: [heat_sink]
+    notes: "Screws securing the HDD retention bracket. Accessible after heat sink is removed."
+  core_holder_Screw:
+    parent_component: core_holder
+    screw_count: 1
+    screw_type: phillips
+    depends_on_removal_of: [hdd_holder]
+    notes: "Screws securing the core/CPU holder. Exposed after HDD holder is removed."
+
+disassembly_sequence:
+
+  # ── Step 1: Pick up heat sink ──────────────────────────────────────────────
+  - step: 1
+    action: pickup
+    label: "Extract heat sink"
+    target: heat_sink
+    depends_on_steps: []
+    reveals:
+      - hdd_holder_screw
+    parameters:
+      grasp_type: precision
+      grip_width_mm: 60.0
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_open_min_width_mm: 120.0
+      gripper_close_force_n: 40.0
+      approach_axis: "+z"
+      lift_height_mm: 10.0
+      lift_speed_mps: 0.05
+      precondition_retract_m: 0.20
+      move_xarm5_clearance: false
+      # Centroid-based approach — offsets zeroed until grasp geometry is tuned.
+      grip_close_width_mm: 62.0     # close to 60 mm gap for heat sink
+      approach_x_offset_m: 0.0
+      approach_y_offset_m: 0.00
+      approach_z_offset_m: -0.001   # −10 mm below vision centroid Z
+      approach_rpy_deg:           # null → use live UF850 home orientation
+      home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
+      hover_velocity: 0.25
+      pre_descent_gripper_width_mm: 100.0
+      descent_distance_m: 0.080
+      descent_step_m: 0.0005
+      descent_rate_hz: 25.0
+      accept_max_depth_without_contact: true
+      descent_accept_ratio: 0.70
+      torque_threshold_nm: 3.0
+      contact_retract_m: 0.005
+      contact_retract_velocity: 0.02
+      post_grasp_retract_m: 0.040
+      drop_x: 0.92
+      drop_y: -0.36
+      drop_z: 0.99
+      skip_if_not_detected: true
+      z_extra_descent_mm: 45        # descend 45 mm below centroid before closing (20 + 15 + 10)
+    notes: >
+      Centroid-based for now. Heat sink is passive (no screws) — lifted directly.
+      approach_z_offset_m −30 mm: grasp target is 30 mm below vision centroid.
+      Fine-tune approach_x/y_offset_m and grip_width_mm after first test run.
+
+  # ── Step 2: Unscrew HDD holder ────────────────────────────────────────────
+  - step: 2
+    action: unscrew
+    label: "Remove HDD holder screws"
+    target: hdd_holder_screw
+    depends_on_steps: []
+    reveals:
+      - hdd_holder
+    parameters:
+      screw_type: phillips
+      screw_count: 1
+      user_skip_counts_as_resolved: true
+      engagement_depth_mm: 5.0
+      descent_max_distance_m: 0.060
+      initial_torque_nm: 0.5
+      max_torque_nm: 1.5
+      rotation_speed_rpm: 60
+      force_threshold_n: 5.0
+      align_tolerance_px: 4.0
+      spiral_timeout_s: 30.0
+      coarse_planner: exotica
+      coarse_only_debug: false
+      align_only_debug: false
+      descent_only_debug: false
+      coarse_position_tolerance_m: 0.010
+      coarse_hover_z_m: 1.01624
+      coarse_x_offset_mm: 10.0      # +5 mm X fine-tune for mini_pc screw alignment
+      coarse_y_offset_mm: -10.0      # no Y offset
+      coarse_velocity: 0.20        # +10 mm above laptop baseline (0.98624)
+      screw_camera_z_min_m: 0.45
+      screw_camera_z_max_m: 0.65
+      screw_world_z_min_m: 0.90
+      screw_world_z_max_m: 1.05
+      pre_retract_m: 0.0
+      xy_speed_align_mps: 0.060
+      z_speed_descent_mps: 0.020
+      spiral_start_dist_mm: 2.0
+      spiral_gap_mm: 2.0
+      spiral_speed_mps: 0.002
+      search_max_step_m: 0.001
+      search_joint_smooth_alpha: 0.35
+      visual_servo_gain: 0.8
+      visual_servo_max_radius_m: 0.025
+      align_move_step_m: 0.0005
+      align_verify_tolerance_m: 0.015
+      align_error_filter_alpha: 0.25
+      align_target_filter_alpha: 0.25
+      align_stable_cycles: 3
+      align_only_timeout_s: 90.0
+      align_full_speed_error_px: 150.0
+      align_min_speed_mps: 0.012
+      align_z_lock_gain: 1.2
+      align_z_lock_speed_mps: 0.003
+      align_target_wait_s: 3.0
+      align_target_lost_grace_s: 0.6
+      enable_spiral_search: true
+      align_rate_hz: 30.0
+      align_joint_alpha: 0.20
+      align_max_joint_step_rad: 0.020
+      align_max_joint_velocity_rad_s: 0.6
+      pre_descent_align_tolerance_px: 65.0
+      pre_descent_align_timeout_s: 45.0
+      pre_descent_align_stable_cycles: 1
+      final_align_tolerance_px: 3.0
+      final_align_timeout_s: 20.0
+      final_align_max_radius_m: 0.012
+      final_align_stable_cycles: 1
+      final_align_xy_speed_mps: 0.006
+      final_align_min_speed_mps: 0.002
+      final_align_error_filter_alpha: 0.15
+      unscrew_probe_duration_s: 0.50
+      unscrew_probe_force_increase_n: 0.30
+      unscrew_min_spin_s: 1.0
+      unscrew_max_spin_s: 10.0
+      unscrew_release_force_ratio: 0.50
+      unscrew_release_debounce_s: 0.15
+      unscrew_force_ideal_delta_n: 0.15
+      unscrew_force_deadband_n: 0.04
+      unscrew_z_relief_gain_mps_per_n: 0.003
+      unscrew_z_relief_speed_cap_mps: 0.008
+      unscrew_z_relief_max_m: 0.030
+      tool_release_settle_s: 0.50
+      tool_grab_settle_s: 0.50
+      skip_final_align_on_contact: true
+      use_screw_gripper: false
+
+  # ── Step 3: Pick up HDD holder ────────────────────────────────────────────
+  - step: 3
+    action: pickup
+    label: "Extract HDD holder"
+    target: hdd_holder
+    depends_on_steps: []
+    reveals:
+      - core_holder_Screw
+    parameters:
+      grasp_type: precision
+      grip_width_mm: 60.0
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_open_min_width_mm: 120.0
+      gripper_close_force_n: 36.0
+      approach_axis: "+z"
+      lift_height_mm: 10.0
+      lift_speed_mps: 0.05
+      precondition_retract_m: 0.20
+      move_xarm5_clearance: false
+      # Fine-tuned approach offsets for HDD holder grasp geometry.
+      grip_close_width_mm: 15.0     # close to 15 mm gap for hdd holder
+      approach_x_offset_m: 0.0
+      approach_y_offset_m: 0.030    # +30 mm Y to reach bracket centre
+      approach_z_offset_m: 0.04    # +25 mm above vision centroid Z
+      approach_rpy_deg:           # null → use live UF850 home orientation
+      home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
+      hover_velocity: 0.25
+      pre_descent_gripper_width_mm: 100.0
+      descent_distance_m: 0.080
+      descent_step_m: 0.0005
+      descent_rate_hz: 25.0
+      accept_max_depth_without_contact: true
+      descent_accept_ratio: 0.70
+      torque_threshold_nm: 3.0
+      contact_retract_m: 0.005
+      contact_retract_velocity: 0.02
+      post_grasp_retract_m: 0.040
+      drop_x: 0.92
+      drop_y: -0.36
+      drop_z: 0.99
+      skip_if_not_detected: true
+      z_extra_descent_mm: 45        # descend 45 mm below centroid before closing (20 + 15 + 10)
+    notes: >
+      approach_y_offset_m +30 mm and approach_z_offset_m −30 mm tuned from
+      first test run.  grip_width_mm and x offset left as placeholders.
+
+  # ── Step 4: Unscrew core holder ───────────────────────────────────────────
+  - step: 4
+    action: unscrew
+    label: "Remove core holder screws"
+    target: core_holder_Screw
+    depends_on_steps: []
+    reveals:
+      - core_holder
+    parameters:
+      screw_type: phillips
+      screw_count: 1
+      user_skip_counts_as_resolved: true
+      engagement_depth_mm: 5.0
+      descent_max_distance_m: 0.060
+      initial_torque_nm: 0.5
+      max_torque_nm: 1.5
+      rotation_speed_rpm: 60
+      force_threshold_n: 5.0
+      align_tolerance_px: 4.0
+      spiral_timeout_s: 30.0
+      coarse_planner: exotica
+      coarse_only_debug: false
+      align_only_debug: false
+      descent_only_debug: false
+      coarse_position_tolerance_m: 0.010
+      coarse_hover_z_m: 1.01624
+      coarse_x_offset_mm: 5.0      # +5 mm X fine-tune for mini_pc screw alignment
+      coarse_y_offset_mm: 0.0      # no Y offset
+      coarse_velocity: 0.20        # +10 mm above laptop baseline (0.98624)
+      screw_camera_z_min_m: 0.45
+      screw_camera_z_max_m: 0.65
+      screw_world_z_min_m: 0.90
+      screw_world_z_max_m: 1.05
+      pre_retract_m: 0.0
+      xy_speed_align_mps: 0.060
+      z_speed_descent_mps: 0.020
+      spiral_start_dist_mm: 2.0
+      spiral_gap_mm: 2.0
+      spiral_speed_mps: 0.002
+      search_max_step_m: 0.001
+      search_joint_smooth_alpha: 0.35
+      visual_servo_gain: 0.8
+      visual_servo_max_radius_m: 0.025
+      align_move_step_m: 0.0005
+      align_verify_tolerance_m: 0.015
+      align_error_filter_alpha: 0.25
+      align_target_filter_alpha: 0.25
+      align_stable_cycles: 3
+      align_only_timeout_s: 90.0
+      align_full_speed_error_px: 150.0
+      align_min_speed_mps: 0.012
+      align_z_lock_gain: 1.2
+      align_z_lock_speed_mps: 0.003
+      align_target_wait_s: 3.0
+      align_target_lost_grace_s: 0.6
+      enable_spiral_search: true
+      align_rate_hz: 30.0
+      align_joint_alpha: 0.20
+      align_max_joint_step_rad: 0.020
+      align_max_joint_velocity_rad_s: 0.6
+      pre_descent_align_tolerance_px: 65.0
+      pre_descent_align_timeout_s: 45.0
+      pre_descent_align_stable_cycles: 1
+      final_align_tolerance_px: 3.0
+      final_align_timeout_s: 20.0
+      final_align_max_radius_m: 0.012
+      final_align_stable_cycles: 1
+      final_align_xy_speed_mps: 0.006
+      final_align_min_speed_mps: 0.002
+      final_align_error_filter_alpha: 0.15
+      unscrew_probe_duration_s: 0.50
+      unscrew_probe_force_increase_n: 0.30
+      unscrew_min_spin_s: 1.0
+      unscrew_max_spin_s: 10.0
+      unscrew_release_force_ratio: 0.50
+      unscrew_release_debounce_s: 0.15
+      unscrew_force_ideal_delta_n: 0.15
+      unscrew_force_deadband_n: 0.04
+      unscrew_z_relief_gain_mps_per_n: 0.003
+      unscrew_z_relief_speed_cap_mps: 0.008
+      unscrew_z_relief_max_m: 0.030
+      tool_release_settle_s: 0.50
+      tool_grab_settle_s: 0.50
+      skip_final_align_on_contact: true
+      use_screw_gripper: false
+    notes: "Exposed after HDD holder is removed. Uses exact model class label 'core_holder_Screw'."
+
+  # ── Step 5: Pick up core holder ───────────────────────────────────────────
+  - step: 5
+    action: pickup
+    label: "Extract core holder"
+    target: core_holder
+    depends_on_steps: []
+    reveals: []
+    parameters:
+      grasp_type: precision
+      grip_width_mm: 60.0
+      gripper_open_deg: 35.0
+      gripper_close_deg: -35.0
+      gripper_open_min_width_mm: 120.0
+      gripper_close_force_n: 40.0
+      approach_axis: "+z"
+      lift_height_mm: 10.0
+      lift_speed_mps: 0.05
+      precondition_retract_m: 0.20
+      move_xarm5_clearance: false
+      wrist_joint6_deg: 90.0        # rotate joint6 90° at pre-grasp stop
+      grip_close_width_mm: 60.0     # close to 60 mm gap for core holder
+      approach_x_offset_m: -0.010  # −10 mm X offset
+      approach_y_offset_m: 0.0
+      approach_z_offset_m: -0.005  # −5 mm below vision centroid Z
+      approach_rpy_deg:           # null → use live UF850 home orientation
+      home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
+      hover_velocity: 0.25
+      pre_descent_gripper_width_mm: 100.0
+      descent_distance_m: 0.080
+      descent_step_m: 0.0005
+      descent_rate_hz: 25.0
+      accept_max_depth_without_contact: true
+      descent_accept_ratio: 0.70
+      torque_threshold_nm: 3.0
+      contact_retract_m: 0.005
+      contact_retract_velocity: 0.02
+      post_grasp_retract_m: 0.040
+      drop_x: 0.92
+      drop_y: -0.36
+      drop_z: 0.99
+      skip_if_not_detected: true
+      z_extra_descent_mm: 45        # descend 45 mm below centroid before closing
+      pickup_max_retries: 2
+    notes: >
+      Centroid-based for now. Exposed after core holder screws are removed.
+      Fine-tune approach_x/y_offset_m and grip_width_mm after first test run.
+
+metadata:
+  version: 1
+  author: adip
+  created_with: manual
+  notes: >
+    Mini-PC config — 5-step sequence:
+    heat sink pickup → HDD holder unscrew/pickup → core holder unscrew/pickup.
+    No hold arm used (fixturing: none).
+    Pickup offsets are placeholders; update approach_x/y_offset_m and
+    grip_width_mm after first test run.
+    Coarse hover z bumped +20 mm vs laptop baseline (0.98624 → 1.01624).

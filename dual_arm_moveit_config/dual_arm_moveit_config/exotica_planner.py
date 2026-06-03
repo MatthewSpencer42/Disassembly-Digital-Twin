@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import math
 import threading
 from pathlib import Path
 from tempfile import gettempdir
@@ -526,6 +527,13 @@ class ExoticaSingleArmPosePlanner:
     # Pose IK must be tight.  A 50 mm residual was enough for fine visual-servo
     # requests to return a distant local minimum and make the xArm jump.
     _POSE_SUCCESS_TOLERANCE_M = 0.005
+    # Arc-safety thresholds: max single-joint travel from current configuration.
+    # Solutions exceeding _MAX_PREFERRED_SINGLE_JOINT_ARC_RAD are stored but not
+    # accepted immediately — IK continues searching for a shorter-arc alternative.
+    # Solutions exceeding _MAX_HARD_SINGLE_JOINT_ARC_RAD are rejected outright
+    # (hard limit; physically too risky).
+    _MAX_PREFERRED_SINGLE_JOINT_ARC_RAD = math.pi         # 180° — prefer below this
+    _MAX_HARD_SINGLE_JOINT_ARC_RAD = 4.5                  # ~258° — hard reject above
 
     def __init__(self, node, group_name: str, hardware_type: str = "fake"):
         self.node = node
@@ -907,10 +915,15 @@ class ExoticaSingleArmPosePlanner:
             elif abs(abs(req_roll) - self._np.pi) < 1.0:    # roll≈±π → tip physically UP
                 target_tool_z_sign = -1
 
-        # Track position+orientation correct solution separately from position-only.
-        best_full_solution = None   # position AND orientation correct
+        # Track solutions at two quality tiers:
+        #   best_full_solution  — position + orientation correct, any arc length
+        #   best_short_arc_sol  — position + orientation correct, arc <= _MAX_PREFERRED
+        #   best_pos_solution   — position correct, orientation wrong
+        best_full_solution = None
         best_full_error = float('inf')
-        best_pos_solution = None    # position correct, orientation wrong
+        best_short_arc_sol = None
+        best_short_arc_error = float('inf')
+        best_pos_solution = None
         best_pos_error = float('inf')
 
         for attempt in range(max_retries):
@@ -942,6 +955,26 @@ class ExoticaSingleArmPosePlanner:
                     except Exception:
                         pass
 
+                    # --- arc-safety check -------------------------------------------
+                    joint_deltas = self._np.abs(cand_state - base_start_state)
+                    max_single_delta = float(self._np.max(joint_deltas))
+                    total_arc = float(self._np.sum(joint_deltas))
+
+                    # Hard-reject solutions requiring an impossibly large single-joint arc.
+                    if max_single_delta > self._MAX_HARD_SINGLE_JOINT_ARC_RAD:
+                        worst_idx = int(self._np.argmax(joint_deltas))
+                        worst_name = self.controlled_joint_names[worst_idx]
+                        self.node.get_logger().warning(
+                            f"[EXOTica/{self.group_name}] attempt {attempt}: "
+                            f"hard-rejected solution — {worst_name} would move "
+                            f"{math.degrees(max_single_delta):.1f}° "
+                            f"(limit {math.degrees(self._MAX_HARD_SINGLE_JOINT_ARC_RAD):.0f}°)"
+                        )
+                        continue
+
+                    is_short_arc = max_single_delta <= self._MAX_PREFERRED_SINGLE_JOINT_ARC_RAD
+                    # ----------------------------------------------------------------
+
                     # Verify FK position error
                     fk_frame = self._scene.fk(self.link_name)
                     if hasattr(fk_frame, 'get_translation'):
@@ -957,8 +990,6 @@ class ExoticaSingleArmPosePlanner:
 
                     if err <= success_tolerance_m:
                         # Check tool orientation when a direction is required.
-                        # Always break on position-OK so the server responds quickly.
-                        # Orientation is verified here; the caller decides whether to retry.
                         rzz = self._fk_tool_rzz(fk_frame)
                         orientation_ok = True
                         if target_tool_z_sign is not None and rzz is not None:
@@ -967,24 +998,54 @@ class ExoticaSingleArmPosePlanner:
                             orientation_ok = (rzz * target_tool_z_sign) > 0.3
 
                         if orientation_ok:
-                            best_full_solution = cand_state
-                            best_full_error = err
+                            if err < best_full_error:
+                                best_full_solution = cand_state
+                                best_full_error = err
 
-                        break  # always exit after first position-OK (fast response)
+                            if is_short_arc:
+                                # Short arc + position + orientation: accept immediately.
+                                best_short_arc_sol = cand_state
+                                best_short_arc_error = err
+                                break  # ideal solution found
+                            else:
+                                # Long-arc solution: store but continue searching so we
+                                # may find a shorter-arc alternative in the next seeds.
+                                worst_idx = int(self._np.argmax(joint_deltas))
+                                worst_name = self.controlled_joint_names[worst_idx]
+                                self.node.get_logger().warning(
+                                    f"[EXOTica/{self.group_name}] attempt {attempt}: "
+                                    f"large-arc solution stored ({worst_name}: "
+                                    f"{math.degrees(max_single_delta):.1f}°, "
+                                    f"total {math.degrees(total_arc):.1f}°) — "
+                                    f"searching for shorter-arc alternative…"
+                                )
+                                # Don't break: allow remaining seeds to find a safer path.
+                        else:
+                            # orientation wrong — only break if short arc position-only
+                            if is_short_arc:
+                                break  # let caller handle orientation-failed case
 
-        # Prefer position+orientation correct solution.
-        if best_full_solution is not None:
+        # Prefer the short-arc solution (safe), fall back to the long-arc one.
+        final_solution = best_short_arc_sol if best_short_arc_sol is not None else best_full_solution
+        if final_solution is not None:
             solve_duration = _time.time() - t0
+            final_deltas = self._np.abs(final_solution - base_start_state)
+            final_max_delta = float(self._np.max(final_deltas))
+            arc_tag = (
+                f"arc≤180° ✓"
+                if final_max_delta <= self._MAX_PREFERRED_SINGLE_JOINT_ARC_RAD
+                else f"arc={math.degrees(final_max_delta):.1f}° ⚠️ (large)"
+            )
             log_message = (
                 f"[EXOTica/{self.group_name}] IK solved in {solve_duration:.3f}s "
-                f"with error {best_full_error:.4f}m"
+                f"with error {best_full_error:.4f}m {arc_tag}"
             )
-            if solve_duration >= 0.2:
+            if solve_duration >= 0.2 or final_max_delta > self._MAX_PREFERRED_SINGLE_JOINT_ARC_RAD:
                 self.node.get_logger().warning(log_message)
             else:
                 self.node.get_logger().debug(log_message)
             return {
-                joint_name: float(best_full_solution[index])
+                joint_name: float(final_solution[index])
                 for index, joint_name in enumerate(self.controlled_joint_names)
             }
 
@@ -1068,6 +1129,7 @@ class RemoteExoticaIKClient:
 
         # Pending responses keyed by request id.
         self._pending_responses: dict[str, dict] = {}
+        self._pending_request_ids: set[str] = set()
         self._pending_lock = threading.Lock()
 
         # Publishers / subscribers.
@@ -1150,7 +1212,8 @@ class RemoteExoticaIKClient:
             req_id = data.get("id")
             if req_id is not None:
                 with self._pending_lock:
-                    self._pending_responses[req_id] = data
+                    if req_id in self._pending_request_ids:
+                        self._pending_responses[req_id] = data
         except Exception:  # noqa: BLE001
             pass
 
@@ -1174,6 +1237,8 @@ class RemoteExoticaIKClient:
             return None
 
         req_id = str(self._uuid_mod.uuid4())
+        with self._pending_lock:
+            self._pending_request_ids.add(req_id)
         request = {
             "id": req_id,
             "group": self.group_name,
@@ -1195,6 +1260,8 @@ class RemoteExoticaIKClient:
         while _time.monotonic() < deadline:
             with self._pending_lock:
                 response = self._pending_responses.pop(req_id, None)
+                if response is not None:
+                    self._pending_request_ids.discard(req_id)
             if response is not None:
                 if response.get("error"):
                     self.last_error = response["error"]
@@ -1211,6 +1278,9 @@ class RemoteExoticaIKClient:
                 return {k: float(v) for k, v in joints.items()}
             _time.sleep(0.005)
 
+        with self._pending_lock:
+            self._pending_request_ids.discard(req_id)
+            self._pending_responses.pop(req_id, None)
         self.last_error = f"Timed out waiting for IK response (id={req_id})"
         self.node.get_logger().error(
             f"[RemoteExoticaIKClient/{self.group_name}] {self.last_error}"

@@ -41,9 +41,13 @@ class ExoticaIKServerNode(Node):
         # Planners — keyed by group name, populated in background threads.
         self._planners: dict = {}
         self._planners_lock = threading.Lock()
+        # Per-group solve locks: serialise concurrent IK requests for the same
+        # arm so _problem / _solver shared state is never touched by two threads.
+        self._solve_locks: dict = {}  # group -> threading.Lock()
 
-        # Pending IK futures (request id → future) and their lock.
-        self._executor_pool = ThreadPoolExecutor(max_workers=2)
+        # Thread pool: 4 workers lets requests queue and drain quickly while
+        # per-group solve locks ensure the planner's shared state is safe.
+        self._executor_pool = ThreadPoolExecutor(max_workers=4)
 
         # /exotica/ready publisher — TransientLocal so late subscribers get the message.
         ready_qos = QoSProfile(
@@ -81,6 +85,7 @@ class ExoticaIKServerNode(Node):
                 )
                 with self._planners_lock:
                     self._planners[group] = planner
+                    self._solve_locks[group] = threading.Lock()
                 if planner.available:
                     self.get_logger().info(
                         f"[EXOTica IK server] Planner for '{group}' ready."
@@ -142,6 +147,7 @@ class ExoticaIKServerNode(Node):
         try:
             with self._planners_lock:
                 planner = self._planners.get(group)
+                solve_lock = self._solve_locks.get(group)
 
             if planner is None:
                 error = (
@@ -153,12 +159,16 @@ class ExoticaIKServerNode(Node):
                     f"Planner for '{group}' is not available: {planner.last_error}"
                 )
             else:
-                result = planner.solve_pose_goal_joint_positions(
-                    current,
-                    pose_rpy,
-                    max_retries=max_retries,
-                    position_tolerance_m=position_tolerance_m,
-                )
+                # Hold the per-group lock for the ENTIRE solve so that two
+                # concurrent requests for the same arm cannot corrupt the
+                # shared _problem / _solver state inside the planner.
+                with solve_lock:
+                    result = planner.solve_pose_goal_joint_positions(
+                        current,
+                        pose_rpy,
+                        max_retries=max_retries,
+                        position_tolerance_m=position_tolerance_m,
+                    )
                 if result is None:
                     error = planner.last_error or "IK returned no solution."
                 else:

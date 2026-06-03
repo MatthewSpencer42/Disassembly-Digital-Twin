@@ -31,8 +31,14 @@ from vision_agent.common import (
     Point3DStabilizer,
     StaticAnchorTracker,
     calculate_orientation_pca,
+    DetectionStabilizer,
 )
-from vision_agent.agents.scout import ScoutAgent
+from vision_agent.common import VISION_BACKEND
+
+if VISION_BACKEND == "yolo":
+    from vision_agent.agents.yolo.scout import ScoutYolo as ScoutAgent
+else:
+    from vision_agent.agents.scout import ScoutAgent
 
 
 class GlobalVisionNode(Node):
@@ -44,9 +50,9 @@ class GlobalVisionNode(Node):
 
         self.scout = ScoutAgent(PATH_SCOUT)
         self.bridge = CvBridge()
-        self.tracker = StaticAnchorTracker(tolerance=60, max_disappeared=3000)
-        self.angle_stabilizer = AngleStabilizer(window_size=15)
-        self.xyz_stabilizer = Point3DStabilizer(window_size=15)
+        self.tracker = StaticAnchorTracker(tolerance=60, max_disappeared=3000, deadband=10.0, alpha=0.15)
+        self.angle_stabilizer = AngleStabilizer(window_size=25)
+        self.xyz_stabilizer = Point3DStabilizer(window_size=25)
 
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         self.aruco_params = cv2.aruco.DetectorParameters()
@@ -64,6 +70,12 @@ class GlobalVisionNode(Node):
         self.color_intrinsics = None  # color camera intrinsics (cropped)
         self.frame_counter = 0
         self.last_scout_results = []
+        # Global temporal filter: require a detection to appear in 3 of 5
+        # consecutive scout runs before reporting — kills intermittent false positives.
+        # Global detections are keyed differently (list of dicts with 'label')
+        # so we wrap them into a fake category dict for DetectionStabilizer.
+        self._global_stabilizer = DetectionStabilizer(window=4, min_hits=2, iou_thresh=0.40)
+        self._stable_scout_results = []
         self.scout_future = None
         self._scout_submit_time = 0.0
         self._scout_timeout_sec = 30.0
@@ -316,8 +328,18 @@ class GlobalVisionNode(Node):
             return
         if self.scout_future.done():
             try:
-                self.last_scout_results, elapsed = self.scout_future.result()
+                raw_results, elapsed = self.scout_future.result()
                 self._record_stage_time("scout_ms", elapsed)
+                # Wrap flat list → per-label dict, stabilize, then flatten back.
+                by_label: dict = {}
+                for det in raw_results:
+                    lbl = det.get("label", "unknown")
+                    by_label.setdefault(lbl, []).append(det)
+                stable_by_label = self._global_stabilizer.update(by_label)
+                self._stable_scout_results = [
+                    det for dets in stable_by_label.values() for det in dets
+                ]
+                self.last_scout_results = self._stable_scout_results
             except Exception as e:
                 self.get_logger().error(f"Scout Error: {e}")
             self.scout_future = None
@@ -327,6 +349,22 @@ class GlobalVisionNode(Node):
                 "check GPU/CUDA. Inference image size may be wrong. Resetting future."
             )
             self.scout_future = None
+
+    def _centroid_in_bin(self, cx: int, cy: int) -> bool:
+        """Return True if (cx, cy) lies inside any bin polygon (marker_id 1, 2, 3).
+
+        Uses OpenCV pointPolygonTest (result ≥ 0 means inside or on boundary).
+        Returns False if no bin polygons are known yet (ArUco not detected).
+        """
+        for marker_id, poly_arr in self.active_polygons.items():
+            if int(marker_id) == 0:   # marker 0 = workspace, never excluded
+                continue
+            try:
+                if cv2.pointPolygonTest(poly_arr, (float(cx), float(cy)), False) >= 0:
+                    return True
+            except Exception:
+                pass
+        return False
 
     def processing_loop(self):
         self._poll_future()
@@ -392,6 +430,12 @@ class GlobalVisionNode(Node):
                 continue
             raw_cx = int((box[0] + box[2]) / 2)
             raw_cy = int((box[1] + box[3]) / 2)
+            # ── Bin-zone exclusion ────────────────────────────────────────────
+            # Suppress any detection whose centroid falls inside a bin polygon
+            # (marker_id 1, 2, 3).  Marker 0 is the workspace — never excluded.
+            if self._centroid_in_bin(raw_cx, raw_cy):
+                continue
+            # ─────────────────────────────────────────────────────────────────
             valid_objects.append(obj)
             rects.append(box)
             labels.append(label)

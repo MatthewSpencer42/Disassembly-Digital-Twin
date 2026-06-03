@@ -273,6 +273,28 @@ class DashboardNode(Node):
     def _status_color(ok):
         return (0, 210, 80) if ok else (0, 165, 255)
 
+    @staticmethod
+    def _ratio_to_bgr(ratio: float) -> tuple:
+        """Map ratio ∈ [0,1] (1=green, 0=red) to a BGR colour tuple for OpenCV.
+
+        Mirrors the Qt _value_to_color() logic:
+          1.0 → (139, 209, 79)  #4fd18b green
+          0.5 → (102, 217, 255) #ffd966 yellow
+          0.0 → (93,  93,  255) #ff5d5d red
+        """
+        ratio = max(0.0, min(1.0, float(ratio)))
+        if ratio >= 0.5:
+            t = (1.0 - ratio) * 2.0
+            r = int(0x4f + t * (0xff - 0x4f))
+            g = int(0xd1 + t * (0xd9 - 0xd1))
+            b = int(0x8b + t * (0x66 - 0x8b))
+        else:
+            t = (0.5 - ratio) * 2.0
+            r = 0xff
+            g = int(0xd9 + t * (0x5d - 0xd9))
+            b = int(0x66 + t * (0x5d - 0x66))
+        return (b, g, r)  # BGR for OpenCV
+
     def draw_system_health_panel(self, height):
         width = 300
         panel = np.zeros((height, width, 3), dtype=np.uint8)
@@ -385,16 +407,17 @@ class DashboardNode(Node):
             tx = wrench_data["torque"]["x"]
             ty = wrench_data["torque"]["y"]
             tz = wrench_data["torque"]["z"]
-            readings = [
-                f"Fx {fx:>6.2f} N",
-                f"Fy {fy:>6.2f} N",
-                f"Fz {fz:>6.2f} N",
-                f"Tx {tx:>6.3f} Nm",
-                f"Ty {ty:>6.3f} Nm",
-                f"Tz {tz:>6.3f} Nm",
+            # (label, value, max) — colour scales from green(0) → red(max)
+            ft_entries = [
+                (f"Fx {fx:>+6.2f} N",  abs(fx) / 300.0),
+                (f"Fy {fy:>+6.2f} N",  abs(fy) / 300.0),
+                (f"Fz {fz:>+6.2f} N",  abs(fz) / 300.0),
+                (f"Tx {tx:>+6.3f} Nm", abs(tx) / 30.0),
+                (f"Ty {ty:>+6.3f} Nm", abs(ty) / 30.0),
+                (f"Tz {tz:>+6.3f} Nm", abs(tz) / 30.0),
             ]
-            for idx, line in enumerate(readings):
-                color = (80, 235, 145) if idx < 3 else (190, 202, 216)
+            for idx, (line, bad_ratio) in enumerate(ft_entries):
+                color = self._ratio_to_bgr(1.0 - bad_ratio)
                 draw_text(panel, line, x5 + 16, 104 + idx * 22, 0.50, color, 1)
         else:
             draw_text(panel, "Waiting for FT300", x5 + 16, 104, 0.55, (135, 145, 158), 1)

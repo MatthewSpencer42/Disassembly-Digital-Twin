@@ -20,11 +20,11 @@ class UnscrewSkill(Node):
             "REACH_LIMIT": 0.680,           # m (xArm reach radius)
             "REACH_SOFT_MARGIN": 0.120,     # m, screwdriver TCP can extend past nominal flange reach
             "MM_PER_PIX": 0.000130,         # m/px (Vision calibration)
-            "COARSE_VELOCITY": 0.40,        # trajectory scaling for coarse pose moves
+            "COARSE_VELOCITY": 0.20,        # trajectory scaling for coarse pose moves
             "COARSE_POSITION_TOLERANCE": 0.010,  # m, abort descent/search if hover TCP is off target
             "COARSE_PLANNER": "exotica",    # EXOTica IK with slide correction — accurate hover position
-            "COARSE_X_OFFSET": -0.01,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
-            "COARSE_Y_OFFSET": 0.0,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
+            "COARSE_X_OFFSET": 0.0,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
+            "COARSE_Y_OFFSET": -0.005,          # m, base_link-frame coarse target trim for xArm/URDF mismatch
             "COARSE_ONLY_DEBUG": False,      # temporary: verify all screw hover poses before unscrewing
             "ALIGN_ONLY_DEBUG": True,        # current debug path: run XY align only, skip descent/extraction
             "DESCENT_ONLY_DEBUG": False,     # validate conical descent, then stop before extraction/bin
@@ -91,14 +91,16 @@ class UnscrewSkill(Node):
             "RETRACT_SPEED": 0.06,          # m/s, safety lift after failed unscrew phases
             "POST_UNSCREW_RETRACT_SPEED": 0.06,  # m/s, closed-loop lift after screw grab
             "UNSCREW_PROBE_DURATION": 0.50,  # s, first short engagement test spin
-            "UNSCREW_PROBE_FORCE_INCREASE": 0.15,  # N, axial force change required to trust engagement
+            "UNSCREW_PROBE_FORCE_INCREASE": 0.30,  # N, axial force change required to trust engagement
             "UNSCREW_MIN_SPIN_TIME": 1.0,    # s, minimum continuous unscrew after probe
             "UNSCREW_MAX_SPIN_TIME": 4.0,    # s, hard cap before grabbing/retracting
-            "UNSCREW_RELEASE_FORCE_RATIO": 0.35,  # stable drop below peak ratio indicates loosening
+            "UNSCREW_RELEASE_FORCE_RATIO": 0.50,  # stable drop below peak ratio indicates loosening
+            "UNSCREW_RELEASE_DEBOUNCE": 0.15,     # s, how long ΔFz must stay below release_level
+            "SCREW_GRIPPER_ENABLED": True,         # send tool cmd=2 (grab) / cmd=3 (release); disable for no-gripper configs
             "UNSCREW_FORCE_IDEAL_DELTA": 0.15,    # N, preferred axial force increase while spinning
             "UNSCREW_FORCE_DEADBAND": 0.04,       # N, no Z relief inside this band
-            "UNSCREW_Z_RELIEF_GAIN": 0.003,       # m/s per N above ideal force while unscrewing
-            "UNSCREW_Z_RELIEF_SPEED_CAP": 0.008,  # m/s, max upward relief while unscrewing
+            "UNSCREW_Z_RELIEF_GAIN": 0.0015,      # m/s per N above ideal force while unscrewing
+            "UNSCREW_Z_RELIEF_SPEED_CAP": 0.004,  # m/s, max upward relief while unscrewing
             "UNSCREW_Z_RELIEF_MAX": 0.030,        # m, max relief before gripper close
             "TOOL_RELEASE_SETTLE": 0.50,      # s, allow tool gripper to open before unscrew
             "TOOL_GRAB_SETTLE": 0.50,        # s, allow tool gripper to close before retract
@@ -135,6 +137,7 @@ class UnscrewSkill(Node):
         self.data_lock = threading.Lock()
         self.latest_targets = []
         self.local_view = {}
+        self._align_detected_hole = False   # set by _get_vision when hole seen, no screw
         self.cached_bin1_xyz = None
         self._bin1_locked = False    # once set, bin1 is frozen for the session
         self.last_contact_fz_diff = 0.0
@@ -152,11 +155,17 @@ class UnscrewSkill(Node):
         except Exception:
             pass
 
-    def _apply_unscrew_config(self, cfg):
+    def _apply_unscrew_config(self, cfg, target_label=None):
         unscrew_steps = [s for s in cfg.disassembly_sequence if s.action == 'unscrew']
         if not unscrew_steps:
             return
-        p = unscrew_steps[0].parameters
+        step = unscrew_steps[0]
+        if target_label:
+            for s in unscrew_steps:
+                if s.target == target_label:
+                    step = s
+                    break
+        p = step.parameters
         if 'force_threshold_n' in p:
             self.CONFIG['FORCE_THRESHOLD'] = p['force_threshold_n']
         if 'align_tolerance_px' in p:
@@ -177,6 +186,7 @@ class UnscrewSkill(Node):
             'screw_world_z_min_m': 'SCREW_WORLD_Z_MIN',
             'screw_world_z_max_m': 'SCREW_WORLD_Z_MAX',
             'coarse_hover_z_m': 'COARSE_HOVER_Z_OVERRIDE',
+            'coarse_velocity': 'COARSE_VELOCITY',
             'pre_retract_m': 'PRE_RETRACT',
             'xy_speed_align_mps': 'XY_SPEED_ALIGN',
             'z_speed_descent_mps': 'Z_SPEED_DESCENT',
@@ -215,12 +225,15 @@ class UnscrewSkill(Node):
             'final_align_xy_speed_mps': 'FINAL_ALIGN_XY_SPEED',
             'final_align_min_speed_mps': 'FINAL_ALIGN_MIN_SPEED',
             'final_align_error_filter_alpha': 'FINAL_ALIGN_ERROR_ALPHA',
+            'skip_final_align_on_contact': 'SKIP_FINAL_ALIGN_ON_CONTACT',
             'engagement_depth_mm': 'ENGAGEMENT_DEPTH_MM',
             'unscrew_probe_duration_s': 'UNSCREW_PROBE_DURATION',
             'unscrew_probe_force_increase_n': 'UNSCREW_PROBE_FORCE_INCREASE',
             'unscrew_min_spin_s': 'UNSCREW_MIN_SPIN_TIME',
             'unscrew_max_spin_s': 'UNSCREW_MAX_SPIN_TIME',
             'unscrew_release_force_ratio': 'UNSCREW_RELEASE_FORCE_RATIO',
+            'unscrew_release_debounce_s': 'UNSCREW_RELEASE_DEBOUNCE',
+            'use_screw_gripper': 'SCREW_GRIPPER_ENABLED',
             'unscrew_force_ideal_delta_n': 'UNSCREW_FORCE_IDEAL_DELTA',
             'unscrew_force_deadband_n': 'UNSCREW_FORCE_DEADBAND',
             'unscrew_z_relief_gain_mps_per_n': 'UNSCREW_Z_RELIEF_GAIN',
@@ -234,6 +247,11 @@ class UnscrewSkill(Node):
                 self.CONFIG[config_name] = p[param_name]
         if 'coarse_planner' in p:
             self.CONFIG['COARSE_PLANNER'] = str(p['coarse_planner']).lower()
+        # mm-unit coarse XY offset fine-tune (stored internally in metres)
+        if 'coarse_x_offset_mm' in p:
+            self.CONFIG['COARSE_X_OFFSET'] = float(p['coarse_x_offset_mm']) / 1000.0
+        if 'coarse_y_offset_mm' in p:
+            self.CONFIG['COARSE_Y_OFFSET'] = float(p['coarse_y_offset_mm']) / 1000.0
         self.get_logger().info("Unscrew config applied from device config.")
 
     # =========================================================================
@@ -614,6 +632,42 @@ class UnscrewSkill(Node):
                 return [0.5 * (float(box[0]) + float(box[2])), 0.5 * (float(box[1]) + float(box[3]))]
             return [320.0, 240.0]
 
+        # Locked pixel anchor: once we latch onto a screw on the first visible
+        # frame, subsequent frames pick the candidate nearest that locked pixel
+        # rather than nearest the crosshair.  This prevents the servo from
+        # jumping to a neighbouring screw that drifts closer to centre while
+        # the arm is already tracking the correct one.
+        locked_pixel = [None]   # [px, py] once latched; None until first detection
+
+        def _iou(a, b):
+            ax1,ay1,ax2,ay2 = float(a[0]),float(a[1]),float(a[2]),float(a[3])
+            bx1,by1,bx2,by2 = float(b[0]),float(b[1]),float(b[2]),float(b[3])
+            ix1,iy1 = max(ax1,bx1), max(ay1,by1)
+            ix2,iy2 = min(ax2,bx2), min(ay2,by2)
+            iw,ih = max(0.0,ix2-ix1), max(0.0,iy2-iy1)
+            inter = iw*ih
+            if inter == 0.0: return 0.0
+            union = max(0.0,ax2-ax1)*max(0.0,ay2-ay1) + max(0.0,bx2-bx1)*max(0.0,by2-by1) - inter
+            return inter/union if union > 0 else 0.0
+
+        def _hole_overlaps_screw(screw_box, holes, iou_thresh=0.10):
+            """True if any hole bbox overlaps the screw bbox by IoU > iou_thresh,
+            OR if any hole center falls inside the screw bbox.
+            Catches co-located detections even when hole center is slightly outside."""
+            for h in (holes or []):
+                hb = h.get("box")
+                if not hb or len(hb) < 4:
+                    continue
+                # Center-in-box check
+                hcx = (hb[0] + hb[2]) / 2.0
+                hcy = (hb[1] + hb[3]) / 2.0
+                if screw_box[0] <= hcx <= screw_box[2] and screw_box[1] <= hcy <= screw_box[3]:
+                    return True
+                # IoU overlap check
+                if _iou(screw_box, hb) >= iou_thresh:
+                    return True
+            return False
+
         def _get_vision():
             with self.data_lock:
                 lv = copy.deepcopy(self.local_view).get("local_view", {})
@@ -621,13 +675,60 @@ class UnscrewSkill(Node):
             candidates = lv.get("screw_heads", [])
             label      = "screw_head"
             if not candidates:
-                candidates = lv.get("screws", [])
+                holes = lv.get("holes", [])
+                raw_screws = lv.get("screws", [])
+                # Filter screws that overlap with a stable hole detection
+                candidates = [
+                    s for s in raw_screws
+                    if not _hole_overlaps_screw(s.get("box") or [], holes)
+                ]
+                suppressed = len(raw_screws) - len(candidates)
+                if suppressed:
+                    print(f"[ALIGN] Suppressed {suppressed} hole-overlapping screw detection(s).")
+                # If holes are visible but screws are gone (stabilizer killed fluctuating
+                # detections), signal HOLE so the align loop aborts cleanly instead of
+                # spiral-searching around an already-removed position.
+                # Exception: if any hole is inside a raw screw's bounding box, the
+                # screw may be partially removed or mis-detected — defer to spiral
+                # search (10 s cap) instead of aborting immediately.
+                if not candidates and holes:
+                    hole_inside_screw_box = raw_screws and any(
+                        _hole_overlaps_screw(s.get("box") or [], holes)
+                        for s in raw_screws
+                    )
+                    if hole_inside_screw_box:
+                        if hole_spiral_deadline[0] == 0.0:
+                            hole_spiral_deadline[0] = time.time() + HOLE_SPIRAL_TIMEOUT_S
+                            print(
+                                f"[ALIGN] Hole inside screw bbox — deferring to spiral search "
+                                f"(timeout {HOLE_SPIRAL_TIMEOUT_S:.0f}s)."
+                            )
+                        return None, None, crosshair, False, lv
+                    best_hole = holes[0]
+                    best_hole = dict(best_hole)
+                    best_hole["center"] = _candidate_center(best_hole)
+                    print("[ALIGN] Hole visible, no stable screw — signalling HOLE to abort alignment.")
+                    self._align_detected_hole = True
+                    return "hole", best_hole, crosshair, False, lv
                 label = "screw"
             if candidates:
-                det = self._nearest_detection_to_crosshair(candidates, crosshair)
+                # First frame: pick nearest to crosshair (best proxy for the
+                # coarse-hover target) and lock that pixel as the anchor.
+                # Subsequent frames: pick nearest to the locked pixel so we
+                # keep tracking the same physical screw even if another one
+                # drifts closer to image centre.
+                anchor = locked_pixel[0] if locked_pixel[0] is not None else crosshair
+                det = self._nearest_detection_to_crosshair(candidates, anchor)
                 if det is not None:
                     det = dict(det)
                     det["center"] = _candidate_center(det)
+                    if locked_pixel[0] is None:
+                        locked_pixel[0] = list(det["center"])
+                        print(
+                            f"[ALIGN] Locked onto screw at pixel "
+                            f"({locked_pixel[0][0]:.0f}, {locked_pixel[0][1]:.0f}) "
+                            f"— will track this detection for the full alignment."
+                        )
                     return label, det, crosshair, False, lv
             return None, None, crosshair, False, lv
 
@@ -652,6 +753,11 @@ class UnscrewSkill(Node):
         spiral_remain_m    = [spiral_start_mm / 1000.0]
         spiral_center      = [init_x, init_y]  # updated to target_xy when spiral starts
 
+        # Hole-overlap spiral: when a hole is detected inside a screw bbox,
+        # defer to spiral search rather than aborting; cap at 10 s.
+        HOLE_SPIRAL_TIMEOUT_S   = 10.0
+        hole_spiral_deadline    = [0.0]   # 0.0 = not yet triggered
+
         last_log_t = [time.time()]
         start_t    = time.time()
 
@@ -665,6 +771,11 @@ class UnscrewSkill(Node):
                 return True
             if time.time() - start_t >= align_timeout:
                 print("\n[ALIGN] Timeout reached.")
+                return True
+            # Hole-overlap spiral timeout
+            if hole_spiral_deadline[0] > 0.0 and time.time() >= hole_spiral_deadline[0]:
+                print("\n[ALIGN] Hole-overlap spiral search timed out (10s) — aborting.")
+                self._align_detected_hole = True
                 return True
             # Z drift guard
             try:
@@ -701,6 +812,12 @@ class UnscrewSkill(Node):
                 return None
 
             t_class, t_det, crosshair, using_stale_target, local_snapshot = _get_vision()
+
+            # Hole detected and no stable screw — abort alignment cleanly
+            if t_class == "hole":
+                abort_flag[0] = True
+                abort_reason[0] = "HOLE_DETECTED"
+                return None
 
             if t_det is not None:
                 # Target visible: visual servo XY correction
@@ -805,7 +922,11 @@ class UnscrewSkill(Node):
                     state["last_abs_err"] = None
                 no_target_cnt[0] += 1
 
-                if no_target_cnt[0] < 5 or not enable_spiral_search:
+                # If we already locked onto a pixel, tolerate more misses before
+                # spiralling — fluctuating detections would otherwise oscillate
+                # between servo-mode and spiral-mode and never converge.
+                no_target_thresh = 12 if locked_pixel[0] is not None else 5
+                if no_target_cnt[0] < no_target_thresh or not enable_spiral_search:
                     # Hold: vision is lagging, wait for the next real frame
                     target_xy[0] = ex
                     target_xy[1] = ey
@@ -813,7 +934,8 @@ class UnscrewSkill(Node):
                     heads_n = len(local_snapshot.get("screw_heads", []) or [])
                     log_str = (
                         f"[ALIGN] No local screw target heads={heads_n} screws={screws_n} "
-                        f"miss={no_target_cnt[0]} — holding Z={ez*1000:.1f}mm"
+                        f"miss={no_target_cnt[0]}/{'12' if locked_pixel[0] else '5'} "
+                        f"— holding Z={ez*1000:.1f}mm"
                     )
                 else:
                     if not spiral_on[0]:
@@ -1698,6 +1820,10 @@ class UnscrewSkill(Node):
             speed = min_xy + (max_xy - min_xy) * ratio
             return math.copysign(speed, error_px)
 
+        # Lock pixel anchor for descent: once latched, track the same screw
+        # across frames rather than re-selecting nearest-to-crosshair each time.
+        descent_locked_pixel = [None]
+
         def _get_vision_target():
             with self.data_lock:
                 lv = copy.deepcopy(self.local_view).get('local_view', {})
@@ -1709,7 +1835,12 @@ class UnscrewSkill(Node):
                 label = "screw"
             if not candidates:
                 return None, None, crosshair
-            return label, self._nearest_detection_to_crosshair(candidates, crosshair), crosshair
+            anchor = descent_locked_pixel[0] if descent_locked_pixel[0] is not None else crosshair
+            det = self._nearest_detection_to_crosshair(candidates, anchor)
+            if det is not None and descent_locked_pixel[0] is None:
+                c = det.get("center") or det.get("contact_point") or [320, 240]
+                descent_locked_pixel[0] = [float(c[0]), float(c[1])]
+            return label, det, crosshair
 
         # Read initial EE pose for reference orientation (held constant during descent)
         ee_link = "screwdriver_tcp"
@@ -1974,6 +2105,28 @@ class UnscrewSkill(Node):
         contact_flag = False
         last_log_t = 0.0
         start_t = time.time()
+        no_target_since = None
+        # If the model consistently reports a jump for many frames the camera has
+        # likely shifted onto a neighbouring screw.  Reset the tracking anchor so
+        # the persistent detection becomes the new reference and descent can resume.
+        _JUMP_REJECT_RESET_FRAMES = 20   # ≈ 0.67 s at 30 Hz
+        consecutive_jump_rejects = 0
+        no_target_grace_s = max(0.4, float(self.CONFIG.get("ALIGN_TARGET_LOST_GRACE_S", 0.6)))
+        no_target_timeout_s = max(2.0, float(self.CONFIG.get("SPIRAL_TIMEOUT", 15.0)))
+        enable_spiral_search = bool(self.CONFIG.get("ENABLE_SPIRAL_SEARCH", True))
+        spiral_cfg_speed = float(self.CONFIG.get("SPIRAL_SPEED", 0.001))
+        # During descent the TCP is still high enough to use the same square
+        # spiral search shape as hover alignment, but Servo commands below a
+        # few mm/s often do not produce reliable TF progress on hardware.
+        spiral_speed = min(
+            max(spiral_cfg_speed, float(self.CONFIG.get("ALIGN_MIN_SPEED", 0.012))),
+            descent_xy_max,
+        )
+        spiral_gap_m = max(float(self.CONFIG.get("SPIRAL_GAP_MM", 2.0)) / 1000.0, 0.001)
+        spiral_side_len_m = max(float(self.CONFIG.get("SPIRAL_START_DIST_MM", 2.0)) / 1000.0, 0.001)
+        spiral_side_idx = 0
+        spiral_side_progress_m = 0.0
+        spiral_started = False
 
         try:
             while rclpy.ok():
@@ -2004,23 +2157,78 @@ class UnscrewSkill(Node):
                     return False
 
                 radius = math.hypot(ex - start_x, ey - start_y)
-                if radius > max_radius:
-                    self.moveit_backend._publish_zero_twist()
-                    print(
-                        f"\n[DESCENT] Aborted: XY radius {radius*1000:.1f}mm exceeded "
-                        f"{max_radius*1000:.1f}mm."
-                    )
-                    return False
 
                 t_class, t_det, crosshair = _get_vision()
                 if t_det is None:
-                    vx = vy = vz = 0.0
                     prev_vx = prev_vy = 0.0
-                    log_str = (
-                        f"[DESCENT/no-target] holding Z={ez*1000:.1f}mm "
-                        f"moved={moved_down*1000:.1f}mm Fz={fz_diff:.2f}N"
-                    )
+                    if no_target_since is None:
+                        no_target_since = time.time()
+                        spiral_started = False
+                        spiral_side_idx = 0
+                        spiral_side_progress_m = 0.0
+                        spiral_side_len_m = max(float(self.CONFIG.get("SPIRAL_START_DIST_MM", 2.0)) / 1000.0, 0.001)
+                    missing_s = time.time() - no_target_since
+                    if missing_s >= no_target_timeout_s:
+                        self.moveit_backend._publish_zero_twist()
+                        print(
+                            f"\n[DESCENT] Local screw target not visible for {missing_s:.1f}s "
+                            f"during descent search. Aborting before unscrew."
+                        )
+                        return False
+
+                    vz = 0.0
+                    if enable_spiral_search and missing_s >= no_target_grace_s:
+                        if not spiral_started:
+                            print("[DESCENT] No local screw target — starting bounded XY spiral at locked Z.")
+                            spiral_started = True
+                        if spiral_side_progress_m >= spiral_side_len_m:
+                            spiral_side_idx += 1
+                            spiral_side_progress_m = 0.0
+                            if spiral_side_idx % 2 == 0:
+                                spiral_side_len_m += spiral_gap_m
+                        idx = spiral_side_idx % 4
+                        if idx == 0:
+                            vx, vy, direction = -spiral_speed, 0.0, "-X"
+                        elif idx == 1:
+                            vx, vy, direction = 0.0, -spiral_speed, "-Y"
+                        elif idx == 2:
+                            vx, vy, direction = spiral_speed, 0.0, "+X"
+                        else:
+                            vx, vy, direction = 0.0, spiral_speed, "+Y"
+                        spiral_side_progress_m += spiral_speed * dt
+                        projected_radius = math.hypot(
+                            (ex - start_x) + vx * dt,
+                            (ey - start_y) + vy * dt,
+                        )
+                        if projected_radius > max_radius:
+                            self.moveit_backend._publish_zero_twist()
+                            print(
+                                f"\n[DESCENT] Spiral search would exceed XY radius "
+                                f"{projected_radius*1000:.1f}mm > {max_radius*1000:.1f}mm. "
+                                "Aborting before unscrew."
+                            )
+                            return False
+                        log_str = (
+                            f"[DESCENT/spiral] no-target={missing_s:.1f}/{no_target_timeout_s:.1f}s "
+                            f"dir={direction} side={spiral_side_len_m*1000:.1f}mm "
+                            f"r={projected_radius*1000:.1f}/{max_radius*1000:.0f}mm "
+                            f"speed={spiral_speed*1000:.1f}mm/s "
+                            f"Z={ez*1000:.1f}mm moved={moved_down*1000:.1f}mm Fz={fz_diff:.2f}N"
+                        )
+                    else:
+                        vx = vy = 0.0
+                        log_str = (
+                            f"[DESCENT/no-target] holding Z={ez*1000:.1f}mm "
+                            f"missing={missing_s:.1f}/{no_target_timeout_s:.1f}s "
+                            f"moved={moved_down*1000:.1f}mm Fz={fz_diff:.2f}N"
+                        )
                 else:
+                    if no_target_since is not None and spiral_started:
+                        print("[DESCENT] Target reacquired — resuming conical descent.")
+                    no_target_since = None
+                    spiral_started = False
+                    spiral_side_idx = 0
+                    spiral_side_progress_m = 0.0
                     center = t_det.get("center", [320, 240])
                     now = time.time()
                     if tracked_center is not None:
@@ -2031,6 +2239,7 @@ class UnscrewSkill(Node):
                             # rejecting it as a target jump.
                             pass
                         elif (t_class != tracked_label and jump_px > 35.0) or jump_px > 80.0:
+                            consecutive_jump_rejects += 1
                             vx = vy = vz = 0.0
                             prev_vx = prev_vy = 0.0
                             log_str = (
@@ -2041,6 +2250,18 @@ class UnscrewSkill(Node):
                             if not self.moveit_backend.publish_servo_velocity(vx, vy, vz):
                                 print("\n[DESCENT] Servo hold command failed.")
                                 return False
+                            # After ~0.67 s of consistent jump-rejections the camera has
+                            # likely shifted to an adjacent screw.  Reset the anchor so
+                            # the next persistent detection becomes the new reference.
+                            if consecutive_jump_rejects >= _JUMP_REJECT_RESET_FRAMES:
+                                print(
+                                    f"\n[DESCENT] {consecutive_jump_rejects} consecutive "
+                                    f"jump-rejects — resetting tracked anchor to accept "
+                                    f"current detection."
+                                )
+                                tracked_center = None
+                                tracked_label = None
+                                consecutive_jump_rejects = 0
                             if now - last_log_t >= log_interval:
                                 print(f"  {log_str}")
                                 last_log_t = now
@@ -2054,6 +2275,7 @@ class UnscrewSkill(Node):
                         ]
                     tracked_center = [float(center[0]), float(center[1])]
                     tracked_label = t_class
+                    consecutive_jump_rejects = 0   # good detection accepted
                     err_x = float(crosshair[0] - center[0])
                     err_y = float(crosshair[1] - center[1])
                     dist_px = math.hypot(err_x, err_y)
@@ -2154,12 +2376,17 @@ class UnscrewSkill(Node):
         return False
 
     def _reset_tool_for_unscrew_start(self):
-        """Stop screwdriver motor and open screw gripper before any unscrew motion."""
-        print("[TOOL] Startup reset: stopping screwdriver (cmd=0), opening screw gripper (cmd=3).")
+        """Stop screwdriver motor and (if gripper enabled) open screw gripper."""
+        gripper = bool(self.CONFIG.get("SCREW_GRIPPER_ENABLED", True))
+        print(
+            "[TOOL] Startup reset: stopping screwdriver (cmd=0)"
+            + (", opening screw gripper (cmd=3)." if gripper else " (gripper disabled).")
+        )
         self.tool_pub.publish(Int8(data=0))
         time.sleep(0.10)
-        self.tool_pub.publish(Int8(data=3))
-        time.sleep(max(float(self.CONFIG["TOOL_RELEASE_SETTLE"]), 0.1))
+        if gripper:
+            self.tool_pub.publish(Int8(data=3))
+            time.sleep(max(float(self.CONFIG["TOOL_RELEASE_SETTLE"]), 0.1))
 
     def _run_unscrew_probe(self, baseline_fz: float) -> tuple[bool, float]:
         probe_duration = max(float(self.CONFIG["UNSCREW_PROBE_DURATION"]), 0.05)
@@ -2192,6 +2419,7 @@ class UnscrewSkill(Node):
         max_time = max(float(self.CONFIG["UNSCREW_MAX_SPIN_TIME"]), min_time)
         threshold = max(float(self.CONFIG["UNSCREW_PROBE_FORCE_INCREASE"]), 0.01)
         release_ratio = max(0.05, min(0.95, float(self.CONFIG["UNSCREW_RELEASE_FORCE_RATIO"])))
+        release_debounce = max(0.05, float(self.CONFIG.get("UNSCREW_RELEASE_DEBOUNCE", 0.15)))
         ideal_delta = max(float(self.CONFIG["UNSCREW_FORCE_IDEAL_DELTA"]), threshold)
         deadband = max(float(self.CONFIG["UNSCREW_FORCE_DEADBAND"]), 0.0)
         relief_gain = max(float(self.CONFIG["UNSCREW_Z_RELIEF_GAIN"]), 0.0)
@@ -2223,16 +2451,32 @@ class UnscrewSkill(Node):
         self.tool_pub.publish(Int8(data=-1))
         start_t = time.time()
         peak_delta = max(float(initial_peak_delta), threshold)
+        validated_force = peak_delta >= threshold
         release_since = None
         last_log_t = 0.0
         max_lateral_drift = 0.008
         rate_hz = max(float(self.CONFIG["ALIGN_RATE_HZ"]), 20.0)
         dt = 1.0 / rate_hz
+        # Grab the screw mid-spin so the gripper secures it as threads disengage.
+        # Send cmd=2 at 50% of min_time (at least 0.5 s into the spin).
+        grab_sent = False
+        grab_after_s = max(min_time * 0.5, 0.5)
         try:
             while rclpy.ok() and time.time() - start_t < max_time:
-                elapsed = time.time() - start_t
+                loop_start = time.time()
+                elapsed = loop_start - start_t
                 delta = abs(self._current_fz() - baseline_fz)
                 peak_delta = max(peak_delta, delta)
+                if delta >= threshold:
+                    validated_force = True
+
+                # Send gripper-grab while motor is still spinning so the screw
+                # is captured before it can fall once threads disengage.
+                if not grab_sent and elapsed >= grab_after_s:
+                    grab_sent = True
+                    if bool(self.CONFIG.get("SCREW_GRIPPER_ENABLED", True)):
+                        print(f"[UNSCREW] Closing gripper on screw (cmd=2) at t={elapsed:.1f}s.")
+                        self.tool_pub.publish(Int8(data=2))
 
                 try:
                     tf = self.moveit_backend.tf_buffer.lookup_transform(
@@ -2243,14 +2487,6 @@ class UnscrewSkill(Node):
                     z = float(tf.transform.translation.z)
                 except Exception as exc:
                     print(f"\n[UNSCREW] Could not read {ee_link} during force relief: {exc}")
-                    return False
-
-                drift = math.hypot(x - start_x, y - start_y)
-                if drift > max_lateral_drift:
-                    print(
-                        f"\n[UNSCREW] Force-relief retract aborted: lateral drift "
-                        f"{drift*1000:.1f}mm exceeded {max_lateral_drift*1000:.1f}mm."
-                    )
                     return False
 
                 z_relief = max(0.0, z - start_z)
@@ -2269,9 +2505,9 @@ class UnscrewSkill(Node):
                     return False
 
                 release_level = max(threshold, peak_delta * release_ratio)
-                if elapsed >= min_time and delta <= release_level:
+                if elapsed >= min_time and validated_force and delta <= release_level:
                     release_since = release_since or time.time()
-                    if time.time() - release_since >= 0.30:
+                    if time.time() - release_since >= release_debounce:
                         print(
                             f"\n[UNSCREW] Force relaxed: ΔFz={delta:.2f}N "
                             f"peak={peak_delta:.2f}N. Screw likely loosened."
@@ -2289,10 +2525,18 @@ class UnscrewSkill(Node):
                         f"cmd_z={cmd_z*1000:.1f}mm/s"
                     )
                     last_log_t = now
-                time.sleep(dt)
+                # Sleep only the remaining portion of dt so loop runs at a
+                # consistent rate regardless of how long the body took.
+                # Irregular input to MoveIt Servo causes uneven Z-relief motion.
+                spent = time.time() - loop_start
+                if dt - spent > 0.001:
+                    time.sleep(dt - spent)
 
-            print(f"\n[UNSCREW] Max spin time reached ({max_time:.1f}s); proceeding to grab.")
-            return True
+            print(
+                f"\n[UNSCREW] Max spin time reached ({max_time:.1f}s) without validated force release. "
+                "Treating as failed engagement."
+            )
+            return False
         finally:
             try:
                 self.moveit_backend._publish_zero_twist()
@@ -2316,26 +2560,39 @@ class UnscrewSkill(Node):
         print("[TOOL] Resetting screwdriver and opening screw gripper before unscrew.")
         self.tool_pub.publish(Int8(data=0))
         time.sleep(0.10)
-        self.tool_pub.publish(Int8(data=3))
-        time.sleep(max(float(self.CONFIG["TOOL_RELEASE_SETTLE"]), 0.1))
+        if bool(self.CONFIG.get("SCREW_GRIPPER_ENABLED", True)):
+            self.tool_pub.publish(Int8(data=3))
+            time.sleep(max(float(self.CONFIG["TOOL_RELEASE_SETTLE"]), 0.1))
 
         baseline_fz = self._sample_fz_average(0.15)
         engaged, peak_delta = self._run_unscrew_probe(baseline_fz)
         if not engaged:
+            # First probe failed — try a second probe immediately at the same
+            # position before triggering the expensive retract/realign/redescend.
             print(
-                "[UNSCREW] Probe did not show enough axial force increase. "
-                "Keeping tool stopped and retrying alignment/descent."
+                "[UNSCREW] Probe 1 did not show enough axial force increase "
+                f"(ΔFz={peak_delta:.2f}N). Trying probe 2 immediately..."
             )
-            self.tool_pub.publish(Int8(data=0))
-            return False, True  # retryable: no force spike
+            time.sleep(0.10)  # brief settle so FT sensor stabilises
+            baseline_fz2 = self._sample_fz_average(0.15)
+            engaged, peak_delta = self._run_unscrew_probe(baseline_fz2)
+            if not engaged:
+                print(
+                    "[UNSCREW] Probe 2 also did not show enough axial force increase. "
+                    "Keeping tool stopped and retrying alignment/descent."
+                )
+                self.tool_pub.publish(Int8(data=0))
+                return False, True  # retryable: no force spike
+            print(f"[UNSCREW] Probe 2 engaged (ΔFz={peak_delta:.2f}N) — proceeding with unscrew.")
 
         if not self._continue_unscrew_until_released(baseline_fz, peak_delta):
             self.tool_pub.publish(Int8(data=0))
-            return False, False
+            return False, True
 
-        print("[GRAB] Closing tool gripper on screw before retract.")
-        self.tool_pub.publish(Int8(data=2))
-        time.sleep(max(float(self.CONFIG["TOOL_GRAB_SETTLE"]), 0.1))
+        if bool(self.CONFIG.get("SCREW_GRIPPER_ENABLED", True)):
+            print("[GRAB] Confirming tool gripper closed on screw (cmd=2).")
+            self.tool_pub.publish(Int8(data=2))
+            time.sleep(max(float(self.CONFIG["TOOL_GRAB_SETTLE"]), 0.1))
 
         if not self._post_unscrew_style_retract("[RETRACT] Closed-loop Servo retract with gripper closed"):
             print("[RETRACT] Closed-loop retract failed; not navigating to bin.")
@@ -2355,11 +2612,13 @@ class UnscrewSkill(Node):
     # =========================================================================
     def execute_unscrew_command(self, target_id, target_label, interactive=True, target_data_override=None):
         print(f"\n🛠️ [START] Unscrew Sequence on ID: {target_id} ({target_label})")
+        self._align_detected_hole = False   # reset for this run
         self._reset_tool_for_unscrew_start()
         
-        # Verify Bin 1 location
+        # Verify Bin 1 location — only required when the screw gripper is enabled.
+        # When disabled the screwdriver leaves the screw in place; no bin needed.
         with self.data_lock: bin1_raw = copy.deepcopy(self.cached_bin1_xyz)
-        if not bin1_raw:
+        if not bin1_raw and bool(self.CONFIG.get("SCREW_GRIPPER_ENABLED", True)):
             print("❌ Bin 1 location missing. Aborting.")
             return False
 
@@ -2506,9 +2765,14 @@ class UnscrewSkill(Node):
             timeout_s=self.CONFIG["PRE_DESCENT_ALIGN_TIMEOUT"],
             stable_cycles=self.CONFIG["PRE_DESCENT_ALIGN_STABLE_CYCLES"],
         ):
-            print("⚠️ XY alignment failed.")
             self._post_unscrew_style_retract("[RETRACT] XY-align failure lift")
             self._pub_state("IDLE")
+            if self._align_detected_hole:
+                print("⚠️ XY alignment aborted — hole detected at target position (screw already removed).")
+                self.tool_pub.publish(Int8(data=0))
+                self._move_xarm_home()
+                return "HOLE"
+            print("⚠️ XY alignment failed.")
             return self._finish_failed_run_at_bin(bin1_raw)
 
         if interactive: input("👉 GATE 2: Start conical descent [ENTER]")
@@ -2529,13 +2793,36 @@ class UnscrewSkill(Node):
 
         time.sleep(0.3)
 
-        print("\n[PHASE 3] Surface contact confirmed — skipping final XY align.")
+        if bool(self.CONFIG.get("SKIP_FINAL_ALIGN_ON_CONTACT", False)):
+            print("\n[PHASE 3] Skipping final XY alignment — contact detected, proceeding directly to unscrew.")
+        else:
+            print("\n[PHASE 3] Final XY alignment at contact...")
+            self._pub_state("ALIGNING")
+            if not self.perform_xy_align_search_only(
+                tolerance_px=self.CONFIG["FINAL_ALIGN_TOLERANCE_PX"],
+                timeout_s=self.CONFIG["FINAL_ALIGN_TIMEOUT"],
+                max_radius_m=self.CONFIG["FINAL_ALIGN_MAX_RADIUS"],
+                stable_cycles=self.CONFIG["FINAL_ALIGN_STABLE_CYCLES"],
+                max_xy_mps=self.CONFIG["FINAL_ALIGN_XY_SPEED"],
+                min_xy_mps=self.CONFIG["FINAL_ALIGN_MIN_SPEED"],
+                error_alpha=self.CONFIG["FINAL_ALIGN_ERROR_ALPHA"],
+                screw_head_only=False,
+                enable_spiral=False,
+            ):
+                print("⚠️ Final XY alignment failed.")
+                self._post_unscrew_style_retract("[RETRACT] Final-align failure lift")
+                self._pub_state("IDLE")
+                return self._finish_failed_run_at_bin(bin1_raw)
 
         if interactive: input("👉 GATE 3: Start compliant extraction [ENTER]")
 
-        # Phase 4: Compliant extraction with up to 3 retries on no-force-spike
+        # Phase 4: Compliant extraction — up to MAX_PROBE_RETRIES attempts.
+        # On failure (no-force-spike or spin timeout), retract EXACTLY 5 mm
+        # closed-loop, realign, redescend, and retry.  Only abort early when
+        # the closed-loop retract itself fails (physical blockage / servo fault)
+        # or when an alignment/descent step fails after retract.
         self._pub_state("UNSCREWING")
-        MAX_PROBE_RETRIES = 3
+        MAX_PROBE_RETRIES = 5
         for probe_attempt in range(MAX_PROBE_RETRIES):
             ok, no_force_spike = self.perform_compliant_extraction()
             if ok:
@@ -2543,19 +2830,26 @@ class UnscrewSkill(Node):
                 self._pub_state("DROPPING")
                 return self._navigate_to_bin(bin1_raw)
 
-            if not no_force_spike or probe_attempt >= MAX_PROBE_RETRIES - 1:
+            # no_force_spike=False means the closed-loop retract itself failed
+            # (not recoverable by realigning).  Everything else is retryable.
+            if not no_force_spike:
+                print("⚠️ Retract failed during extraction — aborting retry loop.")
+                break
+
+            if probe_attempt >= MAX_PROBE_RETRIES - 1:
+                print(f"⚠️ Max extraction retries ({MAX_PROBE_RETRIES}) reached.")
                 break
 
             print(
-                f"[RETRY {probe_attempt + 1}/{MAX_PROBE_RETRIES}] No force spike detected. "
-                "Retracting 5 mm, realigning, redescending..."
+                f"[RETRY {probe_attempt + 1}/{MAX_PROBE_RETRIES}] Extraction failed. "
+                "Retracting exactly 5 mm (closed-loop), realigning, redescending..."
             )
-            retract_speed = float(self.CONFIG.get("POST_UNSCREW_RETRACT_SPEED", 0.01))
+            retract_speed = float(self.CONFIG.get("POST_UNSCREW_RETRACT_SPEED", 0.06))
             if not self._safe_servo_lift_z(0.005, speed_mps=retract_speed):
-                print("⚠️ Retry retract failed. Aborting.")
+                print("⚠️ Closed-loop 5 mm retry retract failed. Aborting.")
                 break
 
-            # Re-align only after lifting off the surface, then descend again.
+            # XY align at current (lifted) Z before re-descent.
             if not self.perform_xy_align_search_only(
                 tolerance_px=self.CONFIG["FINAL_ALIGN_TOLERANCE_PX"],
                 timeout_s=self.CONFIG["FINAL_ALIGN_TIMEOUT"],
@@ -2570,13 +2864,26 @@ class UnscrewSkill(Node):
                 print("⚠️ Retry XY alignment failed. Aborting.")
                 break
 
-            # Redescend to contact
+            # Redescend to surface contact.
             if not self.perform_exotica_descent(hover_z=hover_z, screw_z=tz_screw):
                 print("⚠️ Retry descent failed. Aborting.")
                 break
 
+            # Fine XY alignment on surface before next extraction attempt.
             time.sleep(0.3)
-            print("[RETRY] Surface contact confirmed — skipping post-contact XY align.")
+            if not self.perform_xy_align_search_only(
+                tolerance_px=self.CONFIG["FINAL_ALIGN_TOLERANCE_PX"],
+                timeout_s=self.CONFIG["FINAL_ALIGN_TIMEOUT"],
+                max_radius_m=self.CONFIG["FINAL_ALIGN_MAX_RADIUS"],
+                stable_cycles=self.CONFIG["FINAL_ALIGN_STABLE_CYCLES"],
+                max_xy_mps=self.CONFIG["FINAL_ALIGN_XY_SPEED"],
+                min_xy_mps=self.CONFIG["FINAL_ALIGN_MIN_SPEED"],
+                error_alpha=self.CONFIG["FINAL_ALIGN_ERROR_ALPHA"],
+                screw_head_only=False,
+                enable_spiral=False,
+            ):
+                print("⚠️ Retry post-contact XY alignment failed. Aborting.")
+                break
 
         print("⚠️ Extraction failed. Lifting to safety and stopping this run.")
         self._post_unscrew_style_retract("[RETRACT] Extraction failure lift")
@@ -2584,39 +2891,85 @@ class UnscrewSkill(Node):
         return self._finish_failed_run_at_bin(bin1_raw)
 
     def _finish_failed_run_at_bin(self, bin1_raw) -> bool:
-        print("[FAILURE] Moving to Bin 1 drop position, then home.")
-        self._navigate_to_bin(bin1_raw)
+        if not bool(self.CONFIG.get("SCREW_GRIPPER_ENABLED", True)):
+            print("[FAILURE] Screw gripper disabled — skipping bin; homing.")
+            self.tool_pub.publish(Int8(data=0))
+            self._move_xarm_home()
+        else:
+            print("[FAILURE] Moving to Bin 1 drop position, then home.")
+            self._navigate_to_bin(bin1_raw)
         return False
 
     def _navigate_to_bin(self, bin1_raw):
+        gripper_enabled = bool(self.CONFIG.get("SCREW_GRIPPER_ENABLED", True))
+
+        # ── If screw gripper is disabled there is nothing to drop. ────────────
+        # The screwdriver leaves the screw in place; just stop the tool and home.
+        if not gripper_enabled:
+            print("🏠 [DROP-OFF] Screw gripper disabled — skipping bin; stopping tool and homing.")
+            self.tool_pub.publish(Int8(data=0))
+            return self._move_xarm_home()
+
         release_height = float(self.CONFIG["BIN_RELEASE_HEIGHT"])
         z_trim = float(self.CONFIG["BIN_Z_TRIM"])
         print(f"🗑️ [DROP-OFF] Navigating to cached Bin 1, release={release_height*100:.0f}cm trim={z_trim*1000:.0f}mm...")
+
         bin_pose = Pose()
         bin_pose.position.x, bin_pose.position.y, bin_pose.position.z = bin1_raw
-        world_bin = self.moveit_backend.get_transformed_pose(bin_pose, self.CONFIG["CAMERA_FRAME"], self.CONFIG["WORLD_FRAME"])
-        
-        if world_bin:
-            bx, by = world_bin.pose.position.x, world_bin.pose.position.y
-            raw_bz = world_bin.pose.position.z
-            bz = raw_bz + release_height + z_trim
-            print(
-                f"[DROP-OFF] Bin raw camera xyz=({bin1_raw[0]:.4f},{bin1_raw[1]:.4f},{bin1_raw[2]:.4f}) "
-                f"world_z={raw_bz:.4f} + release={release_height:.3f} + trim={z_trim:.3f} -> target_z={bz:.4f}"
-            )
-            
-            if self.moveit_backend.move_to_pose_exotica(bx, by, bz, velocity=self.CONFIG["COARSE_VELOCITY"]):
-                self.wait_for_arm_settled()
-                print("⏬ [RELEASE] Opening tool gripper above Bin 1...")
-                self.tool_pub.publish(Int8(data=3)) # Release
-                time.sleep(1.0)
-                self.tool_pub.publish(Int8(data=0))
-                print("♻️ Screw released. Moving xArm5 to home and waiting.")
-                return self._move_xarm_home()
-            print("[DROP-OFF] Failed to move above Bin 1.")
+        world_bin = self.moveit_backend.get_transformed_pose(
+            bin_pose, self.CONFIG["CAMERA_FRAME"], self.CONFIG["WORLD_FRAME"]
+        )
+        if not world_bin:
+            print("[DROP-OFF] Could not transform cached Bin 1 coordinate.")
             return False
-        print("[DROP-OFF] Could not transform cached Bin 1 coordinate.")
-        return False
+
+        bx = world_bin.pose.position.x
+        by = world_bin.pose.position.y
+        raw_bz = world_bin.pose.position.z
+        bz = raw_bz + release_height + z_trim
+        print(
+            f"[DROP-OFF] Bin raw camera xyz=({bin1_raw[0]:.4f},{bin1_raw[1]:.4f},{bin1_raw[2]:.4f}) "
+            f"world_z={raw_bz:.4f} + release={release_height:.3f} + trim={z_trim:.3f} -> drop_z={bz:.4f}"
+        )
+
+        # ── Stage 1: XY transit at current retracted height ───────────────────
+        # Read the TCP Z after the post-unscrew retract so the arm moves
+        # horizontally first (safe clearance) before descending into the bin.
+        transit_z = bz  # fallback if TF read fails
+        try:
+            import rclpy.time as rtime
+            tf_now = self.moveit_backend.tf_buffer.lookup_transform(
+                self.CONFIG["WORLD_FRAME"],
+                self.moveit_backend.default_ik_link,
+                rtime.Time(),
+            )
+            transit_z = float(tf_now.transform.translation.z)
+            print(f"[DROP-OFF] Current TCP Z after retract: {transit_z*1000:.1f}mm  → XY transit at this height")
+        except Exception as e:
+            print(f"[DROP-OFF] TF read failed ({e}); using bin drop_z={transit_z:.4f} as transit height")
+
+        print(f"[DROP-OFF] Stage 1: XY transit to bin XY=({bx:.3f},{by:.3f}) at Z={transit_z:.4f}...")
+        ok = self.moveit_backend.move_to_pose_exotica(bx, by, transit_z, velocity=self.CONFIG["COARSE_VELOCITY"])
+        if not ok:
+            print("[DROP-OFF] Stage 1 (XY transit) failed.")
+            return False
+        self.wait_for_arm_settled()
+
+        # ── Stage 2: Descend to bin drop height ───────────────────────────────
+        print(f"[DROP-OFF] Stage 2: Descending to drop_z={bz:.4f}...")
+        ok = self.moveit_backend.move_to_pose_exotica(bx, by, bz, velocity=self.CONFIG["COARSE_VELOCITY"])
+        if not ok:
+            print("[DROP-OFF] Stage 2 (descent) failed.")
+            return False
+        self.wait_for_arm_settled()
+
+        # ── Release & home ────────────────────────────────────────────────────
+        print("⏬ [RELEASE] Opening tool gripper above Bin 1...")
+        self.tool_pub.publish(Int8(data=3))   # Release (gripper_enabled already confirmed above)
+        time.sleep(1.0)
+        self.tool_pub.publish(Int8(data=0))
+        print("♻️ Screw released. Moving xArm5 to home and waiting.")
+        return self._move_xarm_home()
 
     def _move_xarm_home(self) -> bool:
         home_joints = dict(self.CONFIG["XARM_HOME_JOINTS"])

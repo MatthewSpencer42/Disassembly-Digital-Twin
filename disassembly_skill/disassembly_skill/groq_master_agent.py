@@ -199,80 +199,78 @@ class GroqMasterAgentNode(Node):
     def __init__(self):
         super().__init__('groq_master_agent')
 
-        # --- Device Config Loading ---
+        # --- Load ALL device configs from the configs directory ---
+        self.all_configs: Dict[str, Any] = {}
+        self._device_label_sets: Dict[str, set] = {}
         self.device_cfg = None
-        self._declare_parameter_safe('device_config_path', '')
-        cfg_path = self.get_parameter('device_config_path').get_parameter_value().string_value
-        if not cfg_path:
-            # Try default location
-            default_path = Path(__file__).parent.parent / 'config' / 'device_configs' / 'hdd.yaml'
-            if default_path.exists():
-                cfg_path = str(default_path)
-        if cfg_path and _DEVICE_CONFIG_AVAILABLE:
-            try:
-                self.device_cfg = DeviceConfig.load(cfg_path)
-                self.get_logger().info(
-                    f"Device config loaded: {self.device_cfg.device.device_class} / "
-                    f"{self.device_cfg.device.device_model} "
-                    f"({len(self.device_cfg.disassembly_sequence)} steps)"
+        self._identified_device_class: Optional[str] = None
+
+        if _DEVICE_CONFIG_AVAILABLE:
+            configs_dir = Path(__file__).parent.parent / 'config' / 'device_configs'
+            for yaml_path in sorted(configs_dir.glob('*.yaml')):
+                try:
+                    cfg = DeviceConfig.load(yaml_path)
+                    device_id = cfg.device.device_class
+                    self.all_configs[device_id] = cfg
+                    labels: set = set()
+                    for c in cfg.components:
+                        labels.add(c.label.lower())
+                    for z in cfg.screw_zones:
+                        labels.add(z.zone_name.lower())
+                    self._device_label_sets[device_id] = labels
+                    self.get_logger().info(
+                        f"Loaded config: {device_id} / {cfg.device.device_model} "
+                        f"({len(cfg.disassembly_sequence)} steps, {len(labels)} labels)"
+                    )
+                except Exception as exc:
+                    self.get_logger().warning(f"Could not load {yaml_path.name}: {exc}")
+
+        if self.all_configs:
+            device_blocks = []
+            for device_id, cfg in self.all_configs.items():
+                ctx = cfg.to_llm_context()
+                removable = [c['label'] for c in ctx['components'] if c.get('removable')]
+                fixed = [c['label'] for c in ctx['components'] if not c.get('removable')]
+                zones_str = ", ".join(
+                    f"{z['zone_name']}({z['screw_count']} screws -> {z['parent_component']})"
+                    for z in ctx['screw_zones']
                 )
-            except Exception as exc:
-                self.get_logger().warning(f"Could not load device config from '{cfg_path}': {exc}")
-
-        # Build device-aware mission prompt
-        if self.device_cfg is not None:
-            cfg = self.device_cfg
-            ctx = cfg.to_llm_context()
-            # Build sequence hint from config
-            seq_lines = []
-            for s in ctx['sequence_overview']:
-                reveals_str = f" -> reveals: {s['reveals']}" if s.get('reveals') else ""
-                seq_lines.append(f"  Step {s['step']}: {s['action']} -> {s['target']}{reveals_str}")
-            seq_hint = "\n".join(seq_lines)
-
-            # Build component list
-            removable = [c['label'] for c in ctx['components'] if c.get('removable')]
-            chassis = [c['label'] for c in ctx['components'] if not c.get('removable')]
+                block = (
+                    f"  {device_id}:\n"
+                    f"    Removable parts: {removable}\n"
+                    f"    Fixed/chassis (DO NOT remove): {fixed if fixed else 'none listed'}\n"
+                    f"    Screw zones: {zones_str if zones_str else 'none'}"
+                )
+                device_blocks.append(block)
 
             self.MISSION_PROMPT = (
-                f"You are disassembling a {ctx['device_class']} ({ctx['device_model']}).\n"
-                f"Fixturing: {ctx['fixturing']}. Material: {ctx['materials']}.\n"
-                f"Fixed structural parts (DO NOT remove): {chassis}.\n"
-                f"Removable components: {removable}.\n"
-                f"Screw zones ({len(ctx['screw_zones'])} total): "
-                + ", ".join(
-                    f"{z['zone_name']}({z['screw_count']} screws)->{z['parent_component']}"
-                    for z in ctx['screw_zones']
-                ) + ".\n"
-                f"Reference disassembly sequence:\n{seq_hint}\n\n"
+                "You are a robotic disassembly agent. Identify and fully disassemble the device visible in the scene.\n\n"
+                "KNOWN DEVICES (use visible object labels to identify which device is present):\n"
+                + "\n".join(device_blocks) + "\n\n"
+                "INSTRUCTIONS:\n"
+                "1. Identify the device by matching the detected object labels to the known device label sets above.\n"
+                "2. Decide the disassembly order yourself based on what is visible — there is no fixed sequence to follow.\n"
+                "   Ordering rules:\n"
+                "   - All screws in a zone must be removed before extracting the parent component.\n"
+                "   - Parts blocking access to other parts should be removed first.\n"
+                "3. Execute one action at a time and observe the result before planning the next step.\n\n"
                 "RULES:\n"
-                "1. ALWAYS secure the device with hold_object before unscrewing or extracting parts.\n"
-                "2. Remove ALL screws in a zone before attempting to extract the parent component.\n"
-                "3. Respect zone dependencies — do not attempt to unscrew a zone whose parent component is still blocked.\n"
-                "4. After any pickup_object or flip action, call hold_object again to re-secure the chassis.\n"
-                "5. Verify each extraction by checking the next vision frame. Retry if the part is still present.\n"
-                "6. Use flip_object when the current side is fully stripped to access the opposite side.\n"
-                "7. Use flip_drop to dump loose unthreaded screws and non-delicate parts.\n"
-                "Only output Final Answer when all removable components have been extracted and verified."
+                "A. hold_object is ONLY required immediately before flip_object or flip_drop — not before unscrewing or pickup.\n"
+                "B. You MUST call hold_object to grip the chassis before every flip_object or flip_drop call.\n"
+                "C. Unscrew all screws in a zone before extracting the parent component.\n"
+                "D. If a target label is still visible after a pickup attempt, retry the pickup.\n"
+                "E. Output Final Answer only when all removable parts are no longer visible in the scene."
             )
-            if ctx.get('warnings'):
-                self.MISSION_PROMPT += f"\nCONFIG WARNINGS: {ctx['warnings']}"
         else:
-            # Generic fallback (existing behavior)
             self.MISSION_PROMPT = (
                 "Your objective is to fully disassemble the assembly in the current scene. "
-                "First, analyze the vision data to deduce which object serves as the primary structural base, "
-                "and use the 'hold_object' tool to secure it. "
-                "Next, extract all removable sub-components or fasteners visible on the current side one by one. "
-                "VERIFICATION RULE: After attempting to remove a macro-component using "
-                "'pickup_object' or 'flip_drop', you must check the next vision frame. If that specific part is still "
-                "present, you MUST retry the action. (Note: You do not need to individually verify screws). "
-                "STATE RULE: The 'pickup_object' tool forces the robot to release its grip on the main chassis. "
-                "Therefore, immediately after a successful 'pickup_object' action, you MUST use the 'hold_object' "
-                "tool to re-secure the base before attempting to unscrew or remove anything else. "
-                "Remember that assemblies are 3D objects. Once the current visible side appears completely stripped, "
-                "flip the object to expose and analyze the opposite side. "
-                "Only output your Final Answer when you have verified that all sides of the primary base are completely empty."
+                "First, analyze the vision data to deduce which object serves as the primary structural base. "
+                "PRIORITY RULE: If any screws are visible, unscrew them all before using any other removal tools. "
+                "Next, extract all removable sub-components visible on the current side one by one. "
+                "After attempting to remove a macro-component, check the next vision frame — "
+                "if the part is still present, retry. "
+                "Once the current visible side is fully stripped, flip the object to access the opposite side. "
+                "Output Final Answer only when all sides of the primary base are completely empty."
             )
 
         # START GUI PROCESS
@@ -306,19 +304,21 @@ class GroqMasterAgentNode(Node):
             base_url="https://api.groq.com/openai/v1"
         )
 
-        self.unscrew_skill = UnscrewSkill(device_cfg=self.device_cfg)
-        self.hold_skill = ObjectHoldSkill(device_cfg=self.device_cfg)
-        self.flip_skill = ObjectFlipSkill(device_cfg=self.device_cfg)
-        self.flip_drop_skill = FlipDropSkill(device_cfg=self.device_cfg)
-        self.pickup_skill = PickupSkill(device_cfg=self.device_cfg)
+        self.unscrew_skill = UnscrewSkill(device_cfg=None)
+        self.hold_skill = ObjectHoldSkill(device_cfg=None)
+        self.flip_skill = ObjectFlipSkill(device_cfg=None)
+        self.flip_drop_skill = FlipDropSkill(device_cfg=None)
+        self.pickup_skill = PickupSkill(device_cfg=None)
 
-        # Determine pickup target description from config
-        pickup_targets_desc = "delicate internal components (PCBs, boards)"
-        if self.device_cfg is not None:
-            pickup_steps = [s for s in self.device_cfg.disassembly_sequence if s.action == 'pickup']
-            if pickup_steps:
-                targets = list({s.target for s in pickup_steps})
-                pickup_targets_desc = f"components: {targets}"
+        pickup_targets_all: set = set()
+        for cfg in self.all_configs.values():
+            for s in cfg.disassembly_sequence:
+                if s.action == 'pickup':
+                    pickup_targets_all.add(s.target)
+        pickup_targets_desc = (
+            f"components: {sorted(pickup_targets_all)}"
+            if pickup_targets_all else "delicate internal components (PCBs, boards)"
+        )
 
         self.tools: Dict[str, Tool] = {
             "hold_object": Tool(
@@ -372,44 +372,57 @@ class GroqMasterAgentNode(Node):
     # Tools implementations
     # -------------------------------------------------------------------------
     async def hold_object(self, part_id=None, label=None):
-        if part_id is None or label is None: return "Action failed, missing required parameter"
+        if part_id is None or label is None:
+            return "hold_object failed: missing part_id or label"
+        if self.device_cfg is not None:
+            self.hold_skill._apply_hold_config(self.device_cfg, target_label=label)
         self.hold_skill.execute_hold(part_id=part_id, target_label=label, interactive=False)
-        return "Tool called successfully"
+        return f"hold_object succeeded — '{label}' (id={part_id}) secured."
 
     async def unscrew(self, unscrew_id=None, unscrew_label=None):
-        if unscrew_id is None or unscrew_label is None: return "Action failed, missing required parameter"
-
+        if unscrew_id is None or unscrew_label is None:
+            return "unscrew failed: missing unscrew_id or unscrew_label"
         target_xyz = None
         with self.vision_lock:
             for obj in self.detected_objects:
                 if obj.get('id') == unscrew_id:
                     target_xyz = obj.get('xyz')
                     break
-
+        if self.device_cfg is not None:
+            self.unscrew_skill._apply_unscrew_config(self.device_cfg, target_label=unscrew_label)
         self.unscrew_skill.execute_unscrew_command(target_id=unscrew_id, target_label=unscrew_label, interactive=False)
-
         if target_xyz:
             self.cleared_zones.append(target_xyz)
-            print(f"[MEMORY] Added Exclusion Zone at {target_xyz} (Radius: {self.EXCLUSION_RADIUS*1000}mm)")
-
-        return "Tool called successfully"
+            print(f"[MEMORY] Exclusion zone added at {target_xyz} (r={self.EXCLUSION_RADIUS*1000:.0f}mm)")
+        return f"unscrew succeeded — '{unscrew_label}' (id={unscrew_id}) unthreaded."
 
     async def flip_object(self):
         self.flip_skill.execute_flip(interactive=False)
-        return "Tool called successfully: Object flipped"
+        return "flip_object succeeded — device flipped to expose opposite side."
 
     async def flip_drop(self):
         self.flip_drop_skill.execute_flip_drop(interactive=False)
-        return "Tool called successfully: Object dropped"
+        return "flip_drop succeeded — loose parts dumped."
 
     async def pickup_object(self, pickup_id=None, pickup_label=None):
         if pickup_id is None or pickup_label is None:
-            return "Action failed, missing pickup_id or pickup_label parameter"
-        # Apply per-component config if available
+            return "pickup_object failed: missing pickup_id or pickup_label"
         if self.device_cfg is not None:
             self.pickup_skill._apply_pickup_config(self.device_cfg, target_label=pickup_label)
         self.pickup_skill.execute_pickup(target_id=pickup_id, target_label=pickup_label, interactive=False)
-        return "Tool called successfully"
+        return f"pickup_object succeeded — '{pickup_label}' (id={pickup_id}) extracted."
+
+    # -------------------------------------------------------------------------
+    # Device identification
+    # -------------------------------------------------------------------------
+    def _identify_device(self, detected_lower: set) -> Optional[str]:
+        """Return the device_class with the most label overlap against detected scene labels."""
+        best, best_score = None, 0
+        for device_id, known_labels in self._device_label_sets.items():
+            score = len(detected_lower & known_labels)
+            if score > best_score:
+                best_score, best = score, device_id
+        return best if best_score > 0 else None
 
     # -------------------------------------------------------------------------
     # Vision handling
@@ -447,6 +460,15 @@ class GroqMasterAgentNode(Node):
             with self.vision_lock:
                 self.detected_objects = temp_list
 
+                # Identify device from visible labels (done once on first detection)
+                if self._identified_device_class is None and self.detected_objects:
+                    detected_lower = {o.get('label', '').lower() for o in self.detected_objects}
+                    identified = self._identify_device(detected_lower)
+                    if identified:
+                        self._identified_device_class = identified
+                        self.device_cfg = self.all_configs[identified]
+                        self.get_logger().info(f"Device identified from vision: {identified}")
+
                 if not self.has_printed_startup_vision and len(self.detected_objects) > 0:
                     vis_text = f"Startup Snapshot ({len(self.detected_objects)} valid objects detected)."
                     print(f"\n{TColor.VISION}Vision: {vis_text}{TColor.RESET}")
@@ -475,21 +497,27 @@ class GroqMasterAgentNode(Node):
 
     def build_think_prompt(self, user_input: str, history: List[str]) -> str:
         tool_list = self.format_tool_list()
-        with self.vision_lock: vision_str = json.dumps(self.detected_objects)
+        with self.vision_lock:
+            vision_lines = [
+                f"  id={o['id']} label={o['label']} xyz={o.get('xyz', 'unknown')}"
+                for o in self.detected_objects
+            ]
+        vision_str = "\n".join(vision_lines) if vision_lines else "  (no objects detected)"
+        device_str = (
+            f"Identified device: {self._identified_device_class} ({self.device_cfg.device.device_model})"
+            if self.device_cfg else "Device: not yet identified — infer from visible labels."
+        )
         guide = "\n".join([
-            "You are a part of a ReAct agent. Your role is to produce a reasoning stage to reason about the problem and guide the following Plan, Action and Observation stages that will be handled by the rest of the agent.",
-            "This stage is a TRANSPARENT scratchpad that will be shown to the user.",
+            "You are the reasoning stage of a ReAct robotic disassembly agent.",
+            "Output MUST start with: Reasoning:",
+            "Do NOT output Plan:, Action:, Observation:, or Final Answer: here.",
+            "Summarise what was last done and state the next logical step to take.",
             "",
-            "Rules:",
-            "- Output MUST start with: Reasoning:",
-            "- You may write multiple lines after 'Reasoning:'.",
-            "- Do NOT output Plan:, Action:, Observation:, or Final Answer: in this stage.",
-            "- Do NOT refer to your role in the output. only produce relevant reasoning that can be used by the other parts of the agent",
-            "- Be concrete: if applicable, summarise the previous plan> action> observation within the context of the user query and create a short generation to support the next planning stage",
-            "",
-            "Current Scene:",
-            vision_str])
-        return "\n".join([guide, "Tools available:", tool_list, "", f"User: {user_input}", *history, ""])
+            device_str,
+            f"Current scene ({len(self.detected_objects)} objects):",
+            vision_str,
+        ])
+        return "\n".join([guide, "", "Tools available:", tool_list, "", f"Mission: {user_input}", *history, ""])
 
     def build_plan_prompt(self, user_input: str, history: List[str]) -> str:
         tool_list = self.format_tool_list()
@@ -517,6 +545,8 @@ class GroqMasterAgentNode(Node):
             "- Do NOT output Plan:, Observation:, Reasoning:, or Final Answer: here.",
             "- Use ONLY the tool names/signatures exactly as listed.",
             "- Do not invent extra keyword arguments.",
+            "- Format: Action: tool_name(arg_name=value, ...)",
+            "- Example: Action: unscrew(unscrew_id=1, unscrew_label=\"pcb_screw\")",
             ""])
         return "\n".join([guide, "Tools available:", tool_list, "", f"User: {user_input}", *history, ""])
 
