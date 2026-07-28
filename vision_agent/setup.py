@@ -72,16 +72,11 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'start_vision = vision_agent.agent_node:main',
-            'start_vision_rtdetr = vision_agent.agent_node_v2:main',
-            'start_vision_v2 = vision_agent.agent_node_v2:main',
-            'start_vision_split = vision_agent.split_runtime:main',
             'start_vision_global = vision_agent.global_node:main',
             'start_vision_local = vision_agent.local_node:main',
             'start_vision_classifier = vision_agent.classifier_node:main',
             'start_vision_dashboard = vision_agent.dashboard_node:main',
             'dashboard_window = vision_agent.dashboard_window:main',
-            'detect_workspace = vision_agent.workspace_detector:main',
             'crop_camera_streams = vision_agent.camera_crop_republisher:main',
         ],
     },

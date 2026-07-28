@@ -57,7 +57,10 @@ disassembly_sequence:
       - hdd_holder_screw
     parameters:
       grasp_type: precision
-      grip_width_mm: 60.0
+      grip_width_mm: 65.0
+      final_grip_width_mm: 65.0
+      pre_grasp_width_mm: 87.8
+      final_grip_width_tolerance_mm: 12.0
       gripper_open_deg: 35.0
       gripper_close_deg: -35.0
       gripper_open_min_width_mm: 120.0
@@ -68,14 +71,15 @@ disassembly_sequence:
       precondition_retract_m: 0.20
       move_xarm5_clearance: false
       # Centroid-based approach — offsets zeroed until grasp geometry is tuned.
-      grip_close_width_mm: 62.0     # close to 60 mm gap for heat sink
       approach_x_offset_m: 0.0
-      approach_y_offset_m: 0.00
-      approach_z_offset_m: -0.001   # −10 mm below vision centroid Z
+      approach_y_offset_m: 0.005
+      approach_z_offset_m: -0.001
       approach_rpy_deg:           # null → use live UF850 home orientation
       home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
       hover_velocity: 0.25
-      pre_descent_gripper_width_mm: 100.0
+      pickup_descent_speed_mps: 0.08
+      pickup_pre_grasp_clearance_mm: 15.0
+      pickup_retry_z_step_mm: 2.0
       descent_distance_m: 0.080
       descent_step_m: 0.0005
       descent_rate_hz: 25.0
@@ -191,7 +195,10 @@ disassembly_sequence:
       - core_holder_Screw
     parameters:
       grasp_type: precision
-      grip_width_mm: 60.0
+      grip_width_mm: 10.0
+      final_grip_width_mm: 10.0
+      pre_grasp_width_mm: 35.0
+      final_grip_width_tolerance_mm: 12.0
       gripper_open_deg: 35.0
       gripper_close_deg: -35.0
       gripper_open_min_width_mm: 120.0
@@ -202,14 +209,15 @@ disassembly_sequence:
       precondition_retract_m: 0.20
       move_xarm5_clearance: false
       # Fine-tuned approach offsets for HDD holder grasp geometry.
-      grip_close_width_mm: 15.0     # close to 15 mm gap for hdd holder
       approach_x_offset_m: 0.0
       approach_y_offset_m: 0.030    # +30 mm Y to reach bracket centre
-      approach_z_offset_m: 0.04    # +25 mm above vision centroid Z
+      approach_z_offset_m: 0.030
       approach_rpy_deg:           # null → use live UF850 home orientation
       home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
       hover_velocity: 0.25
-      pre_descent_gripper_width_mm: 100.0
+      pickup_descent_speed_mps: 0.08
+      pickup_pre_grasp_clearance_mm: 15.0
+      pickup_retry_z_step_mm: 2.0
       descent_distance_m: 0.080
       descent_step_m: 0.0005
       descent_rate_hz: 25.0
@@ -324,25 +332,29 @@ disassembly_sequence:
     reveals: []
     parameters:
       grasp_type: precision
-      grip_width_mm: 60.0
+      grip_width_mm: 67.0
+      final_grip_width_mm: 67.0
+      pre_grasp_width_mm: 80.0
+      final_grip_width_tolerance_mm: 12.0
       gripper_open_deg: 35.0
       gripper_close_deg: -35.0
       gripper_open_min_width_mm: 120.0
-      gripper_close_force_n: 40.0
+      gripper_close_force_n: 100.0
       approach_axis: "+z"
       lift_height_mm: 10.0
       lift_speed_mps: 0.05
       precondition_retract_m: 0.20
       move_xarm5_clearance: false
-      wrist_joint6_deg: 90.0        # rotate joint6 90° at pre-grasp stop
-      grip_close_width_mm: 60.0     # close to 60 mm gap for core holder
-      approach_x_offset_m: -0.010  # −10 mm X offset
-      approach_y_offset_m: 0.0
-      approach_z_offset_m: -0.005  # −5 mm below vision centroid Z
+      wrist_joint6_deg: 0.0         # no wrist rotation for core holder pickup
+      approach_x_offset_m: -0.006  # -6 mm X offset
+      approach_y_offset_m: -0.002
+      approach_z_offset_m: -0.013
       approach_rpy_deg:           # null → use live UF850 home orientation
       home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
       hover_velocity: 0.25
-      pre_descent_gripper_width_mm: 100.0
+      pickup_descent_speed_mps: 0.08
+      pickup_pre_grasp_clearance_mm: 15.0
+      pickup_retry_z_step_mm: 2.0
       descent_distance_m: 0.080
       descent_step_m: 0.0005
       descent_rate_hz: 25.0

@@ -138,16 +138,14 @@ disassembly_sequence:
     reveals: []
     parameters:
       grasp_type: precision
-      grip_width_mm: 80.0
+      grip_width_mm: 85.0
+      final_grip_width_mm: 85.0
+      pre_grasp_width_mm: 120.0
+      final_grip_width_tolerance_mm: 12.0
       gripper_open_deg: 35.0
       gripper_close_deg: -35.0
       gripper_open_min_width_mm: 120.0
       gripper_close_force_n: 40.0
-      # Close to 90 mm physical gap for lid grasp.
-      grip_close_width_mm: 85.0
-      # Fingers pre-positioned to 120mm during descent so they clear the lid edges.
-      # Must be wider than grip_close_width_mm (85mm).
-      pre_descent_gripper_width_mm: 120.0
       # Rotate joint6 by 90° at pre-grasp stop (30mm above part) before descent.
       wrist_joint6_deg: 90.0
       approach_axis: "+z"
@@ -158,7 +156,7 @@ disassembly_sequence:
       approach_x_offset_m: 0.0
       approach_y_offset_m: 0.0
       # −20 mm below vision centroid Z.
-      approach_z_offset_m: -0.020
+      approach_z_offset_m: -0.010
       approach_rpy_deg:
       home_approach_quat_xyzw: [0.55235, -0.30229, 0.51143, 0.58478]
       hover_velocity: 0.25
@@ -178,7 +176,7 @@ disassembly_sequence:
       z_extra_descent_mm: 0
     notes: >
       Lid removed first before flipping to expose PCB side.
-      grip_close_width_mm 90 mm for lid grasp.
+      final_grip_width_mm controls final grasp width; pre_grasp_width_mm controls the pre-descent jaw width.
       wrist_joint6_deg 90 — tune once grasp geometry is confirmed.
 
   # ── Step 3: Hold case for flip ────────────────────────────────────────────
@@ -191,13 +189,16 @@ disassembly_sequence:
     parameters:
       strategy: lateral_clamp
       holdable_labels: [case, lid]
-      grip_width_mm: 101.6
+      # Command full close for HDD hold; the HDD body prevents zero-width closure.
+      grip_width_mm: 0.0
+      grip_contact_margin_mm: 0.0
+      final_grip_width_tolerance_mm: 110.0
       approach_axis: "+x"
       flip_approach: false
       tilt_deg: 0.0
       gripper_open_deg: 35.0
       gripper_close_deg: -35.0
-      gripper_close_force_n: 100.0
+      gripper_close_force_n: 120.0
       torque_threshold_nm: 3.0
       use_tactile_descent: true
       descent_speed_mps: 0.030
@@ -206,8 +207,8 @@ disassembly_sequence:
       min_contact_descent_m: 0.030
       contact_retract_min_success_m: 0.0025
       hover_x_offset_m: 0.015
-      hover_y_offset_m: 0.0
-      hover_z_offset: 0.05
+      hover_y_offset_m: 0.003
+      hover_z_offset: 0.04
       approach_rpy_deg: [12.0, -82.0, 74.0]
       descent_distance_m: 0.12
       final_z_offset_m: 0.0
@@ -326,16 +327,14 @@ disassembly_sequence:
     reveals: []
     parameters:
       grasp_type: precision
-      grip_width_mm: 80.0
+      grip_width_mm: 40.0
+      final_grip_width_mm: 35.0
+      pre_grasp_width_mm: 80.0
+      final_grip_width_tolerance_mm: 12.0
       gripper_open_deg: 35.0
       gripper_close_deg: -35.0
       gripper_open_min_width_mm: 120.0
-      gripper_close_force_n: 40.0
-      # Close to 40 mm physical gap (partial close) instead of fully shut.
-      # Prevents crushing the PCB under its own weight on a soft grasp.
-      grip_close_width_mm: 40.0
-      # Fingers pre-positioned to 80mm during descent (wider than 40mm target).
-      pre_descent_gripper_width_mm: 80.0
+      gripper_close_force_n: 100.0
       # Joint-6 wrist rotation applied at pre-grasp stop (before descent); 0 = no rotation.
       wrist_joint6_deg: 0.0
       approach_axis: "+z"
@@ -345,7 +344,8 @@ disassembly_sequence:
       move_xarm5_clearance: false
       approach_x_offset_m: -0.02
       approach_y_offset_m: 0.015
-      approach_z_offset_m: 0.005
+      # PCB is thin and flush; grasp slightly below the detected top surface.
+      approach_z_offset_m: -0.001
       # Use the homed/current rg6_tcp orientation for PCB pickup. Forcing
       # [180, 0, 0] is not reachable at the HDD PCB hover pose on UF850.
       approach_rpy_deg:
@@ -366,9 +366,9 @@ disassembly_sequence:
       drop_y: -0.36
       drop_z: 0.99
       skip_if_not_detected: true   # skip gracefully when PCB not visible (already removed / occluded)
-      z_extra_descent_mm: 0         # stop at detected Z centroid (HDD PCB sits flush)
+      z_extra_descent_mm: 0         # z offset above sets the PCB edge grasp depth
     notes: >
-      grip_close_width_mm 40 mm: partial close to avoid crushing the PCB.
+      final_grip_width_mm controls final PCB pickup grasp width; pre_grasp_width_mm controls the pre-descent jaw width.
       wrist_joint6_deg 0 for now — tune once grasp geometry is confirmed.
 
 metadata:

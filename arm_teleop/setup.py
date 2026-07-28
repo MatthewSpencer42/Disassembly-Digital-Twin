@@ -50,7 +50,7 @@ setup(
     maintainer_email="adipdas11@gmail.com",
     description="Webcam hand tracking and EXOTica teleoperation package.",
     license="BSD-3-Clause",
-    tests_require=["pytest"],
+    extras_require={"test": ["pytest"]},
     entry_points={
         "console_scripts": [
             "webcam_hand_tracker = arm_teleop.webcam_hand_tracker:main",

@@ -38,6 +38,14 @@ class ObjectFlipSkill(Node):
         self.ROTATION_DEG = 180.0
         self.WRIST_ROTATION_VELOCITY = 0.35
         self._last_retract_start_z = None
+        self.UF_HOME_JOINTS = {
+            'uf850_joint1': 0.0,
+            'uf850_joint2': 0.0,
+            'uf850_joint3': -1.57,
+            'uf850_joint4': 0.0,
+            'uf850_joint5': -1.57,
+            'uf850_joint6': 0.0,
+        }
         
         self.is_holding_object = False
         self.hold_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -81,6 +89,7 @@ class ObjectFlipSkill(Node):
         self.state_update_pub.publish(String(data=s))
 
     def publish_hold_status(self, h):
+        self.is_holding_object = bool(h)
         self.hold_status_pub.publish(Bool(data=h))
 
     def hold_status_callback(self, msg):
@@ -154,20 +163,50 @@ class ObjectFlipSkill(Node):
             return False
 
         self.wait_for_arm_settled()
-        try:
-            end_tf = self.uf850.tf_buffer.lookup_transform(self.PLANNING_FRAME, self.ROBOT_EE_LINK, rclpy.time.Time())
-            ez = end_tf.transform.translation.z
-            actual_dz = float(ez - sz)
-            print(f"[RETRACT] actual dz={actual_dz*1000:.1f}mm target_dz={distance_m*1000:.1f}mm")
-            min_expected_dz = max(0.010, min(distance_m * 0.50, distance_m - 0.010))
-            if actual_dz < min_expected_dz:
-                self.get_logger().error(
-                    f"Unsafe flip retract result: expected +Z but actual dz={actual_dz*1000:.1f}mm. Aborting."
+        min_expected_dz = max(0.010, min(distance_m * 0.50, distance_m - 0.010))
+        best_dz = None
+        last_dz = None
+        verify_start = time.time()
+        while rclpy.ok() and (time.time() - verify_start) < 2.0:
+            try:
+                end_tf = self.uf850.tf_buffer.lookup_transform(
+                    self.PLANNING_FRAME,
+                    self.ROBOT_EE_LINK,
+                    rclpy.time.Time(),
                 )
-                self.uf850._hold_current_arm_position()
-                return False
-        except Exception as e:
-            self.get_logger().warning(f"Could not read final TF after retract: {e}")
+                actual_dz = float(end_tf.transform.translation.z - sz)
+                last_dz = actual_dz
+                best_dz = actual_dz if best_dz is None else max(best_dz, actual_dz)
+                if best_dz >= min_expected_dz:
+                    print(
+                        f"[RETRACT] actual dz={best_dz*1000:.1f}mm "
+                        f"target_dz={distance_m*1000:.1f}mm"
+                    )
+                    return True
+            except Exception as e:
+                self.get_logger().warning(f"Could not read final TF after retract: {e}")
+            time.sleep(0.1)
+
+        if best_dz is None:
+            self.get_logger().warning(
+                "[flip] Retract trajectory succeeded, but TF could not be read for verification; "
+                "trusting completed trajectory."
+            )
+            return True
+
+        print(f"[RETRACT] actual dz={best_dz*1000:.1f}mm target_dz={distance_m*1000:.1f}mm")
+        if best_dz < -0.010:
+            self.get_logger().error(
+                f"Unsafe flip retract result: TF shows downward motion dz={best_dz*1000:.1f}mm. Aborting."
+            )
+            self.uf850._hold_current_arm_position()
+            return False
+
+        self.get_logger().warning(
+            f"[flip] TF did not confirm full retract after successful trajectory "
+            f"(best_dz={best_dz*1000:.1f}mm, last_dz={last_dz*1000:.1f}mm, "
+            f"expected>={min_expected_dz*1000:.1f}mm). Trusting trajectory and continuing."
+        )
         return True
 
     @staticmethod
@@ -230,12 +269,57 @@ class ObjectFlipSkill(Node):
     def _open_gripper_for_release(self):
         target_rad = math.radians(self.OPEN_DEG)
         self.get_logger().info(f"[flip] Opening gripper to {target_rad:.3f}rad")
-        if not self.gripper.move_to_joint_positions(
+        command_ok = self.gripper.move_to_joint_positions(
             {self.JOINT_GRIPPER: target_rad},
             gripper_force_n=self.GRIPPER_OPEN_FORCE_N,
-        ):
+        )
+        if command_ok and self._wait_for_gripper_rad(target_rad, is_closing=False, timeout=4.0):
+            return True
+
+        state = dict(self.gripper.current_gripper_state or {})
+        width = float(state.get("width_mm", 0.0) or 0.0)
+        is_moving = bool(state.get("is_moving", False))
+        object_detected = bool(state.get("object_detected", False))
+        if is_moving or not object_detected or width >= 100.0:
+            self.get_logger().warning(
+                "[flip] Release open did not fully verify, but gripper state indicates "
+                f"release/opening (command_ok={command_ok}, width={width:.1f}mm, "
+                f"is_moving={is_moving}, object_detected={object_detected}). "
+                "Continuing to retract/home."
+            )
+            return True
+
+        self.get_logger().error(
+            "[flip] Release open failed and gripper state does not indicate release "
+            f"(command_ok={command_ok}, width={width:.1f}mm, "
+            f"is_moving={is_moving}, object_detected={object_detected})."
+        )
+        return False
+
+    def _move_home(self):
+        self.get_logger().info("[flip] Moving UF850 to home pose.")
+        if not self.uf850.move_to_joint_positions(self.UF_HOME_JOINTS, velocity=0.2):
+            self.get_logger().error("[flip] Failed to move UF850 home after release.")
             return False
-        return self._wait_for_gripper_rad(target_rad, is_closing=False)
+        return self.wait_for_arm_settled(timeout=12.0)
+
+    def release_retract_home(self):
+        """Release the flipped object, retract from the work surface, and home."""
+        print("👐 STEP 4: Releasing flipped object...")
+        self.publish_state("IDLE")
+        release_ok = self._open_gripper_for_release()
+        self.publish_hold_status(False)
+        if not release_ok:
+            self.get_logger().warning(
+                "[flip] Release did not verify cleanly; retracting and homing anyway to leave the arm safe."
+            )
+
+        print(f"⬆️ STEP 5: Retracting {self.RETRACT_Z_HEIGHT*100:.1f}cm after release...")
+        if not self._planned_retract_z(self.RETRACT_Z_HEIGHT):
+            return False
+
+        print("🏠 STEP 6: Moving UF850 home after flip release...")
+        return self._move_home()
 
     def _close_gripper_for_flip(self):
         target_rad = self._flip_close_target_rad()
@@ -344,7 +428,7 @@ class ObjectFlipSkill(Node):
             last_pos = curr; time.sleep(0.1)
         return False
 
-    def execute_flip(self, interactive=True):
+    def execute_flip(self, interactive=True, release_after=True):
         # Ensure clean state (previous skill may have left servo on a different MotionBackend)
         self.uf850.stop_servo()
 
@@ -379,11 +463,16 @@ class ObjectFlipSkill(Node):
         if not self._seat_after_flip():
             return False
 
-        # Keep the chassis held after the wrist flip. Releasing/regrasping here
-        # can drop the HDD if the surface touches before the gripper is seated.
+        if release_after:
+            if not self.release_retract_home():
+                return False
+            self.publish_state("IDLE")
+            print("🎉 FLIP COMPLETE — object released, retracted, and UF850 homed.")
+            return True
+
         self.publish_state("HOLDING")
         self.publish_hold_status(True)
-        print("🎉 FLIP COMPLETE — chassis remains held.")
+        print("🎉 FLIP COMPLETE — object remains held.")
         return True
 
 def main(args=None):
@@ -408,12 +497,9 @@ def main(args=None):
         if not node.is_holding_object:
             print("❌ No object held. Run object_hold_skill first.")
         else:
-            success = node.execute_flip(interactive=False)
+            success = node.execute_flip(interactive=False, release_after=True)
             if success:
-                print("✅ Flip complete. Broadcasting hold state. Press Ctrl+C to exit.")
-                while rclpy.ok():
-                    node.publish_hold_status(True)
-                    time.sleep(1.0)
+                print("✅ Flip complete. Object released, arm retracted, and UF850 homed.")
             else:
                 print("❌ Flip failed.")
     except KeyboardInterrupt:

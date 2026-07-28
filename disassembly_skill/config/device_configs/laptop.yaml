@@ -14,6 +14,11 @@ device:
     approach_rpy_deg and offsets once grasp geometry is confirmed.
 
 components:
+  battery:
+    label: battery
+    type: module
+    removable: false
+    notes: "Detector-only laptop identifier. Do not remove in the current laptop disassembly sequence."
   heat_sink:
     label: heat_sink
     type: shield
@@ -24,14 +29,31 @@ components:
     type: bracket
     removable: true
     notes: "Metal bracket retaining the SSD. Targeted in step 3."
+  pcb_holder:
+    label: pcb_holder
+    type: bracket
+    removable: false
+    notes: "Detector-only laptop identifier. Not part of the current configured sequence."
 
 screw_zones:
+  battery_screw:
+    parent_component: battery
+    screw_count: 2
+    screw_type: phillips
+    depends_on_removal_of: []
+    notes: "Detector-only laptop identifier. Not part of the current configured sequence."
   heat_sink_screw:
     parent_component: heat_sink
     screw_count: 4
     screw_type: phillips
     depends_on_removal_of: []
     notes: "Screws securing the heat sink to the motherboard / chassis."
+  pcb_holder_screw:
+    parent_component: pcb_holder
+    screw_count: 5
+    screw_type: phillips
+    depends_on_removal_of: []
+    notes: "Detector-only laptop identifier. Not part of the current configured sequence."
   ssd_holder_Screw:
     parent_component: ssd_holder
     screw_count: 2
@@ -135,19 +157,22 @@ disassembly_sequence:
       - ssd_holder_Screw
     parameters:
       grasp_type: precision
-      grip_width_mm: 60.0
+      grip_width_mm: 0.0
+      final_grip_width_mm: 0.0
+      pre_grasp_width_mm: 27.0
+      final_grip_width_tolerance_mm: 15.0
       gripper_open_deg: 35.0
       gripper_close_deg: -35.0
       gripper_open_min_width_mm: 120.0
-      gripper_close_force_n: 40.0
+      gripper_close_force_n: 100.0
       approach_axis: "+z"
       lift_height_mm: 20.0
       lift_speed_mps: 0.05
       precondition_retract_m: 0.20
       move_xarm5_clearance: false
-      approach_x_offset_m: -0.025
-      approach_y_offset_m: -0.010
-      approach_z_offset_m: 0.015
+      approach_x_offset_m: 0.037
+      approach_y_offset_m: 0.005
+      approach_z_offset_m: -0.014
       # Sideways approach (commented out — using standard top-down for now):
       # approach_quat_xyzw: [0.547778, 0.00620888, -0.0143922, 0.836477]
       # approach_rpy_deg: [180.0, 25.0, 0.0]
@@ -174,7 +199,7 @@ disassembly_sequence:
       Tune approach_x/y_offset_m to shift TCP toward the grippable edge.
       Tune approach_z_offset_m so the lower finger lands at part-surface level.
       Tune wrist_joint6_deg to fine-tune tilt direction at the grasp point.
-      grip_close_width_mm 40 mm: sandwiches the thin part without slipping.
+      final_grip_width_mm controls final grasp width; pre_grasp_width_mm controls the pre-descent jaw width.
 
   # ── Step 3: Unscrew SSD holder ────────────────────────────────────────
   - step: 3

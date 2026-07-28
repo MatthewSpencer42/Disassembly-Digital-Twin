@@ -14,7 +14,7 @@ setup(
      ('share/' + package_name + '/resource', glob(os.path.join('resource', '*.ui'))),
      ('share/' + package_name, ['package.xml']),
      ('share/' + package_name, ['plugin_evaluator.xml','plugin_calibrator.xml']),
-     (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*')))
+     (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*.py')))
    ],
  install_requires=['setuptools'],
  zip_safe=True,
@@ -22,7 +22,7 @@ setup(
  maintainer_email='esposito@imfusion.com',
  description='Simple, hardware-independent ROS2 library for hand-eye calibration',
  license='BSD',
- tests_require=['pytest'],
+ extras_require={'test': ['pytest']},
  entry_points={
      'console_scripts': [
                 'handeye_server = easy_handeye2.handeye_server:main',

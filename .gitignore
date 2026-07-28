@@ -15,6 +15,7 @@ vision_training/realsense_data/
 vision_training/record_data/
 vision_training/train_vision_model/
 vision_training/__pycache__/
+vision_training/.venv/
 # vision_training/**/*.pt
 # vision_training/**/*.pth
 # Specific inclusions requested
@@ -50,6 +51,8 @@ vision_training/**/runs/
 
 # Python
 __pycache__/
+.pytest_cache/
+*.egg-info/
 *.pyc
 *.pyo
 *.pyd

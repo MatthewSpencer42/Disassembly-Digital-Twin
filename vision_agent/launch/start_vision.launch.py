@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, TimerAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo, SetEnvironmentVariable, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -61,6 +61,11 @@ def generate_launch_description():
         LogInfo(msg="Starting full vision stack"),
         LogInfo(msg=["  Orbbec launch: ", launch_orbbec]),
         LogInfo(msg=["  Tool camera launch: ", launch_tool_cam]),
+        SetEnvironmentVariable("PYTHONNOUSERSITE", "1"),
+        SetEnvironmentVariable("NO_ALBUMENTATIONS_UPDATE", "1"),
+        SetEnvironmentVariable("TRANSFORMERS_VERBOSITY", "error"),
+        SetEnvironmentVariable("QT_LOGGING_RULES", "*.debug=false;qt.qpa.*=false"),
+        SetEnvironmentVariable("MPLCONFIGDIR", "/tmp/matplotlib"),
 
         orbbec_launch,
 

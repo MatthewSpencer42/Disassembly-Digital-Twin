@@ -6,6 +6,7 @@
 # -----------------------------------------------------------------------------
 import asyncio
 import inspect
+import os
 import re
 import ast
 import time
@@ -29,6 +30,7 @@ from disassembly_skill.object_flip_drop_skill import FlipDropSkill
 from disassembly_skill.object_pickup_skill import PickupSkill
 
 from pathlib import Path
+from ament_index_python.packages import get_package_share_directory
 try:
     from disassembly_skill.device_config import DeviceConfig
     _DEVICE_CONFIG_AVAILABLE = True
@@ -44,6 +46,22 @@ DEBUG_FULL_OUTPUT = False
 FORBIDDEN_HEADERS = ("Plan:", "Action:", "Observation:", "Final Answer:")
 FIRST_LINE_RE = re.compile(r"([^\r\n]*)")
 ACTION_RE = re.compile(r"^Action:\s*([\w_]+)\s*\((.*)\)\s*$")
+
+
+def _read_api_key(filename: str, env_var: str) -> str:
+    env_value = os.getenv(env_var)
+    if env_value:
+        return env_value.strip()
+    candidates = [
+        Path(get_package_share_directory("disassembly_skill")) / "config" / filename,
+        Path(__file__).resolve().parents[1] / "config" / filename,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path.read_text().strip()
+    raise RuntimeError(
+        f"Missing {filename}. Set {env_var} or place it under disassembly_skill/config."
+    )
 
 # -----------------------------------------------------------------------------
 # LIVE GUI DASHBOARD PROCESS (WITH COLOR MAPPING)
@@ -217,6 +235,9 @@ class GroqMasterAgentNode(Node):
                         labels.add(c.label.lower())
                     for z in cfg.screw_zones:
                         labels.add(z.zone_name.lower())
+                    for s in cfg.disassembly_sequence:
+                        if s.target:
+                            labels.add(s.target.lower())
                     self._device_label_sets[device_id] = labels
                     self.get_logger().info(
                         f"Loaded config: {device_id} / {cfg.device.device_model} "
@@ -249,17 +270,16 @@ class GroqMasterAgentNode(Node):
                 + "\n".join(device_blocks) + "\n\n"
                 "INSTRUCTIONS:\n"
                 "1. Identify the device by matching the detected object labels to the known device label sets above.\n"
-                "2. Decide the disassembly order yourself based on what is visible — there is no fixed sequence to follow.\n"
-                "   Ordering rules:\n"
-                "   - All screws in a zone must be removed before extracting the parent component.\n"
-                "   - Parts blocking access to other parts should be removed first.\n"
+                "2. Each device has a REQUIRED SEQUENCE shown in the think/plan prompts — follow it exactly in order.\n"
+                "   Do NOT invent your own order. Do NOT skip steps unless a target is confirmed absent from the scene.\n"
                 "3. Execute one action at a time and observe the result before planning the next step.\n\n"
                 "RULES:\n"
-                "A. hold_object is ONLY required immediately before flip_object or flip_drop — not before unscrewing or pickup.\n"
-                "B. You MUST call hold_object to grip the chassis before every flip_object or flip_drop call.\n"
-                "C. Unscrew all screws in a zone before extracting the parent component.\n"
-                "D. If a target label is still visible after a pickup attempt, retry the pickup.\n"
-                "E. Output Final Answer only when all removable parts are no longer visible in the scene."
+                "A. Always follow the REQUIRED SEQUENCE for the identified device — never jump ahead.\n"
+                "B. A step is 'done' only when its Observation in history explicitly confirms success.\n"
+                "C. If a target label is still visible after an attempt, retry that same step before moving on.\n"
+                "D. CRITICAL: After a successful unscrew, the freed component may shift and disappear from vision. "
+                "   ALWAYS attempt the following pickup step regardless — do NOT declare it 'absent' and skip it.\n"
+                "E. Output Final Answer only when all steps are confirmed done in the history."
             )
         else:
             self.MISSION_PROMPT = (
@@ -290,13 +310,11 @@ class GroqMasterAgentNode(Node):
 
         # Spatial Memory
         self.cleared_zones = []
+        self.unscrew_call_counts = {}
         self.EXCLUSION_RADIUS = 0.010
 
         # --- Groq API Setup ---
-        API_KEY_FILE = "/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/config/groq_api_key.txt"
-        try:
-            with open(API_KEY_FILE, "r") as f: GROQ_API_KEY = f.read().strip()
-        except FileNotFoundError: raise RuntimeError(f"Missing {API_KEY_FILE}.")
+        GROQ_API_KEY = _read_api_key("groq_api_key.txt", "GROQ_API_KEY")
 
         self.GROQ_MODEL = "llama-3.3-70b-versatile"
         self.groq_client = AsyncOpenAI(
@@ -371,6 +389,14 @@ class GroqMasterAgentNode(Node):
     # -------------------------------------------------------------------------
     # Tools implementations
     # -------------------------------------------------------------------------
+    def _get_obj_snapshot(self, obj_id):
+        """Return a frozen copy of the detected object with the given id, or None."""
+        with self.vision_lock:
+            for obj in self.detected_objects:
+                if obj.get('id') == obj_id:
+                    return dict(obj)
+        return None
+
     async def hold_object(self, part_id=None, label=None):
         if part_id is None or label is None:
             return "hold_object failed: missing part_id or label"
@@ -379,37 +405,99 @@ class GroqMasterAgentNode(Node):
         self.hold_skill.execute_hold(part_id=part_id, target_label=label, interactive=False)
         return f"hold_object succeeded — '{label}' (id={part_id}) secured."
 
+    def _find_exact_visible_target(self, label):
+        target = str(label or "").strip().lower()
+        with self.vision_lock:
+            for obj in self.detected_objects:
+                if str(obj.get('label', '')).strip().lower() == target:
+                    return dict(obj)
+        return None
+
+    def _ensure_hold_before_flip(self) -> tuple[bool, str]:
+        if self.flip_skill.is_holding_object or self.hold_skill.is_holding_object:
+            self.flip_skill.is_holding_object = True
+            return True, "already held"
+        if self.device_cfg is None:
+            return False, "no device config"
+        hold_step = next((s for s in self.device_cfg.disassembly_sequence if s.action == 'hold'), None)
+        if hold_step is None or not hold_step.target:
+            return False, "no hold step configured"
+        obj_data = self._find_exact_visible_target(hold_step.target)
+        if obj_data is None:
+            return False, f"hold target '{hold_step.target}' not visible"
+        self.hold_skill._apply_hold_config(self.device_cfg, target_label=hold_step.target, hold_step=hold_step)
+        ok = self.hold_skill.execute_hold(
+            part_id=obj_data.get('id'),
+            target_label=hold_step.target,
+            interactive=False,
+            hold_step=hold_step,
+            target_data_override=obj_data,
+        )
+        if not ok:
+            return False, "hold failed"
+        self.flip_skill.is_holding_object = True
+        return True, "hold succeeded"
+
     async def unscrew(self, unscrew_id=None, unscrew_label=None):
         if unscrew_id is None or unscrew_label is None:
             return "unscrew failed: missing unscrew_id or unscrew_label"
-        target_xyz = None
-        with self.vision_lock:
-            for obj in self.detected_objects:
-                if obj.get('id') == unscrew_id:
-                    target_xyz = obj.get('xyz')
-                    break
+        label_key = str(unscrew_label).lower()
+        if self.unscrew_call_counts.get(label_key, 0) >= 2:
+            return f"unscrew done — '{unscrew_label}' (id={unscrew_id}) marked complete."
+        self.unscrew_call_counts[label_key] = self.unscrew_call_counts.get(label_key, 0) + 1
+        obj_data = self._get_obj_snapshot(unscrew_id)
+        target_xyz = obj_data.get('xyz') if obj_data else None
         if self.device_cfg is not None:
             self.unscrew_skill._apply_unscrew_config(self.device_cfg, target_label=unscrew_label)
-        self.unscrew_skill.execute_unscrew_command(target_id=unscrew_id, target_label=unscrew_label, interactive=False)
-        if target_xyz:
-            self.cleared_zones.append(target_xyz)
-            print(f"[MEMORY] Exclusion zone added at {target_xyz} (r={self.EXCLUSION_RADIUS*1000:.0f}mm)")
-        return f"unscrew succeeded — '{unscrew_label}' (id={unscrew_id}) unthreaded."
+        result = self.unscrew_skill.execute_unscrew_command(
+            target_id=unscrew_id,
+            target_label=unscrew_label,
+            interactive=False,
+            target_data_override=obj_data,
+        )
+        if result is True:
+            if target_xyz:
+                self.cleared_zones.append(target_xyz)
+                print(f"[MEMORY] Exclusion zone added at {target_xyz} (r={self.EXCLUSION_RADIUS*1000:.0f}mm)")
+            return f"unscrew succeeded — '{unscrew_label}' (id={unscrew_id}) unthreaded."
+        if result == "HOLE":
+            return (f"unscrew skipped — '{unscrew_label}' (id={unscrew_id}) was already absent "
+                    f"(hole detected). Treat this step as done.")
+        return (f"unscrew FAILED — could not extract '{unscrew_label}' (id={unscrew_id}). "
+                f"The screw is still present. Retry this step.")
 
     async def flip_object(self):
-        self.flip_skill.execute_flip(interactive=False)
+        if self.device_cfg is not None:
+            self.flip_skill._apply_flip_config(self.device_cfg)
+        hold_ok, hold_note = self._ensure_hold_before_flip()
+        if not hold_ok:
+            return f"flip_object FAILED — could not hold device before flip ({hold_note}). Retry hold_object."
+        ok = self.flip_skill.execute_flip(interactive=False)
+        if not ok:
+            return "flip_object FAILED — could not flip device. Retry."
         return "flip_object succeeded — device flipped to expose opposite side."
 
     async def flip_drop(self):
-        self.flip_drop_skill.execute_flip_drop(interactive=False)
+        ok = self.flip_drop_skill.execute_flip_drop(interactive=False)
+        if not ok:
+            return "flip_drop FAILED — could not dump parts. Retry."
         return "flip_drop succeeded — loose parts dumped."
 
     async def pickup_object(self, pickup_id=None, pickup_label=None):
         if pickup_id is None or pickup_label is None:
             return "pickup_object failed: missing pickup_id or pickup_label"
+        obj_data = self._get_obj_snapshot(pickup_id)
         if self.device_cfg is not None:
             self.pickup_skill._apply_pickup_config(self.device_cfg, target_label=pickup_label)
-        self.pickup_skill.execute_pickup(target_id=pickup_id, target_label=pickup_label, interactive=False)
+        ok = self.pickup_skill.execute_pickup(
+            target_id=pickup_id,
+            target_label=pickup_label,
+            interactive=False,
+            target_snapshot=obj_data,
+        )
+        if not ok:
+            return (f"pickup_object FAILED — could not extract '{pickup_label}' (id={pickup_id}). "
+                    f"Retry this step.")
         return f"pickup_object succeeded — '{pickup_label}' (id={pickup_id}) extracted."
 
     # -------------------------------------------------------------------------
@@ -433,6 +521,10 @@ class GroqMasterAgentNode(Node):
             raw_objects = data.get("global_view", {}).get("objects", [])
 
             # Spatial Memory Filtering
+            def _is_screw_or_hole(label: str) -> bool:
+                lbl = (label or "").lower()
+                return "screw" in lbl or "hole" in lbl
+
             temp_list = []
             for o in raw_objects:
                 obj_id = o.get("id")
@@ -440,6 +532,10 @@ class GroqMasterAgentNode(Node):
                 obj_xyz = o.get("xyz")
 
                 if not obj_xyz or len(obj_xyz) < 3:
+                    temp_list.append({"id": obj_id, "label": obj_label, "xyz": obj_xyz})
+                    continue
+
+                if not _is_screw_or_hole(obj_label):
                     temp_list.append({"id": obj_id, "label": obj_label, "xyz": obj_xyz})
                     continue
 
@@ -478,13 +574,52 @@ class GroqMasterAgentNode(Node):
 
                 if not self.auto_start_triggered and len(self.detected_objects) > 0:
                     self.auto_start_triggered = True
-                    initial_state = {"input": self.MISSION_PROMPT, "history": [], "phase": "plan"}
+                    seq_ctx = self._build_sequence_context()
+                    mission = (
+                        self.MISSION_PROMPT + "\n\n" + seq_ctx
+                        if seq_ctx else self.MISSION_PROMPT
+                    )
+                    initial_state = {"input": mission, "history": [], "phase": "plan"}
                     asyncio.run_coroutine_threadsafe(self.run_agent(initial_state), self.loop)
-        except Exception: pass
+        except Exception as exc:
+            self.get_logger().warning(f"Vision callback failed: {exc}")
 
     # -------------------------------------------------------------------------
     # Prompt builders
     # -------------------------------------------------------------------------
+    _ACTION_TO_TOOL = {
+        'hold':      'hold_object',
+        'unscrew':   'unscrew',
+        'pickup':    'pickup_object',
+        'flip':      'flip_object',
+        'flip_drop': 'flip_drop',
+    }
+
+    def _build_sequence_context(self) -> str:
+        """Return the device's ordered disassembly sequence for injection into every prompt."""
+        if self.device_cfg is None:
+            return ""
+        lines = [
+            f"REQUIRED SEQUENCE for {self._identified_device_class} "
+            f"({self.device_cfg.device.device_model}) — follow these steps strictly in order:",
+        ]
+        for i, step in enumerate(self.device_cfg.disassembly_sequence, 1):
+            tool = self._ACTION_TO_TOOL.get(step.action, step.action)
+            target = step.target or ""
+            target_str = f"  target_label=\"{target}\"" if target else ""
+            lines.append(f"  Step {i}: {tool}{target_str}  [{step.label}]")
+        lines.append(
+            "Rules: "
+            "(a) Execute the next incomplete step. "
+            "(b) Skip a step ONLY if its target label is absent AND the step has NOT yet been attempted. "
+            "    Do NOT skip a step simply because its target is absent AFTER the preceding step just succeeded — "
+            "    the object may have shifted when its screw was removed. Always attempt pickup after a successful unscrew. "
+            "(c) Never jump ahead — complete each step before the next. "
+            "(d) A step is DONE only if its Observation in the history confirms success. "
+            "    Do NOT re-apply the 'absent = skip' logic to steps that are already confirmed done."
+        )
+        return "\n".join(lines)
+
     def format_tool_list(self) -> str:
         lines = []
         for name, tool in self.tools.items():
@@ -507,21 +642,29 @@ class GroqMasterAgentNode(Node):
             f"Identified device: {self._identified_device_class} ({self.device_cfg.device.device_model})"
             if self.device_cfg else "Device: not yet identified — infer from visible labels."
         )
-        guide = "\n".join([
+        seq_ctx = self._build_sequence_context()
+        guide_parts = [
             "You are the reasoning stage of a ReAct robotic disassembly agent.",
             "Output MUST start with: Reasoning:",
             "Do NOT output Plan:, Action:, Observation:, or Final Answer: here.",
-            "Summarise what was last done and state the next logical step to take.",
+            "Identify the next INCOMPLETE step from the sequence below and state what must be done.",
             "",
             device_str,
+        ]
+        if seq_ctx:
+            guide_parts.append(seq_ctx)
+        guide_parts += [
+            "",
             f"Current scene ({len(self.detected_objects)} objects):",
             vision_str,
-        ])
+        ]
+        guide = "\n".join(guide_parts)
         return "\n".join([guide, "", "Tools available:", tool_list, "", f"Mission: {user_input}", *history, ""])
 
     def build_plan_prompt(self, user_input: str, history: List[str]) -> str:
         tool_list = self.format_tool_list()
-        guide = "\n".join([
+        seq_ctx = self._build_sequence_context()
+        guide_parts = [
             "You are a ReAct agent controlling a robot arm.",
             "Output exactly ONE line.",
             "It MUST start with: Plan:  (or you may output Final Answer: if the task is complete).",
@@ -529,13 +672,20 @@ class GroqMasterAgentNode(Node):
             "Rules:",
             "- Output exactly ONE line only.",
             "- Do NOT output Action:, Observation:, or Reasoning: here.",
-            "- If uncertain, make a cautious Plan that leads to an Action next.",
-            ""])
+            "- Plan the next step from the REQUIRED SEQUENCE that has not yet been completed.",
+            "- Never skip ahead in the sequence.",
+            "",
+        ]
+        if seq_ctx:
+            guide_parts.append(seq_ctx)
+            guide_parts.append("")
+        guide = "\n".join(guide_parts)
         return "\n".join([guide, "Tools available:", tool_list, "", f"User: {user_input}", *history, ""])
 
     def build_action_prompt(self, user_input: str, history: List[str]) -> str:
         tool_list = self.format_tool_list()
-        guide = "\n".join([
+        seq_ctx = self._build_sequence_context()
+        guide_parts = [
             "You are a ReAct agent controlling a robot arm.",
             "Output exactly ONE line.",
             "It MUST start with: Action:",
@@ -547,7 +697,13 @@ class GroqMasterAgentNode(Node):
             "- Do not invent extra keyword arguments.",
             "- Format: Action: tool_name(arg_name=value, ...)",
             "- Example: Action: unscrew(unscrew_id=1, unscrew_label=\"pcb_screw\")",
-            ""])
+            "- Use the target_label exactly as shown in the REQUIRED SEQUENCE.",
+            "",
+        ]
+        if seq_ctx:
+            guide_parts.append(seq_ctx)
+            guide_parts.append("")
+        guide = "\n".join(guide_parts)
         return "\n".join([guide, "Tools available:", tool_list, "", f"User: {user_input}", *history, ""])
 
     # -------------------------------------------------------------------------
@@ -668,11 +824,12 @@ class GroqMasterAgentNode(Node):
 
         app = graph.compile()
         try:
-            with open("agent_architecture.md", "w") as f:
+            with open("/tmp/disassembly_groq_master_agent_architecture.md", "w") as f:
                 f.write("```mermaid\n")
                 f.write(app.get_graph().draw_mermaid())
                 f.write("\n```")
-        except Exception: pass
+        except Exception as exc:
+            self.get_logger().warning(f"Could not write agent architecture graph: {exc}")
         return app
 
     async def run_agent(self, state: AgentState):

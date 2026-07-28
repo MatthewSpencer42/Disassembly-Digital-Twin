@@ -41,7 +41,12 @@ def find_repo_root(current_path: str, target_name: str = "agentic_disassembly") 
 WS_ROOT = find_repo_root(__file__)
 EXPECTED_4K_WIDTH = 3840
 EXPECTED_4K_HEIGHT = 2160
-DATA_COLLECTION_ROOT = "/home/adip/workspace/disassembly_ws/src/agentic_disassembly/vision_training/data_collection/data"
+DATA_COLLECTION_ROOT = os.path.join(
+    WS_ROOT or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+    "vision_training",
+    "data_collection",
+    "data",
+)
 SAVE_SUBDIR = "hdd"
 
 

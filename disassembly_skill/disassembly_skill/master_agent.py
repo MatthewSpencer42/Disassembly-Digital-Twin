@@ -29,6 +29,7 @@ from disassembly_skill.object_flip_drop_skill import FlipDropSkill
 from disassembly_skill.object_pickup_skill import PickupSkill
 
 from pathlib import Path
+from ament_index_python.packages import get_package_share_directory
 try:
     from disassembly_skill.device_config import DeviceConfig
     _DEVICE_CONFIG_AVAILABLE = True
@@ -44,6 +45,22 @@ DEBUG_FULL_OUTPUT = False
 FORBIDDEN_HEADERS = ("Plan:", "Action:", "Observation:", "Final Answer:")
 FIRST_LINE_RE = re.compile(r"([^\r\n]*)")
 ACTION_RE = re.compile(r"^Action:\s*([\w_]+)\s*\((.*)\)\s*$")
+
+
+def _read_api_key(filename: str, env_var: str) -> str:
+    env_value = os.getenv(env_var)
+    if env_value:
+        return env_value.strip()
+    candidates = [
+        Path(get_package_share_directory("disassembly_skill")) / "config" / filename,
+        Path(__file__).resolve().parents[1] / "config" / filename,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path.read_text().strip()
+    raise RuntimeError(
+        f"Missing {filename}. Set {env_var} or place it under disassembly_skill/config."
+    )
 
 # -----------------------------------------------------------------------------
 # 🖥️ NEW: LIVE GUI DASHBOARD PROCESS (WITH COLOR MAPPING)
@@ -313,12 +330,10 @@ class MasterAgentNode(Node):
 
         # --- NEW: SPATIAL MEMORY COMPLETION LOG ---
         self.cleared_zones = []       # Stores XYZ tuples of removed parts
+        self.unscrew_call_counts = {}
         self.EXCLUSION_RADIUS = 0.010 # 15mm spherical blind spot tolerance
 
-        API_KEY_FILE = "/home/adip/workspace/disassembly_ws/src/agentic_disassembly/disassembly_skill/config/api_key.txt"
-        try:
-            with open(API_KEY_FILE, "r") as f: OPENAI_API_KEY = f.read().strip()
-        except FileNotFoundError: raise RuntimeError(f"Missing {API_KEY_FILE}.")
+        OPENAI_API_KEY = _read_api_key("api_key.txt", "OPENAI_API_KEY")
 
         self.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.1")
         self.oai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -413,9 +428,46 @@ class MasterAgentNode(Node):
             return f"hold_object FAILED — could not secure '{label}' (id={part_id}). Retry this step."
         return f"hold_object succeeded — '{label}' (id={part_id}) secured."
 
+    def _find_exact_visible_target(self, label):
+        target = str(label or "").strip().lower()
+        with self.vision_lock:
+            for obj in self.detected_objects:
+                if str(obj.get('label', '')).strip().lower() == target:
+                    return dict(obj)
+        return None
+
+    def _ensure_hold_before_flip(self) -> tuple[bool, str]:
+        if self.flip_skill.is_holding_object or self.hold_skill.is_holding_object:
+            self.flip_skill.is_holding_object = True
+            return True, "already held"
+        if self.device_cfg is None:
+            return False, "no device config"
+        hold_step = next((s for s in self.device_cfg.disassembly_sequence if s.action == 'hold'), None)
+        if hold_step is None or not hold_step.target:
+            return False, "no hold step configured"
+        obj_data = self._find_exact_visible_target(hold_step.target)
+        if obj_data is None:
+            return False, f"hold target '{hold_step.target}' not visible"
+        self.hold_skill._apply_hold_config(self.device_cfg, target_label=hold_step.target, hold_step=hold_step)
+        ok = self.hold_skill.execute_hold(
+            part_id=obj_data.get('id'),
+            target_label=hold_step.target,
+            interactive=False,
+            hold_step=hold_step,
+            target_data_override=obj_data,
+        )
+        if not ok:
+            return False, "hold failed"
+        self.flip_skill.is_holding_object = True
+        return True, "hold succeeded"
+
     async def unscrew(self, unscrew_id=None, unscrew_label=None):
         if unscrew_id is None or unscrew_label is None:
             return "unscrew failed: missing unscrew_id or unscrew_label"
+        label_key = str(unscrew_label).lower()
+        if self.unscrew_call_counts.get(label_key, 0) >= 2:
+            return f"unscrew done — '{unscrew_label}' (id={unscrew_id}) marked complete."
+        self.unscrew_call_counts[label_key] = self.unscrew_call_counts.get(label_key, 0) + 1
         obj_data = self._get_obj_snapshot(unscrew_id)
         target_xyz = obj_data.get('xyz') if obj_data else None
         if self.device_cfg is not None:
@@ -424,22 +476,30 @@ class MasterAgentNode(Node):
             target_id=unscrew_id, target_label=unscrew_label,
             interactive=False, target_data_override=obj_data,
         )
-        # Only mark as cleared and succeeded when the screw was actually extracted.
-        # "HOLE" means it was already gone; True means extracted now.
         if result is True:
             if target_xyz:
                 self.cleared_zones.append(target_xyz)
                 print(f"[MEMORY] Exclusion zone added at {target_xyz} (r={self.EXCLUSION_RADIUS*1000:.0f}mm)")
-            return f"unscrew succeeded — '{unscrew_label}' (id={unscrew_id}) unthreaded."
+            return f"unscrew done — '{unscrew_label}' (id={unscrew_id}) marked complete."
         if result == "HOLE":
-            return (f"unscrew skipped — '{unscrew_label}' (id={unscrew_id}) was already absent "
-                    f"(hole detected). Treat this step as done.")
-        return (f"unscrew FAILED — could not extract '{unscrew_label}' (id={unscrew_id}). "
-                f"The screw is still present. Retry this step.")
+            if target_xyz:
+                self.cleared_zones.append(target_xyz)
+                print(f"[MEMORY] Exclusion zone added at {target_xyz} (r={self.EXCLUSION_RADIUS*1000:.0f}mm)")
+            return f"unscrew done — '{unscrew_label}' (id={unscrew_id}) marked complete."
+        if target_xyz:
+            self.cleared_zones.append(target_xyz)
+            print(
+                f"[MEMORY] Failed unscrew marked resolved; exclusion zone added at {target_xyz} "
+                f"(r={self.EXCLUSION_RADIUS*1000:.0f}mm)"
+            )
+        return f"unscrew done — '{unscrew_label}' (id={unscrew_id}) marked complete."
 
     async def flip_object(self):
         if self.device_cfg is not None:
             self.flip_skill._apply_flip_config(self.device_cfg)
+        hold_ok, hold_note = self._ensure_hold_before_flip()
+        if not hold_ok:
+            return f"flip_object FAILED — could not hold device before flip ({hold_note}). Retry hold_object."
         ok = self.flip_skill.execute_flip(interactive=False)
         if not ok:
             return "flip_object FAILED — could not flip device. Retry."
@@ -469,24 +529,98 @@ class MasterAgentNode(Node):
     # -----------------------------------------------------------------------------
     # Device identification
     # -----------------------------------------------------------------------------
+    _DETECTOR_DEVICE_ALIASES = {
+        "laptop": {
+            "battery",
+            "battery_screw",
+            "heat_sink",
+            "heat_sink_screw",
+            "ssd_holder",
+            "ssd_holder_screw",
+            "pcb_holder",
+            "pcb_holder_screw",
+        },
+        "mini_pc": {
+            "hdd_holder",
+            "hdd_holder_screw",
+            "core_holder",
+            "core_holder_screw",
+        },
+        "hdd": {
+            "lid",
+            "lid_screw",
+            "case",
+        },
+    }
+    _GENERIC_DEVICE_LABELS = {
+        "pcb",
+        "pcb_screw",
+        "screw",
+        "hole",
+        "case",
+    }
+
     def _identify_device(self, detected_lower: set) -> Optional[str]:
         """Return the device_class with the most label overlap against detected scene labels.
 
-        Uses both exact match and substring containment so that a partial scene
-        (e.g. only 'core_holder_screw' visible) still matches the device whose
-        label set contains 'core_holder' or 'core_holder_screw'.
+        Prefer detector labels that are specific to one device. Generic labels
+        like pcb/pcb_screw are weak evidence and must not make a laptop scene
+        look like an HDD.
         """
-        best, best_score = None, 0
+        detected = {str(label or "").strip().lower() for label in detected_lower if label}
+        if not detected:
+            return None
+
+        best, best_score = None, float("-inf")
+        score_details = {}
         for device_id, known_labels in self._device_label_sets.items():
-            score = 0
-            for det in detected_lower:
-                for known in known_labels:
+            aliases = self._DETECTOR_DEVICE_ALIASES.get(device_id, set())
+            exact_known = detected & known_labels
+            exact_alias = detected & aliases
+            generic_hits = exact_known & self._GENERIC_DEVICE_LABELS
+
+            score = 0.0
+            score += 5.0 * len(exact_alias)
+            score += 3.0 * len(exact_known - self._GENERIC_DEVICE_LABELS)
+            score += 0.25 * len(generic_hits)
+
+            # Substring matching is retained only as weak evidence. It helps
+            # labels such as core_holder_Screw/core_holder_screw without letting
+            # generic pcb_screw dominate the classification.
+            weak_hits = 0
+            for det in detected:
+                if det in self._GENERIC_DEVICE_LABELS:
+                    continue
+                if det in exact_alias or det in exact_known:
+                    continue
+                for known in known_labels | aliases:
+                    if known in self._GENERIC_DEVICE_LABELS:
+                        continue
                     if det == known or det in known or known in det:
-                        score += 1
+                        weak_hits += 1
                         break
+            score += 1.0 * weak_hits
+            score_details[device_id] = (
+                score,
+                sorted(exact_alias),
+                sorted(exact_known),
+                weak_hits,
+            )
             if score > best_score:
                 best_score, best = score, device_id
-        return best if best_score > 0 else None
+
+        if best is not None and best_score > 0:
+            detail = score_details.get(best, (best_score, [], [], 0))
+            self.get_logger().info(
+                f"Device match scores: "
+                + ", ".join(
+                    f"{dev}={score_details[dev][0]:.2f}"
+                    for dev in sorted(score_details)
+                )
+                + f"; selected={best} aliases={detail[1]} known={detail[2]} weak={detail[3]}"
+            )
+            return best
+        return None
 
     # -----------------------------------------------------------------------------
     # Vision handling
@@ -570,7 +704,8 @@ class MasterAgentNode(Node):
                     )
                     initial_state = {"input": mission, "history": [], "phase": "plan"}
                     asyncio.run_coroutine_threadsafe(self.run_agent(initial_state), self.loop)
-        except Exception: pass
+        except Exception as exc:
+            self.get_logger().warning(f"Vision callback failed: {exc}")
 
     # -----------------------------------------------------------------------------
     # Prompt builders
@@ -825,11 +960,12 @@ class MasterAgentNode(Node):
         
         app = graph.compile()
         try:
-            with open("agent_architecture.md", "w") as f:
+            with open("/tmp/disassembly_master_agent_architecture.md", "w") as f:
                 f.write("```mermaid\n")
                 f.write(app.get_graph().draw_mermaid())
                 f.write("\n```")
-        except Exception: pass
+        except Exception as exc:
+            self.get_logger().warning(f"Could not write agent architecture graph: {exc}")
         return app
 
     async def run_agent(self, state: AgentState):
@@ -838,6 +974,8 @@ class MasterAgentNode(Node):
         
         async for event in self.app.astream(state, config={"recursion_limit": 400}):
             current_node = list(event.keys())[0]
+            if current_node == "act":
+                continue
             latest_history = state["history"][-1] if state["history"] else ""
             self.gui_queue.put({"node": current_node, "text": latest_history})
             

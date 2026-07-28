@@ -405,16 +405,45 @@ class ConfigRunner(Node):
         with self._vision_lock:
             return list(self._latest_vision.get("global_view", {}).get("objects", []) or [])
 
+    @staticmethod
+    def _norm_label(label: str) -> str:
+        return str(label or "").strip().lower()
+
+    @staticmethod
+    def _has_valid_xyz(obj) -> bool:
+        xyz = obj.get("xyz")
+        return isinstance(xyz, (list, tuple)) and len(xyz) >= 3 and all(v is not None for v in xyz[:3])
+
+    @staticmethod
+    def _is_aux_detection_label(label: str) -> bool:
+        label = str(label or "").lower()
+        return "screw" in label or "hole" in label
+
+    def _labels_match_for_step(self, obj_label: str, target_label: str) -> bool:
+        obj_norm = self._norm_label(obj_label)
+        target_norm = self._norm_label(target_label)
+        if not obj_norm or not target_norm:
+            return False
+        if obj_norm == target_norm:
+            return True
+        if self._is_aux_detection_label(obj_norm) and not self._is_aux_detection_label(target_norm):
+            return False
+        return target_norm in obj_norm or obj_norm in target_norm
+
     def _find_global_label(self, label: str):
-        label_norm = str(label or "").strip().lower()
+        label_norm = self._norm_label(label)
         if not label_norm:
             return None
-        for obj in self._global_objects():
-            obj_label = str(obj.get("label", "")).strip().lower()
-            if obj_label == label_norm or label_norm in obj_label:
-                xyz = obj.get("xyz")
-                if isinstance(xyz, (list, tuple)) and len(xyz) >= 3 and all(v is not None for v in xyz[:3]):
-                    return obj
+        valid = [obj for obj in self._global_objects() if self._has_valid_xyz(obj)]
+        exact = next(
+            (obj for obj in valid if self._norm_label(obj.get("label", "")) == label_norm),
+            None,
+        )
+        if exact is not None:
+            return exact
+        for obj in valid:
+            if self._labels_match_for_step(obj.get("label", ""), label):
+                return obj
         return None
 
     def _wait_for_global_label(self, label: str, timeout_s: float = 3.0):
@@ -604,13 +633,12 @@ class ConfigRunner(Node):
         advances to the next screw without aborting the whole zone.
         """
         screw_count = step.parameters.get("screw_count", 1)
+        effective_screw_count = min(int(screw_count), 2)
         zone_name   = step.target
         # Apply per-zone config parameters (e.g. pcb_screw vs lid_screw differ in HDD)
         self.unscrew_skill._apply_unscrew_config(self.cfg, target_label=zone_name)
-        if not self._ensure_hold_for_step(step, "unscrew"):
-            return False
 
-        detected = self._collect_unscrew_targets(zone_name, screw_count)
+        detected = self._collect_unscrew_targets(zone_name, effective_screw_count)
 
         # ── Zone-first ordering ───────────────────────────────────────────────
         # Always attempt zone-matched screws before falling back to screws that
@@ -634,7 +662,7 @@ class ConfigRunner(Node):
         # steps in the sequence and must not be attempted here — doing so would
         # cause the runner to jump ahead and unscrew parts that haven't been
         # revealed yet (e.g. attempting core_holder_screw during hdd_holder_screw step).
-        targets_to_try = zone_matched
+        targets_to_try = zone_matched[:effective_screw_count]
 
         self._log(
             f"  Vision: {len(detected)} screw candidate(s) visible  "
@@ -648,11 +676,11 @@ class ConfigRunner(Node):
                 f"(not '{zone_name}'): will be handled by their own steps.",
                 "info",
             )
-        if len(zone_matched) < screw_count:
+        if len(targets_to_try) < effective_screw_count:
             self._log(
                 f"  [WARN] Only {len(zone_matched)} zone-matched '{zone_name}' screws detected "
                 f"(config expects {screw_count}). "
-                f"Will attempt all {len(zone_matched)} zone-matched screw(s); "
+                f"Will attempt {len(targets_to_try)} zone-matched screw(s); "
                 f"step completes when zone-matched screws are exhausted.",
                 "warn",
             )
@@ -742,7 +770,7 @@ class ConfigRunner(Node):
             step.parameters.get("align_only_debug", False)
             or step.parameters.get("coarse_only_debug", False)
         )
-        expected_visible = min(int(screw_count), len(targets_to_try)) if targets_to_try else 0
+        expected_visible = min(effective_screw_count, len(targets_to_try)) if targets_to_try else 0
         successful_visible = done + holes
         resolved_visible = successful_visible + (skipped if skip_counts_as_resolved else 0)
         zone_ok = (
@@ -809,7 +837,10 @@ class ConfigRunner(Node):
         if not self._ensure_hold_for_step(step, "flip"):
             return False
         self.flip_skill.is_holding_object = self._held_now()
-        return self.flip_skill.execute_flip(interactive=False)
+        ok = self.flip_skill.execute_flip(interactive=False, release_after=True)
+        if ok:
+            self._sync_hold_state(False)
+        return ok
 
     def _run_flip_drop(self, _step) -> bool:
         return self.flip_drop_skill.execute_flip_drop(interactive=False)

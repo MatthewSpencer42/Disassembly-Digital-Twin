@@ -204,9 +204,11 @@ class RGBridge:
     def set_force(self, force_n: float):
         self.target_force_n = clamp(force_n, 0.0, 120.0)
 
-    def set_width_mm(self, width_mm: float):
+    def set_width_mm(self, width_mm: float, force: bool = False):
         self.target_width_mm = clamp(width_mm, MM_CLOSE, MM_OPEN)
         self.pending_width_mm = self.target_width_mm
+        if force:
+            self.last_sent_width_mm = None
         if self.client is None:
             self.last_width_with_offset_mm = self.target_width_mm
             return
@@ -760,6 +762,8 @@ class RealHardware(Node):
         self.grip_detected_pub = self.create_publisher(Bool, "/rg6/grip_detected", 10)
         self.create_subscription(JointState, "/robot_joint_commands", self.handle_joint_command, 10,
                                  callback_group=self._command_cb_group)
+        self.create_subscription(JointState, "/rg6/joint_command", self.handle_rg6_joint_command, 10,
+                                 callback_group=self._command_cb_group)
         self.create_subscription(JointState, "/robot_joint_velocity_commands", self.handle_joint_velocity_command, 10,
                                  callback_group=self._command_cb_group)
         self.create_subscription(Float32, "/rg6/force_command", self.handle_gripper_force, 10,
@@ -863,20 +867,39 @@ class RealHardware(Node):
             else:
                 self.last_slider_command = slider_command
 
-        if "rg6_right_drive_joint" in command_map:
-            if time.time() - self.start_time < GRIPPER_COMMAND_ARM_DELAY_S:
-                self.last_gripper_command = float(command_map["rg6_right_drive_joint"])
-                return
-            command = float(command_map["rg6_right_drive_joint"])
-            target_width_mm = self.rad_to_width_mm(command)
-            target_width_stale = abs(target_width_mm - self.rg6.target_width_mm) > GRIPPER_WIDTH_EPS_MM
-            if (
-                self.last_gripper_command is None
-                or abs(command - self.last_gripper_command) > 1e-3
-                or target_width_stale
-            ):
-                self.rg6.set_width_mm(target_width_mm)
-                self.last_gripper_command = command
+    def handle_rg6_joint_command(self, msg: JointState):
+        command_map = {
+            name: msg.position[index]
+            for index, name in enumerate(msg.name)
+            if index < len(msg.position)
+        }
+        if "rg6_right_drive_joint" not in command_map:
+            return
+        if time.time() - self.start_time < GRIPPER_COMMAND_ARM_DELAY_S:
+            self.last_gripper_command = float(command_map["rg6_right_drive_joint"])
+            return
+        command = float(command_map["rg6_right_drive_joint"])
+        target_width_mm = self.rad_to_width_mm(command)
+        target_width_stale = abs(target_width_mm - self.rg6.target_width_mm) > GRIPPER_WIDTH_EPS_MM
+        current_width_error = abs(target_width_mm - self.rg6.last_width_mm)
+        gripper_stalled_before_target = (
+            current_width_error > 5.0
+            and not self.rg6.is_moving
+            and not self.rg6.object_detected
+        )
+        if (
+            self.last_gripper_command is None
+            or abs(command - self.last_gripper_command) > 1e-3
+            or target_width_stale
+            or gripper_stalled_before_target
+        ):
+            if gripper_stalled_before_target and throttle(self._log_state, "rg6_force_requeue", 1.0):
+                self.get_logger().warning(
+                    f"RG6: target {target_width_mm:.1f}mm is active but physical width "
+                    f"is stalled at {self.rg6.last_width_mm:.1f}mm; force-requeueing Modbus write"
+                )
+            self.rg6.set_width_mm(target_width_mm, force=gripper_stalled_before_target)
+            self.last_gripper_command = command
 
     def handle_joint_velocity_command(self, msg: JointState):
         velocity_map = {

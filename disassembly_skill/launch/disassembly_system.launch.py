@@ -1,3 +1,4 @@
+import os
 from launch import LaunchDescription
 from pathlib import Path
 
@@ -31,10 +32,23 @@ def _stage_exit_handlers(process_action, stage_name: str, critical: bool = True)
     return RegisterEventHandler(OnProcessExit(target_action=process_action, on_exit=_callback))
 
 
+def _default_moveit_servo_setup() -> str:
+    env_path = os.environ.get("MOVEIT_SERVO_SETUP", "").strip()
+    candidates = [
+        env_path,
+        "/home/adip/workspace/dev_ws/install/moveit_servo/share/moveit_servo/local_setup.bash",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return ""
+
+
 def generate_launch_description():
     hardware_type = LaunchConfiguration("hardware_type")
     tool_video_device = LaunchConfiguration("tool_video_device")
     vision_backend = LaunchConfiguration("vision_backend")
+    moveit_servo_setup = LaunchConfiguration("moveit_servo_setup")
 
     # Clean up stale Orbbec depth-engine lock left by unclean shutdowns.
     cleanup_orbbec_lock = ExecuteProcess(
@@ -46,6 +60,9 @@ def generate_launch_description():
     handeye_calibration_file = (
         Path(get_package_share_directory("dual_arm_moveit_config")) / "config" / "orbbec_handeye_new.calib"
     )
+    workspace_setup_file = (
+        Path(get_package_share_directory("disassembly_skill")).parents[2] / "setup.bash"
+    )
 
     moveit_stage = ExecuteProcess(
         cmd=[
@@ -54,8 +71,21 @@ def generate_launch_description():
             [
                 TextSubstitution(
                     text=(
-                        "source /home/adip/workspace/dev_ws/install/moveit_servo/share/moveit_servo/local_setup.bash && "
-                        "source /home/adip/workspace/disassembly_ws/install/setup.bash && "
+                        "source /opt/ros/humble/setup.bash && "
+                        "if [ -n \""
+                    )
+                ),
+                moveit_servo_setup,
+                TextSubstitution(
+                    text=(
+                        "\" ]; then source \""
+                    )
+                ),
+                moveit_servo_setup,
+                TextSubstitution(
+                    text=(
+                        "\"; fi && "
+                        f"source \"{workspace_setup_file}\" && "
                         "export LD_PRELOAD=/opt/ros/humble/lib/librviz_default_plugins.so${LD_PRELOAD:+:$LD_PRELOAD} && "
                         "exec ros2 launch dual_arm_moveit_config exotica.launch.py hardware_type:="
                     )
@@ -226,6 +256,14 @@ def generate_launch_description():
                 "vision_backend",
                 default_value="rfdetr",
                 description="Vision inference backend: 'rfdetr' (RF-DETR, default) or 'yolo' (YOLOv11 seg)",
+            ),
+            DeclareLaunchArgument(
+                "moveit_servo_setup",
+                default_value=_default_moveit_servo_setup(),
+                description=(
+                    "Optional extra setup.bash/local_setup.bash to source before the current workspace "
+                    "when using a custom MoveIt Servo overlay."
+                ),
             ),
             cleanup_orbbec_lock,
             LogInfo(msg="🚀 [1/5] Starting EXOTica MoveIt stack..."),

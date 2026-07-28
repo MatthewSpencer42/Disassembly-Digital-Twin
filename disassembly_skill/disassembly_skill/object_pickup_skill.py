@@ -79,12 +79,15 @@ class PickupSkill(Node):
         self.POST_GRASP_RETRACT_M = 0.03
         self.MOVE_XARM5_CLEARANCE = False
         self.PRECONDITION_RETRACT_M = 0.10
+        self.PICKUP_DESCENT_SPEED_MPS = 0.08
+        self.PRE_GRASP_CLEARANCE_M = 0.015
         self.ACCEPT_MAX_DEPTH_WITHOUT_CONTACT = True
         self.DESCENT_ACCEPT_RATIO = 0.85
         self.SKIP_IF_NOT_DETECTED = True   # skip gracefully when target not in vision snapshot
-        # Pre-descent gripper width (mm). RG6 neutral = 80 mm (0 rad).
-        # Increase for wider objects so fingers don't clip edges during descent.
-        self.PRE_DESCENT_GRIPPER_WIDTH_MM = 80.0
+        self.GRIP_WIDTH_MM = 80.0
+        self.PRE_GRASP_WIDTH_MM = None
+        self.FINAL_GRIP_WIDTH_TOLERANCE_MM = 12.0
+        self.PRE_DESCENT_WIDTH_MARGIN_RATIO = 0.35
         # Extra descent below the detected object Z (m).  Used to slide gripper
         # fingers past the object centroid before closing.  0 = stop at detected Z.
         self.Z_EXTRA_DESCENT_M = 0.0
@@ -94,9 +97,7 @@ class PickupSkill(Node):
         self.CONTACT_GRACE_M = 0.015  # 15 mm default
         # Max grasp retries when vision still sees the target after gripper closes.
         self.PICKUP_MAX_RETRIES = 2
-        # Partial-close width (mm). None = fully close to CLOSE_DEG.
-        # Set to e.g. 40.0 to stop at 40 mm physical gap instead of fully shut.
-        self.GRIP_CLOSE_WIDTH_MM = None
+        self.PICKUP_RETRY_Z_STEP_M = 0.002
         # Extra joint-6 wrist rotation (rad) applied just before descent.
         # 0 = no rotation; home move resets it to 0 after each pickup.
         self.WRIST_JOINT6_RAD = 0.0
@@ -136,12 +137,20 @@ class PickupSkill(Node):
         return pickup_steps[0]
 
     def _apply_pickup_config(self, cfg, target_label=None, pickup_step=None):
+        self.device_cfg = cfg
         matched = pickup_step if pickup_step is not None else self._select_pickup_step(cfg, target_label)
         if matched is None:
             return
         self.active_pickup_step = matched
         p = matched.parameters
         self.GRIPPER_CLOSE_FORCE_N = p.get('gripper_close_force_n', self.GRIPPER_CLOSE_FORCE_N)
+        final_grip_width = p.get('final_grip_width_mm', p.get('grip_width_mm', self.GRIP_WIDTH_MM))
+        self.GRIP_WIDTH_MM = float(final_grip_width)
+        pre_grasp_width = p.get('pre_grasp_width_mm', p.get('pre_descent_gripper_width_mm', None))
+        self.PRE_GRASP_WIDTH_MM = float(pre_grasp_width) if pre_grasp_width is not None else None
+        self.FINAL_GRIP_WIDTH_TOLERANCE_MM = float(
+            p.get('final_grip_width_tolerance_mm', self.FINAL_GRIP_WIDTH_TOLERANCE_MM)
+        )
         self.HOVER_HEIGHT = p.get('lift_height_mm', 50.0) / 1000.0
         self.HOVER_HEIGHT = p.get('hover_height_m', self.HOVER_HEIGHT)
         self.APPROACH_X_OFFSET = p.get('approach_x_offset_m', self.APPROACH_X_OFFSET)
@@ -176,23 +185,27 @@ class PickupSkill(Node):
         self.POST_GRASP_RETRACT_SPEED = p.get('lift_speed_mps', self.POST_GRASP_RETRACT_SPEED)
         self.MOVE_XARM5_CLEARANCE = bool(p.get('move_xarm5_clearance', self.MOVE_XARM5_CLEARANCE))
         self.PRECONDITION_RETRACT_M = p.get('precondition_retract_m', self.PRECONDITION_RETRACT_M)
+        self.PICKUP_DESCENT_SPEED_MPS = float(
+            p.get('pickup_descent_speed_mps', self.PICKUP_DESCENT_SPEED_MPS)
+        )
+        self.PRE_GRASP_CLEARANCE_M = float(
+            p.get('pickup_pre_grasp_clearance_mm', self.PRE_GRASP_CLEARANCE_M * 1000.0)
+        ) / 1000.0
         self.ACCEPT_MAX_DEPTH_WITHOUT_CONTACT = bool(
             p.get('accept_max_depth_without_contact', self.ACCEPT_MAX_DEPTH_WITHOUT_CONTACT)
         )
         self.DESCENT_ACCEPT_RATIO = p.get('descent_accept_ratio', self.DESCENT_ACCEPT_RATIO)
         self.SKIP_IF_NOT_DETECTED = bool(p.get('skip_if_not_detected', self.SKIP_IF_NOT_DETECTED))
-        self.PRE_DESCENT_GRIPPER_WIDTH_MM = float(
-            p.get('pre_descent_gripper_width_mm', self.PRE_DESCENT_GRIPPER_WIDTH_MM)
-        )
         self.Z_EXTRA_DESCENT_M = float(p.get('z_extra_descent_mm', 0.0)) / 1000.0
         self.CONTACT_GRACE_M = float(p.get('contact_grace_mm', 15.0)) / 1000.0
         self.PICKUP_MAX_RETRIES = int(p.get('pickup_max_retries', self.PICKUP_MAX_RETRIES))
-        gcw = p.get('grip_close_width_mm', None)
-        self.GRIP_CLOSE_WIDTH_MM = float(gcw) if gcw is not None else None
+        self.PICKUP_RETRY_Z_STEP_M = float(
+            p.get('pickup_retry_z_step_mm', self.PICKUP_RETRY_Z_STEP_M * 1000.0)
+        ) / 1000.0
         self.WRIST_JOINT6_RAD = math.radians(float(p.get('wrist_joint6_deg', 0.0)))
         self.GRIPPER_OPEN_MIN_WIDTH_MM = p.get(
             'gripper_open_min_width_mm',
-            max(float(p.get('grip_width_mm', 80.0)) + 30.0, self.GRIPPER_OPEN_MIN_WIDTH_MM),
+            max(float(final_grip_width) + 30.0, self.GRIPPER_OPEN_MIN_WIDTH_MM),
         )
         drop = {
             'x': p.get('drop_x', self.DROP_POSE['x']),
@@ -208,6 +221,11 @@ class PickupSkill(Node):
         self.CLOSE_DEG = abs(close_deg)
         source = getattr(cfg, "source_path", None)
         rpy_desc = self._approach_rpy_desc()
+        pre_grasp_desc = (
+            f"{self.PRE_GRASP_WIDTH_MM:.1f}mm"
+            if self.PRE_GRASP_WIDTH_MM is not None
+            else "auto"
+        )
         self.get_logger().info(
             f"[pickup] Config applied from {source}: step={matched.step} target='{matched.target}' "
             f"offsets=({self.APPROACH_X_OFFSET*1000:.1f}, {self.APPROACH_Y_OFFSET*1000:.1f}, "
@@ -215,6 +233,11 @@ class PickupSkill(Node):
             f"rpy={rpy_desc} "
             f"contact_retract={self.CONTACT_RETRACT_M*1000:.1f}mm "
             f"gripper(open={self.OPEN_DEG:.1f}°, close={self.CLOSE_DEG:.1f}°) "
+            f"grip_width={self.GRIP_WIDTH_MM:.1f}mm "
+            f"pre_grasp_width={pre_grasp_desc} "
+            f"pre_grasp_clearance={self.PRE_GRASP_CLEARANCE_M*1000:.1f}mm "
+            f"final_grip_tolerance={self.FINAL_GRIP_WIDTH_TOLERANCE_MM:.1f}mm "
+            f"retry_z_step={self.PICKUP_RETRY_Z_STEP_M*1000:.1f}mm "
             f"open_min_width={self.GRIPPER_OPEN_MIN_WIDTH_MM:.1f}mm "
             f"accept_full_depth={self.ACCEPT_MAX_DEPTH_WITHOUT_CONTACT} "
             f"xarm5_clearance={self.MOVE_XARM5_CLEARANCE}"
@@ -227,7 +250,8 @@ class PickupSkill(Node):
         try:
             data = json.loads(msg.data.strip().strip("'").strip('"'))
             with self.data_lock: self.latest_targets = data.get("global_view", {}).get("objects", [])
-        except Exception: pass
+        except Exception as exc:
+            self.get_logger().warn(f"[pickup] Failed to parse vision update: {exc}")
 
     @staticmethod
     def _has_valid_xyz(target):
@@ -239,14 +263,77 @@ class PickupSkill(Node):
         label = str(target.get("label", "")).lower()
         return any(k in label for k in keywords)
 
+    @staticmethod
+    def _is_aux_detection_label(label: str) -> bool:
+        label = str(label or "").lower()
+        return "screw" in label or "hole" in label
+
+    def _pickup_label_matches(self, item_label, target_label, allow_fuzzy=True) -> bool:
+        """Match pickup labels without allowing component->screw confusion."""
+        label = self._norm_label(item_label)
+        target = self._norm_label(target_label)
+        if not label or not target:
+            return False
+        if label == target:
+            return True
+
+        target_is_aux = self._is_aux_detection_label(target)
+        if self._is_aux_detection_label(label) and not target_is_aux:
+            return False
+
+        if not allow_fuzzy:
+            return False
+        return target in label or label in target
+
+    def _find_pickup_target_in_list(self, targets, target_label, target_id=None):
+        """Find a component pickup target without accidentally matching screws."""
+        norm_target = self._norm_label(target_label)
+        if target_id is not None:
+            by_id = next((t for t in targets if t.get('id') == target_id), None)
+            if by_id is not None:
+                if self._pickup_label_matches(by_id.get('label', ''), target_label):
+                    return by_id
+                self.get_logger().warning(
+                    f"[pickup] Ignoring provided target ID={target_id} "
+                    f"label='{by_id.get('label')}' for pickup target '{target_label}'."
+                )
+
+        def _candidate(item):
+            label = self._norm_label(item.get('label', ''))
+            if not label:
+                return False
+            if ("screw" in label or "hole" in label) and not (
+                "screw" in norm_target or "hole" in norm_target
+            ):
+                return False
+            return True
+
+        exact = next(
+            (
+                t for t in targets
+                if _candidate(t)
+                and self._pickup_label_matches(t.get('label', ''), norm_target, allow_fuzzy=False)
+            ),
+            None,
+        )
+        if exact is not None:
+            return exact
+
+        return next(
+            (
+                t for t in targets
+                if _candidate(t) and self._pickup_label_matches(t.get('label', ''), norm_target)
+            ),
+            None,
+        )
+
     def _select_pickup_target(self, target_label=None):
         with self.data_lock:
             valid = [t for t in self.latest_targets if self._has_valid_xyz(t)]
-        target_norm = self._norm_label(target_label)
-        if target_norm:
-            preferred = [t for t in valid if target_norm in self._norm_label(t.get("label"))]
+        if target_label:
+            preferred = self._find_pickup_target_in_list(valid, target_label)
             if preferred:
-                return preferred[0]
+                return preferred
         return valid[0] if valid else None
 
     def publish_state(self, s): 
@@ -324,6 +411,12 @@ class PickupSkill(Node):
         width = max(RG6_MM_CLOSE, min(RG6_MM_OPEN, float(width_mm)))
         normalized = (width - RG6_MM_CLOSE) / (RG6_MM_OPEN - RG6_MM_CLOSE)
         return RG6_RAD_CLOSE + normalized * (RG6_RAD_OPEN - RG6_RAD_CLOSE)
+
+    def _pre_descent_gripper_width_mm(self) -> float:
+        if self.PRE_GRASP_WIDTH_MM is not None:
+            return max(0.0, min(160.0, float(self.PRE_GRASP_WIDTH_MM)))
+        width = self.GRIP_WIDTH_MM * (1.0 + self.PRE_DESCENT_WIDTH_MARGIN_RATIO)
+        return max(0.0, min(160.0, float(width)))
 
     @staticmethod
     def _quat_desc(q):
@@ -417,17 +510,14 @@ class PickupSkill(Node):
             reasserting for `hold_after_settle_s` so the command is firm before
             the arm starts retracting.
           • Retries the whole sequence up to `attempts` times.
-        If GRIP_CLOSE_WIDTH_MM is set, the gripper closes only to that physical
-        gap (mm) instead of fully to CLOSE_DEG.
+        Final pickup grasp closes to the configured grip_width_mm for every
+        pickup target.
         """
-        if self.GRIP_CLOSE_WIDTH_MM is not None:
-            target_rad = self._width_mm_to_gripper_rad(self.GRIP_CLOSE_WIDTH_MM)
-            self.get_logger().info(
-                f"[pickup] Grip close width override: {self.GRIP_CLOSE_WIDTH_MM:.1f}mm "
-                f"→ {target_rad:.4f}rad ({math.degrees(target_rad):.1f}°)"
-            )
-        else:
-            target_rad = math.radians(self.CLOSE_DEG)
+        target_rad = self._width_mm_to_gripper_rad(self.GRIP_WIDTH_MM)
+        self.get_logger().info(
+            f"[pickup] Final grip width: {self.GRIP_WIDTH_MM:.1f}mm "
+            f"→ {target_rad:.4f}rad ({math.degrees(target_rad):.1f}°)"
+        )
         for attempt in range(1, attempts + 1):
             self.get_logger().info(
                 f"[pickup] Closing gripper attempt {attempt}/{attempts}: "
@@ -435,7 +525,12 @@ class PickupSkill(Node):
             )
             self.gripper.set_gripper_force(self.GRIPPER_CLOSE_FORCE_N)
             self.gripper._publish_gripper_command(self.JOINT_GRIPPER, target_rad)
-            if self._wait_for_gripper_close_physical(target_rad, hold_after_settle_s, timeout=7.0):
+            if self._wait_for_gripper_close_physical(
+                target_rad,
+                hold_after_settle_s,
+                timeout=8.0,
+                require_target_or_object=True,
+            ):
                 return True
             self.get_logger().warning(
                 f"[pickup] Close attempt {attempt}/{attempts} did not settle — retrying..."
@@ -446,7 +541,13 @@ class PickupSkill(Node):
         )
         return False
 
-    def _wait_for_gripper_close_physical(self, target_rad, hold_after_settle_s=0.5, timeout=7.0):
+    def _wait_for_gripper_close_physical(
+        self,
+        target_rad,
+        hold_after_settle_s=0.5,
+        timeout=7.0,
+        require_target_or_object=False,
+    ):
         """
         Poll until the gripper stops moving (stalled on object or fully closed).
         Continuously republishes the close command; if the gripper unexpectedly
@@ -459,6 +560,9 @@ class PickupSkill(Node):
         settled_at = None
         last_republish = 0.0
         last_width = None
+        last_wait_log = 0.0
+        target_width_mm = self.gripper._rg6_rad_to_width_mm(target_rad)
+        width_tolerance_mm = max(2.0, float(self.FINAL_GRIP_WIDTH_TOLERANCE_MM))
 
         while rclpy.ok() and (time.time() - start_t) < timeout:
             state = self.gripper.current_gripper_state
@@ -467,6 +571,11 @@ class PickupSkill(Node):
             except Exception:
                 width_mm = None
             is_moving = bool(state.get("is_moving", False))
+            object_detected = bool(state.get("object_detected", False))
+            target_reached = (
+                width_mm is not None
+                and width_mm <= target_width_mm + width_tolerance_mm
+            )
 
             now = time.time()
             # Continuously reassert so hardware never times out or reverts
@@ -486,8 +595,24 @@ class PickupSkill(Node):
                 stable_since = None
                 settled_at = None
 
-            # Settled = not moving (gripping object or fully closed)
+            # Settled = not moving.  For final grasp, require either the RG6
+            # object-detected bit or actual width near the commanded target;
+            # otherwise a small/no-motion stall would be falsely accepted.
             if not is_moving:
+                if require_target_or_object and not object_detected and not target_reached:
+                    if now - last_wait_log >= 0.8:
+                        w_desc = f"{width_mm:.1f}mm" if width_mm is not None else "unknown"
+                        self.get_logger().warning(
+                            f"[pickup] Gripper stopped before final grasp target: width={w_desc}, "
+                            f"target={target_width_mm:.1f}mm, object_detected={object_detected}. "
+                            "Reasserting close command."
+                        )
+                        last_wait_log = now
+                    stable_since = None
+                    settled_at = None
+                    last_width = width_mm
+                    time.sleep(0.1)
+                    continue
                 if stable_since is None:
                     stable_since = now
                 elif now - stable_since >= 0.4:
@@ -510,6 +635,69 @@ class PickupSkill(Node):
             time.sleep(0.1)
 
         return False
+
+    def _command_pre_grasp_width(self, target_rad, timeout=3.0) -> bool:
+        """Move RG6 to a wide pre-grasp width without final-grasp verification.
+
+        Pre-grasp is only a clearance posture before descent.  It must not use
+        the final close verifier because the RG6 width estimate can oscillate
+        while moving to a wide intermediate target, causing endless "unexpected
+        opening" reassertions even though the jaws are open enough.
+        """
+        target_width_mm = self.gripper._rg6_rad_to_width_mm(target_rad)
+        accept_width_mm = target_width_mm + 18.0
+        start_t = time.time()
+        last_publish = 0.0
+        last_width = None
+        stable_since = None
+
+        while rclpy.ok() and time.time() - start_t < float(timeout):
+            now = time.time()
+            if now - last_publish >= 0.45:
+                self.gripper.set_gripper_force(self.GRIPPER_CLOSE_FORCE_N)
+                self.gripper._publish_gripper_command(self.JOINT_GRIPPER, target_rad)
+                last_publish = now
+
+            state = self.gripper.current_gripper_state
+            try:
+                width_mm = float(state.get("width_mm"))
+            except Exception:
+                width_mm = None
+            is_moving = bool(state.get("is_moving", False))
+
+            if width_mm is not None and width_mm <= accept_width_mm:
+                if not is_moving:
+                    self.get_logger().info(
+                        f"[pickup] Pre-grasp width accepted: width={width_mm:.1f}mm "
+                        f"(target {target_width_mm:.1f}mm, accept <= {accept_width_mm:.1f}mm)."
+                    )
+                    return True
+                if last_width is not None and abs(width_mm - last_width) <= 1.0:
+                    if stable_since is None:
+                        stable_since = now
+                    elif now - stable_since >= 0.3:
+                        self.get_logger().info(
+                            f"[pickup] Pre-grasp width stable enough: width={width_mm:.1f}mm "
+                            f"(target {target_width_mm:.1f}mm)."
+                        )
+                        return True
+                else:
+                    stable_since = None
+            else:
+                stable_since = None
+
+            last_width = width_mm
+            time.sleep(0.1)
+
+        state = self.gripper.current_gripper_state
+        width = state.get("width_mm", "unknown")
+        self.get_logger().warning(
+            f"[pickup] Pre-grasp width command timed out at width={width}; continuing if jaws are clear."
+        )
+        try:
+            return float(width) <= accept_width_mm
+        except Exception:
+            return False
 
     def _open_gripper_verified(self, attempts=3):
         target_rad = math.radians(self.OPEN_DEG)
@@ -670,6 +858,43 @@ class PickupSkill(Node):
             self.get_logger().warning(f"[pickup] Could not read rg6_tcp z: {exc}")
             return None
 
+    def _wait_for_tcp_z_after_descent(
+        self,
+        target_z: float,
+        planned_start_z: float,
+        *,
+        timeout_s: float = 1.5,
+        low_tol_m: float = 0.004,
+        high_tol_m: float = 0.008,
+    ) -> float | None:
+        """Poll TF briefly after a trajectory returns.
+
+        ExecuteTrajectory can report success before the local TF/joint-state
+        cache has caught up.  Pickup descents are short, so a stale sample looks
+        exactly like "travelled=0mm" and causes a false retry.  Return the
+        lowest Z observed during the catch-up window.
+        """
+        deadline = time.time() + max(0.05, float(timeout_s))
+        best_z = None
+        last_z = None
+        while rclpy.ok() and time.time() < deadline:
+            z = self._tcp_z()
+            if z is None:
+                time.sleep(0.05)
+                continue
+            if best_z is None or z < best_z:
+                best_z = z
+            if float(target_z) - low_tol_m <= z <= float(target_z) + high_tol_m:
+                return z
+            # If TF has moved downward from the planned start, give one more
+            # short interval for it to settle near the executed endpoint.
+            if z < float(planned_start_z) - 0.002:
+                last_z = z
+            elif last_z is not None and abs(z - last_z) < 0.001:
+                return best_z
+            time.sleep(0.05)
+        return best_z
+
     def _descent_reached_expected_depth(self, start_z, target_depth_m):
         if start_z is None:
             return False
@@ -694,6 +919,54 @@ class PickupSkill(Node):
             self.get_logger().warning(
                 f"[pickup] Accepting kinematic-limited descent: {travelled*1000:.1f}mm "
                 f">= floor {kinematic_floor*1000:.1f}mm (IK workspace boundary)."
+            )
+            return True
+        return False
+
+    def _wrist_locked_joint_error(self, locked_joints: dict[str, float] | None) -> float:
+        if not locked_joints:
+            return 0.0
+        errors = []
+        for name, target in locked_joints.items():
+            current = self.uf850.current_joint_positions.get(name)
+            if current is None:
+                continue
+            errors.append(abs(self._wrap_to_pi(float(current) - float(target))))
+        return max(errors) if errors else 0.0
+
+    def _accept_partial_wrist_locked_descent(
+        self,
+        planned_start_z: float,
+        target_z: float,
+        final_z: float | None,
+        descent_m: float,
+        locked_joints: dict[str, float] | None,
+    ) -> bool:
+        """Accept a shallow but real wrist-locked descent near the workspace edge.
+
+        HDD lid pickup rotates joint6 by 90 degrees before descent.  At that
+        posture, the exact deep Z target can be over-constrained even though the
+        arm has moved into a usable grasp depth.  Let the gripper close and
+        verify the grasp instead of repeatedly driving deeper into an IK limit.
+        """
+        if not locked_joints or not self.ACCEPT_MAX_DEPTH_WITHOUT_CONTACT or final_z is None:
+            return False
+        descent_m = max(0.0, float(descent_m))
+        if descent_m <= 0.0:
+            return False
+
+        travelled = max(0.0, float(planned_start_z) - float(final_z))
+        z_err = float(final_z) - float(target_z)
+        min_travel = max(0.004, min(0.006, descent_m * 0.30))
+        max_high_err = 0.012
+        wrist_err = self._wrist_locked_joint_error(locked_joints)
+        if travelled >= min_travel and z_err <= max_high_err and wrist_err <= math.radians(12.0):
+            self.get_logger().warning(
+                f"[pickup/descend] Accepting partial wrist-locked descent near IK limit: "
+                f"travelled={travelled*1000:.1f}/{descent_m*1000:.1f}mm, "
+                f"target_error={z_err*1000:.1f}mm, "
+                f"max_locked_joint_error={math.degrees(wrist_err):.1f}°. "
+                "Continuing to gripper close for physical grasp validation."
             )
             return True
         return False
@@ -786,56 +1059,274 @@ class PickupSkill(Node):
         """Normalise angle to (−π, π]."""
         return math.atan2(math.sin(angle_rad), math.cos(angle_rad))
 
-    def _descend_to_grasp_z(self, distance_m: float, speed_mps: float = 0.05) -> bool:
-        """Descend by distance_m using MoveIt Servo velocity commands.
+    def _descend_to_grasp_z(
+        self,
+        target_z: float,
+        speed_mps: float = 0.05,
+        *,
+        target_x: float | None = None,
+        target_y: float | None = None,
+        q_dict: dict | None = None,
+        start_z_hint: float | None = None,
+        locked_joints: dict[str, float] | None = None,
+    ) -> bool:
+        """Descend directly to target_z with a planned Z move.
 
-        Servo sends continuous z-linear velocity twists — smooth motion with no
-        stepping.  Only the z-axis moves; joint6 stays at whatever angle was
-        set at the pre-grasp stop.  Falls back to streaming EXOTica IK if servo
-        is unavailable.
+        This deliberately mirrors the drop-pose Z descent, but uses the pickup
+        target X/Y computed from the latest vision snapshot.  TF is only a state
+        check here; using TF X/Y after gripper motion can pick up stale poses and
+        send the arm back toward an old/drop pose.
         """
-        speed = max(0.01, min(float(speed_mps), 0.10))
-        # UF850 servo Z convention is inverted: positive twist = descend (DOWN).
-        ok = self.uf850.retract_servo_z_closed_loop(abs(float(distance_m)), speed_mps=speed)
-        # Stop servo and anchor JTC at actual position BEFORE returning.
-        # Without this, servo stays active while the gripper closes and through
-        # _verified_post_grasp_retract's stop_servo call, leaving the JTC's
-        # internal position tracking diverged from feedback — which causes jerk
-        # at the start of every subsequent trajectory, compounding over time.
-        self.uf850.stop_servo(timeout_sec=2.0)
-        time.sleep(0.15)
-        self.uf850._hold_current_arm_position()
-        time.sleep(0.10)
-        if not ok:
-            # Servo unavailable — fall back to streaming EXOTica IK
-            self.get_logger().warning("[pickup/descend] Servo descent failed; using streaming EXOTica IK.")
-            rate_hz = 50.0
-            step_m = speed / rate_hz
-            remaining = [abs(float(distance_m))]
+        target_z = float(target_z)
+        min_tcp_z = getattr(self.uf850, "min_tcp_z", None)
+        if min_tcp_z is not None:
+            target_z = max(target_z, float(min_tcp_z) + 0.002)
 
-            def _descend_fn():
-                if remaining[0] <= 0.0:
-                    return None
-                try:
-                    tf = self.uf850.tf_buffer.lookup_transform("base_link", "rg6_tcp", rclpy.time.Time())
-                    ex = float(tf.transform.translation.x)
-                    ey = float(tf.transform.translation.y)
-                    ez = float(tf.transform.translation.z)
-                    q = tf.transform.rotation
-                    roll, pitch, yaw = self.uf850._quaternion_to_rpy(q.x, q.y, q.z, q.w)
-                except Exception:
-                    return None
-                this_step = min(step_m, remaining[0])
-                remaining[0] -= this_step
-                return (ex, ey, ez - this_step, roll, pitch, yaw)
+        try:
+            start_tf = self.uf850.tf_buffer.lookup_transform("base_link", "rg6_tcp", rclpy.time.Time())
+            start_x = float(start_tf.transform.translation.x)
+            start_y = float(start_tf.transform.translation.y)
+            start_z = float(start_tf.transform.translation.z)
+            if q_dict is None:
+                q = start_tf.transform.rotation
+                q_dict = {"qx": q.x, "qy": q.y, "qz": q.z, "qw": q.w}
+        except Exception as exc:
+            self.get_logger().error(f"[pickup/descend] Cannot read start TCP Z: {exc}")
+            return False
 
-            timeout = abs(float(distance_m)) / max(speed, 1e-3) * 4.0 + 2.0
-            result = self.uf850.move_cartesian_realtime_exotica(
-                _descend_fn, rate_hz=rate_hz, max_step_m=step_m * 2.0,
-                joint_smooth_alpha=0.4, timeout_s=timeout,
+        cmd_x = float(target_x) if target_x is not None else start_x
+        cmd_y = float(target_y) if target_y is not None else start_y
+        planned_start_z = start_z
+        if start_z_hint is not None:
+            hinted_z = float(start_z_hint)
+            if abs(start_z - hinted_z) > 0.050:
+                self.get_logger().warning(
+                    f"[pickup/descend] TF start Z looks stale: tf={start_z:.4f}, "
+                    f"expected_pre_grasp={hinted_z:.4f}. Using expected value for descent checks."
+                )
+                planned_start_z = hinted_z
+
+        if planned_start_z <= target_z + 0.002:
+            self.get_logger().info(
+                f"[pickup/descend] TCP already at target depth: z={planned_start_z:.4f}, target={target_z:.4f}"
             )
-            ok = result in ("DONE", "STOPPED")
-        return ok
+            return True
+
+        speed = max(0.005, min(float(speed_mps), 0.08))
+        descent_m = max(0.0, planned_start_z - target_z)
+        self.get_logger().info(
+            f"[pickup/descend] Planned Z descent: xyz=({cmd_x:.4f},{cmd_y:.4f},{target_z:.4f}) "
+            f"start={planned_start_z:.4f}, "
+            f"target={target_z:.4f}, distance={descent_m*1000:.1f}mm, "
+            f"speed={speed*1000:.1f}mm/s"
+        )
+        if target_x is not None or target_y is not None:
+            xy_err = math.hypot(start_x - cmd_x, start_y - cmd_y)
+            if xy_err > 0.030:
+                self.get_logger().warning(
+                    f"[pickup/descend] Current TF XY differs from commanded pickup XY by "
+                    f"{xy_err*1000:.1f}mm; keeping commanded target XY."
+                )
+        if locked_joints:
+            self.get_logger().info(
+                f"[pickup/descend] Streaming wrist-locked descent with locked joints: "
+                + ", ".join(f"{name}={math.degrees(value):.1f}°" for name, value in locked_joints.items())
+            )
+            fallback_ok = self._finish_descent_closed_loop(
+                cmd_x,
+                cmd_y,
+                target_z,
+                q_dict,
+                speed_mps=speed,
+                locked_joints=locked_joints,
+            )
+            if fallback_ok:
+                return True
+            final_z = self._tcp_z()
+            return self._accept_partial_wrist_locked_descent(
+                planned_start_z,
+                target_z,
+                final_z,
+                descent_m,
+                locked_joints,
+            )
+        else:
+            ok = self.uf850.move_to_pose_exotica(cmd_x, cmd_y, target_z, q_dict=q_dict, velocity=speed)
+        if not ok:
+            self.get_logger().warning("[pickup/descend] EXOTica planned descent failed; trying MoveIt IK.")
+            ok = self.uf850.move_to_pose_robust(cmd_x, cmd_y, target_z, q_dict=q_dict, velocity=speed)
+        if not ok:
+            fallback_ok = self._finish_descent_closed_loop(
+                cmd_x,
+                cmd_y,
+                target_z,
+                q_dict,
+                speed_mps=speed,
+                locked_joints=locked_joints,
+            )
+            if fallback_ok:
+                return True
+            final_z = self._tcp_z()
+            return self._accept_partial_wrist_locked_descent(
+                planned_start_z,
+                target_z,
+                final_z,
+                descent_m,
+                locked_joints,
+            )
+
+        end_z = self._wait_for_tcp_z_after_descent(target_z, planned_start_z, timeout_s=1.5)
+        if end_z is not None:
+            z_err = end_z - target_z
+            travelled = max(0.0, planned_start_z - end_z)
+            wrist_err = self._wrist_locked_joint_error(locked_joints)
+            if -0.004 <= z_err <= 0.008 and wrist_err <= math.radians(12.0):
+                return True
+            self.get_logger().warning(
+                f"[pickup/descend] Planned descent did not reach target safely: actual={end_z:.4f}, "
+                f"target={target_z:.4f}, error={z_err*1000:.1f}mm, "
+                f"travelled={travelled*1000:.1f}/{descent_m*1000:.1f}mm."
+            )
+            if locked_joints and wrist_err > math.radians(12.0):
+                self.get_logger().warning(
+                    f"[pickup/descend] Wrist drifted {math.degrees(wrist_err):.1f}° during pose descent; "
+                    "retrying with hard joint constraint."
+                )
+            self.get_logger().warning(
+                "[pickup/descend] Pose descent did not verify; retrying the same descent with MoveIt IK "
+                "before streaming fallback."
+            )
+            moveit_ok = self.uf850.move_to_pose_robust(
+                cmd_x,
+                cmd_y,
+                target_z,
+                q_dict=q_dict,
+                velocity=speed,
+                locked_joints=locked_joints,
+            )
+            if moveit_ok:
+                moveit_z = self._wait_for_tcp_z_after_descent(target_z, planned_start_z, timeout_s=1.2)
+                if moveit_z is None:
+                    return True
+                moveit_err = moveit_z - target_z
+                moveit_wrist_err = self._wrist_locked_joint_error(locked_joints)
+                if -0.004 <= moveit_err <= 0.008 and moveit_wrist_err <= math.radians(12.0):
+                    self.get_logger().info(
+                        f"[pickup/descend] MoveIt IK descent reached target: "
+                        f"actual={moveit_z:.4f}, target={target_z:.4f}, "
+                        f"error={moveit_err*1000:.1f}mm"
+                    )
+                    return True
+                self.get_logger().warning(
+                    f"[pickup/descend] MoveIt IK descent also missed target: "
+                    f"actual={moveit_z:.4f}, target={target_z:.4f}, "
+                    f"error={moveit_err*1000:.1f}mm."
+                )
+            else:
+                self.get_logger().warning("[pickup/descend] MoveIt IK descent retry failed.")
+            fallback_ok = self._finish_descent_closed_loop(
+                cmd_x,
+                cmd_y,
+                target_z,
+                q_dict,
+                speed_mps=speed,
+                locked_joints=locked_joints,
+            )
+            if fallback_ok:
+                return True
+            final_z = self._tcp_z()
+            return self._accept_partial_wrist_locked_descent(
+                planned_start_z,
+                target_z,
+                final_z,
+                descent_m,
+                locked_joints,
+            )
+
+        return True
+
+    def _finish_descent_closed_loop(
+        self,
+        target_x: float,
+        target_y: float,
+        target_z: float,
+        q_dict: dict,
+        speed_mps: float = 0.04,
+        locked_joints: dict[str, float] | None = None,
+    ) -> bool:
+        """Finish a short pickup descent with TF-verified incremental IK steps."""
+        start_z = self._tcp_z()
+        if start_z is None:
+            return False
+        if -0.004 <= (start_z - target_z) <= 0.008:
+            return True
+
+        q = q_dict or self._current_tcp_quat()
+        if not q:
+            return False
+        roll, pitch, yaw = self.uf850._quaternion_to_rpy(
+            float(q["qx"]), float(q["qy"]), float(q["qz"]), float(q["qw"])
+        )
+
+        remaining = max(0.0, start_z - float(target_z))
+        if remaining <= 0.0:
+            return start_z <= float(target_z) + 0.008
+
+        rate_hz = 40.0
+        step_m = max(0.0005, min(float(speed_mps) / rate_hz, 0.0015))
+        timeout_s = max(3.0, remaining / max(float(speed_mps), 0.005) * 4.0 + 1.0)
+        command_z = [float(start_z)]
+
+        self.get_logger().warning(
+            f"[pickup/descend] Continuing with closed-loop descent fallback: "
+            f"start={start_z:.4f}, target={target_z:.4f}, remaining={remaining*1000:.1f}mm"
+        )
+
+        def _target_fn():
+            current_z = self._tcp_z()
+            if current_z is not None and current_z <= float(target_z) + 0.006:
+                return None
+            if current_z is not None:
+                command_z[0] = min(command_z[0], float(current_z))
+            command_z[0] = max(float(target_z), command_z[0] - step_m)
+            return (
+                float(target_x),
+                float(target_y),
+                command_z[0],
+                roll,
+                pitch,
+                yaw,
+            )
+
+        result = self.uf850.move_cartesian_realtime_exotica(
+            _target_fn,
+            rate_hz=rate_hz,
+            max_step_m=max(step_m * 2.0, 0.001),
+            joint_smooth_alpha=0.55,
+            timeout_s=timeout_s,
+            max_joint_delta_rad=0.35,
+            max_joint_step_rad=0.025,
+            locked_joints=locked_joints,
+        )
+        self.uf850._hold_current_arm_position()
+        time.sleep(0.15)
+
+        final_z = self._tcp_z()
+        if final_z is None:
+            return result in ("DONE", "STOPPED")
+        z_err = final_z - float(target_z)
+        if -0.004 <= z_err <= 0.008:
+            self.get_logger().info(
+                f"[pickup/descend] Closed-loop fallback reached target: "
+                f"actual={final_z:.4f}, target={target_z:.4f}, error={z_err*1000:.1f}mm"
+            )
+            return True
+
+        self.get_logger().warning(
+            f"[pickup/descend] Closed-loop fallback did not reach target: result={result}, "
+            f"actual={final_z:.4f}, target={target_z:.4f}, error={z_err*1000:.1f}mm"
+        )
+        return False
 
     def _wrist_joint6_safe_target(self, delta_rad: float) -> float:
         """Return the joint6 target that applies delta_rad while staying closest to 0.
@@ -891,36 +1382,21 @@ class PickupSkill(Node):
 
         # Ensure clean trajectory mode (previous skill may have left servo on)
         self.uf850.stop_servo()
-        # Anchor JTC at actual joint feedback before any trajectory.
-        # After multi-step sequences the JTC's commanded state can drift from
-        # hardware feedback regardless of servo state — re-anchoring here
-        # prevents the discontinuity at the start of the first hover trajectory.
-        self.uf850._hold_current_arm_position()
-        time.sleep(0.15)
+        time.sleep(0.05)
 
         # --- PRE-FLIGHT VISION CHECK (before any arm movement) ---
         # Verify target is visible NOW — avoids releasing hold/homing for nothing.
         print(f"🔎 Pre-flight vision check for '{target_label}'...")
         with self.data_lock:
-            _pf_target = None
-            if target_id is not None:
-                _pf_target = next(
-                    (t for t in self.latest_targets if t.get('id') == target_id), None
-                )
-            if not _pf_target:
-                _pf_target = next(
-                    (t for t in self.latest_targets
-                     if self._norm_label(target_label) in self._norm_label(t.get('label', ''))),
-                    None,
-                )
+            _pf_target = self._find_pickup_target_in_list(
+                self.latest_targets,
+                target_label,
+                target_id=target_id,
+            )
             if not _pf_target and target_snapshot is not None:
-                snap_label = self._norm_label(target_snapshot.get('label', ''))
                 if (
                     self._has_valid_xyz(target_snapshot)
-                    and (
-                        self._norm_label(target_label) in snap_label
-                        or snap_label in self._norm_label(target_label)
-                    )
+                    and self._pickup_label_matches(target_snapshot.get('label', ''), target_label)
                 ):
                     _pf_target = dict(target_snapshot)
         if not _pf_target:
@@ -950,6 +1426,8 @@ class PickupSkill(Node):
             print("🏠 Homing UF850...")
             if not self._move_uf850_home_and_latch():
                 return False
+            print("🔄 Refreshing vision after hold release and home...")
+            time.sleep(1.0)
 
         # --- STEP 0b: POSITION SAFETY CHECK ---
         # If arm is not near home (e.g. hold state was cleared before this node started),
@@ -1007,17 +1485,15 @@ class PickupSkill(Node):
 
         target = None
         with self.data_lock:
-            # 1. Try to find by ID first
-            if target_id is not None:
-                target = next((t for t in self.latest_targets if t.get('id') == target_id), None)
-            
-            # 2. Fallback: If ID is stale, find by label in the current live snapshot.
+            target = self._find_pickup_target_in_list(
+                self.latest_targets,
+                target_label,
+                target_id=target_id,
+            )
             if not target:
                 print(f"⚠️ ID {target_id} not present. Searching by label '{target_label}'...")
-                target = next((t for t in self.latest_targets if self._norm_label(target_label) in self._norm_label(t.get('label'))), None)
             if not target and target_snapshot is not None and self._has_valid_xyz(target_snapshot):
-                snap_label = self._norm_label(target_snapshot.get('label', ''))
-                if self._norm_label(target_label) in snap_label or snap_label in self._norm_label(target_label):
+                if self._pickup_label_matches(target_snapshot.get('label', ''), target_label):
                     print(
                         f"[pickup] Live snapshot missed '{target_label}'; using runner-verified "
                         f"snapshot ID={target_snapshot.get('id')}."
@@ -1046,9 +1522,10 @@ class PickupSkill(Node):
         tx = world_p.pose.position.x + self.APPROACH_X_OFFSET
         ty = world_p.pose.position.y + self.APPROACH_Y_OFFSET
         final_z = world_p.pose.position.z + self.APPROACH_Z_OFFSET
-        # Ensure hover is at least 10 mm above the pre-grasp stop (which is always
-        # 30 mm above final_z), so the arm never moves upward on the way to pre-grasp.
-        hover_z = final_z + max(self.HOVER_HEIGHT, 0.040)
+        centroid_z = world_p.pose.position.z
+        # Ensure hover is at least 10 mm above the pre-grasp stop, so the arm
+        # never moves upward on the way to pre-grasp.
+        hover_z = final_z + max(self.HOVER_HEIGHT, self.PRE_GRASP_CLEARANCE_M + 0.010)
         self.get_logger().info(
             f"[pickup] Target base=({world_p.pose.position.x:.3f},{world_p.pose.position.y:.3f},"
             f"{world_p.pose.position.z:.3f}) offsets=({self.APPROACH_X_OFFSET:.3f},"
@@ -1107,11 +1584,7 @@ class PickupSkill(Node):
                 print(f"🔄 {attempt_tag} Refreshing vision for '{target_label}' and re-hovering...")
                 time.sleep(1.0)   # wait for fresh vision frame
                 with self.data_lock:
-                    fresh_t = next(
-                        (t for t in self.latest_targets
-                         if self._norm_label(target_label) in self._norm_label(t.get('label', ''))),
-                        None,
-                    )
+                    fresh_t = self._find_pickup_target_in_list(self.latest_targets, target_label)
                 if fresh_t and self._has_valid_xyz(fresh_t):
                     raw_p2 = Pose()
                     raw_p2.position.x, raw_p2.position.y, raw_p2.position.z = fresh_t['xyz']
@@ -1120,7 +1593,8 @@ class PickupSkill(Node):
                         tx = world_p2.pose.position.x + self.APPROACH_X_OFFSET
                         ty = world_p2.pose.position.y + self.APPROACH_Y_OFFSET
                         final_z = world_p2.pose.position.z + self.APPROACH_Z_OFFSET
-                        hover_z = final_z + max(self.HOVER_HEIGHT, 0.040)
+                        centroid_z = world_p2.pose.position.z
+                        hover_z = final_z + max(self.HOVER_HEIGHT, self.PRE_GRASP_CLEARANCE_M + 0.010)
                         print(f"   Fresh centroid → ({tx:.3f}, {ty:.3f}, grasp_z={final_z:.4f})")
                 else:
                     print(f"   [WARN] '{target_label}' not found in refreshed vision; using previous coords.")
@@ -1133,12 +1607,16 @@ class PickupSkill(Node):
                     return False
                 self.wait_for_arm_settled()
 
-            # ── Pre-grasp stop: 30 mm above target ───────────────────────────
-            grasp_z = final_z
-            pre_grasp_z = grasp_z + 0.030
+            # ── Pre-grasp stop above target ──────────────────────────────────
+            retry_z_adjust_m = -float(attempt) * self.PICKUP_RETRY_Z_STEP_M
+            grasp_z = final_z + retry_z_adjust_m
+            pre_grasp_z = grasp_z + self.PRE_GRASP_CLEARANCE_M
+            effective_z_offset_m = self.APPROACH_Z_OFFSET + retry_z_adjust_m
             print(
-                f"⬇️ {attempt_tag} Pre-grasp stop at z={pre_grasp_z:.4f} (+30mm above target {grasp_z:.4f})  "
-                f"[centroid_z={world_p.pose.position.z:.4f}m  z_offset={self.APPROACH_Z_OFFSET*1000:+.1f}mm]"
+                f"⬇️ {attempt_tag} Pre-grasp stop at z={pre_grasp_z:.4f} "
+                f"(+{self.PRE_GRASP_CLEARANCE_M*1000:.0f}mm above target {grasp_z:.4f})  "
+                f"[centroid_z={centroid_z:.4f}m  z_offset={effective_z_offset_m*1000:+.1f}mm"
+                f"{f' retry_adjust={retry_z_adjust_m*1000:+.1f}mm' if attempt > 0 else ''}]"
             )
             pre_ok = self.uf850.move_to_pose_exotica(tx, ty, pre_grasp_z, q_dict=approach_q, velocity=hover_velocity)
             if not pre_ok:
@@ -1147,45 +1625,72 @@ class PickupSkill(Node):
                 return False
             self.wait_for_arm_settled()
 
-            # ── Wrist rotation at pre-grasp stop (before descent) ─────────────
-            # Joint6 is rotated here — 30mm above the part — so fingers are
-            # correctly oriented BEFORE they enter the grasp zone.
-            if abs(self.WRIST_JOINT6_RAD) > 0.01:
-                print(f"🔄 {attempt_tag} Rotating wrist joint6 ±{math.degrees(self.WRIST_JOINT6_RAD):.1f}° at pre-grasp stop...")
-                self._rotate_wrist_joint6(self.WRIST_JOINT6_RAD)
-
             # ── Pre-position fingers at pre-grasp stop (before descent) ──────
-            # Open fingers to PRE_DESCENT_GRIPPER_WIDTH_MM so they clear the
-            # part edges during descent.  Only closes to the final grasp width
-            # after the arm reaches the target Z.
-            pre_close_width_mm = float(self.PRE_DESCENT_GRIPPER_WIDTH_MM)
+            # Open fingers 35% wider than the configured final grip width so
+            # they clear the part edges during descent.
+            pre_close_width_mm = self._pre_descent_gripper_width_mm()
             pre_close_rad = self._width_mm_to_gripper_rad(pre_close_width_mm)
+            if self.PRE_GRASP_WIDTH_MM is not None:
+                pre_width_desc = "configured pre-grasp width"
+            else:
+                pre_width_desc = f"{self.PRE_DESCENT_WIDTH_MARGIN_RATIO*100:.1f}% wider than grip width"
             print(
                 f"🤏 {attempt_tag} Pre-positioning fingers to {pre_close_width_mm:.1f}mm "
-                f"before descent (final target: "
-                f"{f'{self.GRIP_CLOSE_WIDTH_MM:.1f}mm' if self.GRIP_CLOSE_WIDTH_MM is not None else 'full close'})..."
+                f"before descent ({pre_width_desc}; final target: {self.GRIP_WIDTH_MM:.1f}mm)..."
             )
             self.gripper.set_gripper_force(self.GRIPPER_CLOSE_FORCE_N)
             self.gripper._publish_gripper_command(self.JOINT_GRIPPER, pre_close_rad)
-            self._wait_for_gripper_close_physical(pre_close_rad, hold_after_settle_s=0.1, timeout=5.0)
+            if not self._command_pre_grasp_width(pre_close_rad, timeout=3.0):
+                self.get_logger().warning(
+                    f"[pickup] {attempt_tag} pre-grasp width did not verify; continuing cautiously."
+                )
 
-            # ── Descend to grasp pose using streaming IK (preserves joint6) ──
-            # move_to_pose_exotica (batch IK) re-seeds from default joints and
-            # rotates j6 back to 0 during the trajectory.  Streaming IK steps
-            # from the current joint state each cycle, keeping j6 at the angle
-            # set by the wrist rotation above.
+            # ── Wrist rotation at pre-grasp stop (before descent) ─────────────
+            # Apply configured joint6 rotation after pre-grasp width is set and
+            # before descending into the grasp zone.
+            locked_descent_joints = None
+            if abs(self.WRIST_JOINT6_RAD) > 0.01:
+                print(f"🔄 {attempt_tag} Rotating wrist joint6 ±{math.degrees(self.WRIST_JOINT6_RAD):.1f}° at pre-grasp stop...")
+                if self._rotate_wrist_joint6(self.WRIST_JOINT6_RAD):
+                    current_j6 = self.uf850.current_joint_positions.get("uf850_joint6")
+                    if current_j6 is not None:
+                        locked_descent_joints = {"uf850_joint6": float(current_j6)}
+                        self.get_logger().info(
+                            f"[pickup] Locking uf850_joint6 at {math.degrees(float(current_j6)):.1f}° "
+                            "for descent."
+                        )
+
+            # ── Descend to grasp pose using planned Z move ───────────────────
+            # Same style as drop-Z descent, but keep the freshly computed pickup
+            # XY instead of re-reading TF XY after gripper motion.
             descent_dist = pre_grasp_z - grasp_z  # always positive (going down)
             print(
-                f"🎯 {attempt_tag} Streaming descent {descent_dist*1000:.1f}mm to grasp z={grasp_z:.4f}m "
+                f"🎯 {attempt_tag} Planned Z descent {descent_dist*1000:.1f}mm to grasp z={grasp_z:.4f}m "
                 f"(j6 preserved at {math.degrees(self.WRIST_JOINT6_RAD):.1f}°)..."
             )
-            grasp_ok = self._descend_to_grasp_z(descent_dist, speed_mps=min(hover_velocity, 0.06))
+            descent_speed = min(hover_velocity, self.PICKUP_DESCENT_SPEED_MPS)
+            descent_q = approach_q
+            if abs(self.WRIST_JOINT6_RAD) > 0.01:
+                descent_q = self._current_tcp_quat() or approach_q
+            grasp_ok = self._descend_to_grasp_z(
+                grasp_z,
+                speed_mps=descent_speed,
+                target_x=tx,
+                target_y=ty,
+                q_dict=descent_q,
+                start_z_hint=pre_grasp_z,
+                locked_joints=locked_descent_joints,
+            )
             if not grasp_ok:
                 self.get_logger().warning(
-                    f"[pickup] {attempt_tag} Streaming descent failed; falling back to EXOTica batch IK."
+                    f"[pickup] {attempt_tag} descent failed."
                 )
-                grasp_ok = self.uf850.move_to_pose_exotica(tx, ty, grasp_z, q_dict=approach_q, velocity=hover_velocity)
-            if not grasp_ok:
+                if attempt < self.PICKUP_MAX_RETRIES:
+                    self.get_logger().warning(
+                        f"[pickup] {attempt_tag} retrying pickup {self.PICKUP_RETRY_Z_STEP_M*1000:.1f}mm deeper "
+                        "on next attempt."
+                    )
+                    continue
                 return False
             self.wait_for_arm_settled()
 
@@ -1195,8 +1700,10 @@ class PickupSkill(Node):
             if actual_z is not None:
                 print(
                     f"\n📏 [DEPTH] {attempt_tag}\n"
-                    f"   Vision centroid Z : {world_p.pose.position.z:.4f} m\n"
-                    f"   Z offset          : {self.APPROACH_Z_OFFSET*1000:+.1f} mm  (approach_z_offset_m)\n"
+                    f"   Vision centroid Z : {centroid_z:.4f} m\n"
+                    f"   Z offset          : {effective_z_offset_m*1000:+.1f} mm  "
+                    f"(approach_z_offset_m {self.APPROACH_Z_OFFSET*1000:+.1f} mm"
+                    f"{f', retry {retry_z_adjust_m*1000:+.1f} mm' if attempt > 0 else ''})\n"
                     f"   Grasp target Z    : {grasp_z:.4f} m\n"
                     f"   Actual rg6_tcp Z  : {actual_z:.4f} m\n"
                     f"   Error vs target   : {(actual_z - grasp_z)*1000:+.1f} mm\n"
@@ -1205,6 +1712,13 @@ class PickupSkill(Node):
             # ── Close gripper to grasp width (verified) ───────────────────────
             print(f"🗜️ {attempt_tag} Closing Gripper at {self.GRIPPER_CLOSE_FORCE_N}N...")
             if not self._close_gripper_verified():
+                if attempt < self.PICKUP_MAX_RETRIES:
+                    self.get_logger().warning(
+                        f"[pickup] {attempt_tag} final gripper close did not verify; "
+                        f"retrying pickup {self.PICKUP_RETRY_Z_STEP_M*1000:.1f}mm deeper on next attempt."
+                    )
+                    self._open_gripper_verified()
+                    continue
                 return False
             self.publish_state("HOLDING")
             self.hold_status_pub.publish(Bool(data=True))
@@ -1261,7 +1775,7 @@ class PickupSkill(Node):
             time.sleep(1.0)   # allow vision node to publish a fresh frame
             with self.data_lock:
                 still_visible = any(
-                    self._norm_label(target_label) in self._norm_label(t.get('label', ''))
+                    self._find_pickup_target_in_list([t], target_label) is not None
                     and self._has_valid_xyz(t)
                     for t in self.latest_targets
                 )
@@ -1298,7 +1812,8 @@ def main(args=None):
         print(f"[WARN] Could not load device config: {exc}. Using defaults.")
         device_cfg = None
     node = PickupSkill(device_cfg=device_cfg)
-    executor = MultiThreadedExecutor(); executor.add_node(node)
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
     time.sleep(1.0)

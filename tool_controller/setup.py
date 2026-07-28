@@ -21,7 +21,11 @@ setup(
     maintainer_email='user@todo.todo',
     description='Screwdriver Control Package',
     license='TODO: License declaration',
-    tests_require=['pytest'],
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
     entry_points={
         'console_scripts': [
             'tool_commander = tool_controller.tool_commander:main',

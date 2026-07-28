@@ -27,6 +27,8 @@ from dual_arm_moveit_config.exotica_planner import ExoticaDualArmPlanner, Exotic
 class MotionBackend:
     _servo_state_lock = threading.Lock()
     _servo_active_by_namespace = {}
+    _command_locks_guard = threading.Lock()
+    _command_locks = {}
 
     _RG6_RAD_OPEN = -0.625
     _RG6_RAD_CLOSE = 0.625
@@ -79,6 +81,12 @@ class MotionBackend:
         x_limits = self._TCP_X_LIMITS.get(self.default_ik_link)
         self.min_tcp_x = x_limits[0] if x_limits is not None else None
         self.max_tcp_x = x_limits[1] if x_limits is not None else None
+        command_lock_key = self.controller_name or self.backend_kind
+        with MotionBackend._command_locks_guard:
+            self._command_lock = MotionBackend._command_locks.setdefault(
+                command_lock_key,
+                threading.RLock(),
+            )
 
         self._service_cb_group = ReentrantCallbackGroup()
         self._move_group_client = ActionClient(self.node, MoveGroup, "move_action")
@@ -92,10 +100,14 @@ class MotionBackend:
         self._joint_command_pub = self.node.create_publisher(
             JointState, "/robot_joint_commands", 10
         )
-        # Publisher for streaming direct joint commands via the JTC topic.
-        # Arm streaming uses this path exclusively. RG6 commands also publish
-        # here to overwrite any stale rg6_controller goal that could otherwise
-        # fight the raw hardware command.
+        self._rg6_command_pub = None
+        if self.is_gripper:
+            self._rg6_command_pub = self.node.create_publisher(
+                JointState, "/rg6/joint_command", 10
+            )
+        # Publisher for streaming direct arm joint commands via the JTC topic.
+        # RG6 uses /rg6/joint_command instead so stale rg6_controller output
+        # cannot fight the raw Modbus command.
         self._joint_traj_stream_pub = None
         if (self.is_uf850 or self.is_xarm5 or self.is_gripper) and self.controller_name:
             self._joint_traj_stream_pub = self.node.create_publisher(
@@ -435,7 +447,7 @@ class MotionBackend:
         normalized = (value - cls._RG6_RAD_CLOSE) / (cls._RG6_RAD_OPEN - cls._RG6_RAD_CLOSE)
         return cls._RG6_MM_CLOSE + normalized * (cls._RG6_MM_OPEN - cls._RG6_MM_CLOSE)
 
-    def _rg6_target_width_acknowledged(self, target_width_mm: float, tolerance_mm: float = 2.0) -> bool:
+    def _rg6_target_width_acknowledged(self, target_width_mm: float, tolerance_mm: float = 5.0) -> bool:
         try:
             reported = float(self.current_gripper_state.get("target_width_mm"))
         except Exception:
@@ -444,41 +456,31 @@ class MotionBackend:
 
     def _publish_gripper_target_until_ack(self, joint_name: str, target: float, timeout_s: float = 1.2) -> bool:
         target_width_mm = self._rg6_rad_to_width_mm(target)
+        self._publish_gripper_command(joint_name, target)
         deadline = time.time() + timeout_s
         while rclpy.ok() and time.time() < deadline:
-            self._publish_gripper_command(joint_name, target)
-            time.sleep(0.08)
             if self._rg6_target_width_acknowledged(target_width_mm):
                 return True
+            time.sleep(0.05)
         return self._rg6_target_width_acknowledged(target_width_mm)
 
     def _publish_gripper_command(self, joint_name: str, target: float, lookahead_s: float = 0.25):
-        """Publish a single final RG6 target on both command paths.
+        """Publish a single final RG6 target to the hardware bridge.
 
-        The real hardware bridge listens to /robot_joint_commands, while the
-        active rg6_controller can retain the previous trajectory command. A
-        one-point JTC command replaces that controller target without sending a
-        multi-point gripper trajectory.
+        RG6 has its own Modbus controller and should receive one final width
+        target. Use the dedicated RG6 command topic instead of the shared
+        /robot_joint_commands topic because ros2_control can keep publishing a
+        stale rg6_controller target on the shared topic.
         """
         target = float(target)
-        self._publish_raw_joint_command({joint_name: target})
-        if self._joint_traj_stream_pub is None:
-            return
-
-        traj = JointTrajectory()
-        traj.header.stamp = self.node.get_clock().now().to_msg()
-        traj.joint_names = [joint_name]
-        pt = JointTrajectoryPoint()
-        pt.positions = [target]
-        pt.velocities = [0.0]
-        pt.accelerations = [0.0]
-        _la = max(0.05, float(lookahead_s))
-        pt.time_from_start = Duration(
-            sec=int(_la),
-            nanosec=int((_la - int(_la)) * 1_000_000_000),
-        )
-        traj.points = [pt]
-        self._joint_traj_stream_pub.publish(traj)
+        msg = JointState()
+        msg.header.stamp = self.node.get_clock().now().to_msg()
+        msg.name = [joint_name]
+        msg.position = [target]
+        if self._rg6_command_pub is not None:
+            self._rg6_command_pub.publish(msg)
+        else:
+            self._joint_command_pub.publish(msg)
 
     def _execute_gripper_direct(
         self,
@@ -512,29 +514,11 @@ class MotionBackend:
             f"width={target_width_mm:.1f}mm force={self.current_gripper_force_n:.1f}N"
         )
         acked = self._publish_gripper_target_until_ack(joint_name, target, timeout_s=0.8)
-        if not acked and is_closing:
-            nudge = target + (0.03 if is_closing else -0.03)
-            nudge = max(self._RG6_RAD_OPEN, min(self._RG6_RAD_CLOSE, nudge))
-            self.node.get_logger().warning(
-                f"[{self.backend_kind}] RG6 bridge did not acknowledge target width "
-                f"{target_width_mm:.1f}mm; nudging command path before retry"
-            )
-            self._publish_gripper_command(joint_name, nudge)
-            time.sleep(0.12)
-            acked = self._publish_gripper_target_until_ack(joint_name, target, timeout_s=1.2)
-        elif not acked:
-            self.node.get_logger().warning(
-                f"[{self.backend_kind}] RG6 bridge did not acknowledge open target width "
-                f"{target_width_mm:.1f}mm; retrying exact open command without nudge"
-            )
-            acked = self._publish_gripper_target_until_ack(joint_name, target, timeout_s=1.2)
         if not acked:
             self.node.get_logger().warning(
                 f"[{self.backend_kind}] RG6 bridge target width still not acknowledged; "
-                f"continuing to monitor physical motion. state={self.current_gripper_state}"
+                f"monitoring physical motion without command nudges. state={self.current_gripper_state}"
             )
-            if not is_closing:
-                return False
 
         if not self.state_received.wait(timeout=1.0):
             return True
@@ -542,18 +526,36 @@ class MotionBackend:
         tolerance = 0.08
         deadline = time.time() + max(4.0, min(12.0, abs(target - current) / max(float(velocity), 0.05) + 2.0))
         last_resend = time.time()
+        last_progress_rad = start_current
+        last_progress_t = time.time()
         while rclpy.ok() and time.time() < deadline:
             current = float(self.current_joint_positions.get(joint_name, current))
             if abs(current - target) <= tolerance:
                 return True
             if is_closing and bool(self.current_gripper_state.get("object_detected", False)):
                 return True
-            if time.time() - last_resend >= 0.2:
-                if not self._rg6_target_width_acknowledged(target_width_mm):
-                    self._publish_gripper_target_until_ack(joint_name, target, timeout_s=0.25)
-                else:
-                    self._publish_gripper_command(joint_name, target)
+            if not is_closing:
+                try:
+                    width_mm = float(self.current_gripper_state.get("width_mm"))
+                except Exception:
+                    width_mm = None
+                if width_mm is not None and width_mm >= target_width_mm - 10.0:
+                    return True
+            moved_toward_target = (current - last_progress_rad) if is_closing else (last_progress_rad - current)
+            if moved_toward_target > 0.01:
+                last_progress_rad = current
+                last_progress_t = time.time()
+
+            is_moving = bool(self.current_gripper_state.get("is_moving", False))
+            no_progress = (time.time() - last_progress_t) >= 1.0
+            if no_progress and not is_moving and time.time() - last_resend >= 0.8:
+                self.node.get_logger().warning(
+                    f"[{self.backend_kind}] RG6 command made no progress for 1.0s; "
+                    f"republishing final width {target_width_mm:.1f}mm once."
+                )
+                self._publish_gripper_command(joint_name, target)
                 last_resend = time.time()
+                last_progress_t = time.time()
             time.sleep(0.05)
         self.node.get_logger().warning(
             f"[{self.backend_kind}] Direct RG6 command timed out before target; "
@@ -564,6 +566,12 @@ class MotionBackend:
         if is_closing and moved_toward_target >= 0.08:
             self.node.get_logger().info(
                 f"[{self.backend_kind}] Direct RG6 command accepted after partial motion "
+                f"toward target: moved={moved_toward_target:.3f}rad"
+            )
+            return True
+        if not is_closing and moved_toward_target >= 0.08:
+            self.node.get_logger().info(
+                f"[{self.backend_kind}] Direct RG6 open accepted after partial motion "
                 f"toward target: moved={moved_toward_target:.3f}rad"
             )
             return True
@@ -620,7 +628,84 @@ class MotionBackend:
         if hold_joints:
             self._publish_direct_joint_command(hold_joints)
 
+    def _anchor_controller_at_feedback(self, label: str, settle_s: float = 0.12) -> None:
+        """Replace any previous JTC target with the current feedback position."""
+        if self.is_gripper or self.is_dual_arms or self._joint_traj_stream_pub is None:
+            return
+        if not self.state_received.wait(timeout=0.5):
+            return
+        self.node.get_logger().debug(f"[{self.backend_kind}] Anchoring controller before {label}")
+        for _ in range(3):
+            self._hold_current_arm_position()
+            time.sleep(max(0.02, float(settle_s) / 3.0))
+
+    def _wait_for_trajectory_feedback(
+        self,
+        trajectory,
+        tolerance_rad: float = 0.035,
+        timeout_s: float = 1.5,
+    ) -> bool:
+        """Wait until joint feedback reaches the trajectory final point.
+
+        ExecuteTrajectory can report success before the Python-side joint/TF
+        caches have caught up. Anchoring immediately in that window republishes
+        the old feedback pose and can pull the arm back to the pre-motion point.
+        """
+        pts = getattr(trajectory.joint_trajectory, "points", [])
+        names = list(getattr(trajectory.joint_trajectory, "joint_names", []))
+        if not pts or not names:
+            return True
+        final = pts[-1]
+        if not final.positions:
+            return True
+        target = {
+            name: float(final.positions[i])
+            for i, name in enumerate(names)
+            if i < len(final.positions) and name.startswith(self.joint_prefixes)
+        }
+        if not target:
+            return True
+
+        deadline = time.time() + max(0.1, float(timeout_s))
+        last_err = None
+        while rclpy.ok() and time.time() < deadline:
+            missing = [name for name in target if name not in self.current_joint_positions]
+            if missing:
+                time.sleep(0.03)
+                continue
+            last_err = max(
+                abs(float(self.current_joint_positions[name]) - target[name])
+                for name in target
+            )
+            if last_err <= float(tolerance_rad):
+                return True
+            time.sleep(0.03)
+
+        if last_err is not None:
+            self.node.get_logger().warning(
+                f"[{self.backend_kind}] Feedback not settled after trajectory success "
+                f"(max_joint_err={last_err:.4f}rad); delaying controller anchor."
+            )
+        return False
+
     def _execute_raw_joint_interpolation(
+        self,
+        target_joints: dict[str, float],
+        velocity: float = 0.15,
+        rate_hz: float = 30.0,
+        max_joint_step_rad: float = 0.025,
+        settle_tolerance_rad: float = 0.025,
+    ) -> bool:
+        with self._command_lock:
+            return self._execute_raw_joint_interpolation_unlocked(
+                target_joints,
+                velocity=velocity,
+                rate_hz=rate_hz,
+                max_joint_step_rad=max_joint_step_rad,
+                settle_tolerance_rad=settle_tolerance_rad,
+            )
+
+    def _execute_raw_joint_interpolation_unlocked(
         self,
         target_joints: dict[str, float],
         velocity: float = 0.15,
@@ -819,6 +904,10 @@ class MotionBackend:
         return True, ""
 
     def _execute_robot_trajectory(self, trajectory) -> bool:
+        with self._command_lock:
+            return self._execute_robot_trajectory_unlocked(trajectory)
+
+    def _execute_robot_trajectory_unlocked(self, trajectory) -> bool:
         pts = len(trajectory.joint_trajectory.points)
         joints = trajectory.joint_trajectory.joint_names
         if pts > 0:
@@ -885,9 +974,14 @@ class MotionBackend:
             self.node.get_logger().error(
                 f"[{self.backend_kind}] Trajectory execution FAILED: error_code={err_val}"
             )
+            self._anchor_controller_at_feedback("execute_trajectory failed", settle_s=0.08)
         return success
 
     def _execute_trajectory_direct(self, trajectory) -> bool:
+        with self._command_lock:
+            return self._execute_trajectory_direct_unlocked(trajectory)
+
+    def _execute_trajectory_direct_unlocked(self, trajectory) -> bool:
         """Stream a pre-planned trajectory by publishing the full waypoint set to the JTC.
 
         Sends all waypoints in a single multi-point JointTrajectory message so the C++
@@ -912,6 +1006,7 @@ class MotionBackend:
             f"{len(arm_names)} joints, duration={dur_s:.2f}s"
         )
 
+        self._anchor_controller_at_feedback("direct trajectory")
         # Build and publish the full trajectory in one JTC message.
         full_traj = JointTrajectory()
         full_traj.header.stamp = self.node.get_clock().now().to_msg()
@@ -949,15 +1044,17 @@ class MotionBackend:
                 self.node.get_logger().info(
                     f"[{self.backend_kind}] Direct trajectory settled (err={err:.4f}rad)"
                 )
+                self._anchor_controller_at_feedback("direct trajectory complete", settle_s=0.08)
                 return True
             if time.time() > t0 + dur_s:
                 self._publish_direct_joint_command(target, lookahead_s=0.25)
             time.sleep(0.05)
 
-        self.node.get_logger().warning(
-            f"[{self.backend_kind}] Direct trajectory settling timeout (non-fatal)"
+        self.node.get_logger().error(
+            f"[{self.backend_kind}] Direct trajectory settling timeout; anchoring current feedback and failing command"
         )
-        return True
+        self._anchor_controller_at_feedback("direct trajectory timeout", settle_s=0.08)
+        return False
 
     def move_to_joint_positions(self, target_joints, velocity: float = 0.2, gripper_force_n: float = None) -> bool:
         self.node.get_logger().info(
@@ -1043,6 +1140,7 @@ class MotionBackend:
         q_dict=None,
         velocity: float = 0.1,
         frame_id: str = "base_link",
+        locked_joints: dict[str, float] = None,
     ) -> bool:
         self.node.get_logger().info(
             f"[{self.backend_kind}] move_to_pose_robust: target=({x:.3f},{y:.3f},{z:.3f}) "
@@ -1076,6 +1174,25 @@ class MotionBackend:
             default_roll = 0.0 if self.is_xarm5 else math.pi
             pose_stamped.pose.orientation = self._rpy_to_quaternion(default_roll, 0.0, 0.0)
         request.ik_request.pose_stamped = pose_stamped
+        locked_joint_values = {
+            name: float(value)
+            for name, value in (locked_joints or {}).items()
+            if name.startswith(self.joint_prefixes)
+        }
+        if locked_joint_values:
+            request.ik_request.constraints = Constraints()
+            for name, value in locked_joint_values.items():
+                jc = JointConstraint()
+                jc.joint_name = name
+                jc.position = value
+                jc.tolerance_above = 0.04
+                jc.tolerance_below = 0.04
+                jc.weight = 1.0
+                request.ik_request.constraints.joint_constraints.append(jc)
+            self.node.get_logger().info(
+                f"[{self.backend_kind}] move_to_pose_robust: applying locked joint constraints: "
+                + ", ".join(f"{name}={math.degrees(value):.1f}°" for name, value in locked_joint_values.items())
+            )
 
         future = self._ik_client.call_async(request)
         if not self._wait_for_future(future, 15.0):
@@ -1083,6 +1200,22 @@ class MotionBackend:
             return False
         result = future.result()
         if result and result.error_code.val == 1:
+            if locked_joint_values:
+                solution = {
+                    name: float(result.solution.joint_state.position[i])
+                    for i, name in enumerate(result.solution.joint_state.name)
+                    if i < len(result.solution.joint_state.position)
+                }
+                max_locked_err = max(
+                    abs(solution.get(name, value) - value)
+                    for name, value in locked_joint_values.items()
+                )
+                if max_locked_err > 0.12:
+                    self.node.get_logger().warning(
+                        f"[{self.backend_kind}] move_to_pose_robust: IK solution violates locked joint "
+                        f"constraint by {math.degrees(max_locked_err):.1f}°; rejecting solution."
+                    )
+                    return False
             self.node.get_logger().info(f"[{self.backend_kind}] move_to_pose_robust: IK solved, executing trajectory")
             return self._execute_joint_goal(result.solution.joint_state, velocity)
 
@@ -1853,6 +1986,44 @@ class MotionBackend:
         timeout_s: float = 60.0,
         max_joint_delta_rad: float = None,
         max_joint_step_rad: float = None,
+        locked_joints: dict[str, float] = None,
+    ) -> str:
+        if not locked_joints:
+            return self._move_cartesian_realtime_exotica_unlocked(
+                target_fn,
+                stop_fn=stop_fn,
+                rate_hz=rate_hz,
+                max_step_m=max_step_m,
+                joint_smooth_alpha=joint_smooth_alpha,
+                timeout_s=timeout_s,
+                max_joint_delta_rad=max_joint_delta_rad,
+                max_joint_step_rad=max_joint_step_rad,
+                locked_joints=None,
+            )
+        with self._command_lock:
+            return self._move_cartesian_realtime_exotica_unlocked(
+                target_fn,
+                stop_fn=stop_fn,
+                rate_hz=rate_hz,
+                max_step_m=max_step_m,
+                joint_smooth_alpha=joint_smooth_alpha,
+                timeout_s=timeout_s,
+                max_joint_delta_rad=max_joint_delta_rad,
+                max_joint_step_rad=max_joint_step_rad,
+                locked_joints=locked_joints,
+            )
+
+    def _move_cartesian_realtime_exotica_unlocked(
+        self,
+        target_fn,
+        stop_fn=None,
+        rate_hz: float = 50.0,
+        max_step_m: float = 0.003,
+        joint_smooth_alpha: float = 0.7,
+        timeout_s: float = 60.0,
+        max_joint_delta_rad: float = None,
+        max_joint_step_rad: float = None,
+        locked_joints: dict[str, float] = None,
     ) -> str:
         """Stream EXOTica IK in a real-time loop (TouchLab/teleoperation style).
 
@@ -1891,11 +2062,17 @@ class MotionBackend:
 
         planner = self._single_arm_exotica_planner
         joint_names = planner.controlled_joint_names
+        locked_joint_values = {
+            name: float(value)
+            for name, value in (locked_joints or {}).items()
+            if name in joint_names
+        }
         dt = 1.0 / max(float(rate_hz), 1.0)
         t_end = time.time() + float(timeout_s)
         ee_link = self.default_ik_link or ""
 
         seed = {n: float(self.current_joint_positions.get(n, 0.0)) for n in joint_names}
+        seed.update(locked_joint_values)
         prev_q = _np.array([seed[n] for n in joint_names], dtype=float)
         consecutive_ik_failures = 0
 
@@ -1960,6 +2137,9 @@ class MotionBackend:
             # Scale alpha so filtering strength is consistent regardless of IK latency:
             # at 50 Hz alpha=0.7 ≈ same bandwidth as at 20 Hz alpha=0.92.
             q_new = _np.array([result[n] for n in joint_names], dtype=float)
+            for i, name in enumerate(joint_names):
+                if name in locked_joint_values:
+                    q_new[i] = locked_joint_values[name]
             actual_dt = max(1e-3, time.time() - loop_start)
             alpha_t = 1.0 - (1.0 - float(joint_smooth_alpha)) ** (actual_dt / dt)
 
@@ -1985,6 +2165,9 @@ class MotionBackend:
                 q_cmd = prev_q + _np.clip(q_target - prev_q, -max_step, max_step)
             else:
                 q_cmd = q_target
+            for i, name in enumerate(joint_names):
+                if name in locked_joint_values:
+                    q_cmd[i] = locked_joint_values[name]
             smoothed = {n: float(q_cmd[i]) for i, n in enumerate(joint_names)}
 
             # Adaptive lookahead: always slightly longer than the measured IK round-trip
@@ -2069,32 +2252,47 @@ class MotionBackend:
     def retract_servo_z_closed_loop(
         self, distance: float, speed_mps: float = 0.03, timeout: float = None
     ) -> bool:
+        """Move TCP in base-link Z with closed-loop target checking.
+
+        Positive distance means higher TCP Z.  The real Servo stack used by
+        this workspace maps negative twist.z to increasing TCP Z, so command
+        sign is intentionally opposite of the requested Cartesian distance.
+        Completion is directional; moving the wrong way no longer counts as
+        success.
+        """
         if not self._ensure_servo_mode():
             return False
+        distance = float(distance)
+        if abs(distance) <= 1e-6:
+            return True
         if timeout is None:
             timeout = max(abs(distance) / 0.002, 5.0)
         try:
             start = self.tf_buffer.lookup_transform("base_link", self.default_ik_link, rclpy.time.Time())
         except Exception:
             return False
-        start_z = start.transform.translation.z
+        start_z = float(start.transform.translation.z)
+        target_z = start_z + distance
         twist = TwistStamped()
         twist.header.frame_id = "base_link"
-        twist.twist.linear.z = abs(speed_mps) if distance > 0 else -abs(speed_mps)
+        twist.twist.linear.z = -abs(speed_mps) if distance > 0 else abs(speed_mps)
         deadline = time.time() + timeout
         while rclpy.ok() and time.time() < deadline:
             try:
                 current = self.tf_buffer.lookup_transform("base_link", self.default_ik_link, rclpy.time.Time())
+                current_z = float(current.transform.translation.z)
                 if distance < 0.0 and self.min_tcp_z is not None:
-                    if float(current.transform.translation.z) <= self.min_tcp_z + 1e-3:
+                    if current_z <= self.min_tcp_z + 1e-3:
                         self.node.get_logger().warning(
                             f"[{self.backend_kind}] Servo Z motion reached table limit "
                             f"z={self.min_tcp_z:.5f} for {self.default_ik_link}. Stopping."
                         )
                         self._publish_zero_twist()
                         return False
-                travelled = abs(current.transform.translation.z - start_z)
-                if travelled >= abs(distance) - 0.002:
+                if distance > 0 and current_z >= target_z - 0.002:
+                    self._publish_zero_twist()
+                    return True
+                if distance < 0 and current_z <= target_z + 0.002:
                     self._publish_zero_twist()
                     return True
             except Exception:

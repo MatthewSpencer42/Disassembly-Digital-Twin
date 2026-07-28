@@ -91,6 +91,7 @@ class ObjectHoldSkill(Node):
         self.TILT_DEG = 0.0
         self.GRIP_WIDTH_MM = 0.0
         self.GRIP_CONTACT_MARGIN_MM = 20.0
+        self.FINAL_GRIP_WIDTH_TOLERANCE_MM = 12.0
         self.APPROACH_STANDOFF_M = 0.12
         self.FLIP_APPROACH = False    # add π to v_rad → approach from opposite Y side
         self.APPROACH_RPY_RAD = None  # None → use default per strategy
@@ -132,15 +133,15 @@ class ObjectHoldSkill(Node):
 
     def _get_target_by_any_label(self, labels):
         """Search vision snapshot for the first object matching any label in *labels*."""
+        label_set = {self._norm_label(lbl) for lbl in labels}
         with self.data_lock:
-            for lbl in labels:
-                result = next(
-                    (t for t in self.latest_targets
-                     if lbl.lower() in t.get("label", "").lower()),
-                    None,
-                )
-                if result:
-                    return result
+            return next(
+                (
+                    t for t in self.latest_targets
+                    if self._norm_label(t.get("label", "")) in label_set
+                ),
+                None,
+            )
         return None
 
     def _select_hold_step(self, cfg, target_label=None):
@@ -181,6 +182,10 @@ class ObjectHoldSkill(Node):
         self.TILT_DEG = p.get('tilt_deg', 0.0)
         self.GRIP_WIDTH_MM = p.get('grip_width_mm', 0.0)
         self.GRIP_CONTACT_MARGIN_MM = p.get('grip_contact_margin_mm', self.GRIP_CONTACT_MARGIN_MM)
+        self.FINAL_GRIP_WIDTH_TOLERANCE_MM = p.get(
+            'final_grip_width_tolerance_mm',
+            self.FINAL_GRIP_WIDTH_TOLERANCE_MM,
+        )
         self.APPROACH_STANDOFF_M = p.get('approach_standoff_m', 0.12)
         # flip_approach: add π to v_rad so arm approaches from the opposite side
         self.FLIP_APPROACH = bool(p.get('flip_approach', False))
@@ -354,7 +359,15 @@ class ObjectHoldSkill(Node):
     def _hold_close_target_rad(self):
         return self._gripper_width_mm_to_rad(self._hold_close_target_width_mm())
 
-    def _wait_for_gripper_position(self, target_rad, is_closing, start_rad=None, timeout=5.0):
+    def _wait_for_gripper_position(
+        self,
+        target_rad,
+        is_closing,
+        start_rad=None,
+        target_width_mm=None,
+        width_tolerance_mm=None,
+        timeout=5.0,
+    ):
         start_t = time.time()
         last_pos = 999.0
         stall_timer = 0.0
@@ -371,6 +384,18 @@ class ObjectHoldSkill(Node):
             if is_closing and bool(self.gripper.current_gripper_state.get("object_detected", False)):
                 self.get_logger().info(f"Grasp confirmed (RG6 object_detected) at {curr:.3f} rad.")
                 return True
+            if is_closing and target_width_mm is not None and width_tolerance_mm is not None:
+                try:
+                    width_mm = float(self.gripper.current_gripper_state.get("width_mm"))
+                except Exception:
+                    width_mm = None
+                if width_mm is not None and width_mm <= float(target_width_mm) + float(width_tolerance_mm):
+                    self.get_logger().info(
+                        f"Grasp accepted by hold width tolerance: width={width_mm:.1f}mm "
+                        f"target={float(target_width_mm):.1f}mm "
+                        f"tol={float(width_tolerance_mm):.1f}mm."
+                    )
+                    return True
             if abs(curr - last_pos) < 0.002:
                 stall_timer += 0.1
                 if stall_timer >= 0.8:
@@ -418,6 +443,8 @@ class ObjectHoldSkill(Node):
             target_rad,
             is_closing=is_closing,
             start_rad=None if current is None else float(current),
+            target_width_mm=target_width_mm,
+            width_tolerance_mm=self.FINAL_GRIP_WIDTH_TOLERANCE_MM,
         )
 
     def _retract_after_contact(self, distance_m=None, q_dict=None, target_x=None, target_y=None):
@@ -1089,8 +1116,15 @@ class ObjectHoldSkill(Node):
         return False
 
     def _get_target_by_label(self, label):
+        target = self._norm_label(label)
         with self.data_lock:
-            return next((t for t in self.latest_targets if label.lower() in t.get('label', '').lower()), None)
+            return next(
+                (
+                    t for t in self.latest_targets
+                    if self._norm_label(t.get('label', '')) == target
+                ),
+                None,
+            )
 
     def _run_hold_sequence(self, part_id, target_label, interactive, target_data_override=None):
         # Caller-provided snapshot bypasses stale-ID issues (e.g. master_agent).

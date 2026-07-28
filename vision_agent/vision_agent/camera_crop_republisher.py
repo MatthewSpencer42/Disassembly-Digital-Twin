@@ -31,47 +31,14 @@ Depth output    : rate-limited via depth_rate_divisor (default 1 → pass-throug
                   camera SW alignment already limits to ~2 fps)
 """
 import copy
-import glob
 import os
 import sys
 import threading
 import time
 
+from vision_agent.runtime_env import setup_python_env
 
-def find_repo_root(current_path, target_name="agentic_disassembly"):
-    curr = os.path.abspath(current_path)
-    while curr != os.path.dirname(curr):
-        if os.path.basename(curr) == target_name:
-            return curr
-        candidate = os.path.join(curr, target_name)
-        if os.path.exists(candidate):
-            return candidate
-        curr = os.path.dirname(curr)
-    return None
-
-
-REPO_ROOT = find_repo_root(__file__)
-if REPO_ROOT is None:
-    fallback_root = "/home/adip/workspace/disassembly_ws/src/agentic_disassembly"
-    if os.path.exists(os.path.join(fallback_root, "vision_training", ".venv")):
-        REPO_ROOT = fallback_root
-if REPO_ROOT:
-    venv_site_packages = sorted(
-        glob.glob(
-            os.path.join(
-                REPO_ROOT,
-                "vision_training",
-                ".venv",
-                "lib",
-                "python*",
-                "site-packages",
-            )
-        )
-    )
-    for path in venv_site_packages:
-        if os.path.exists(path) and path not in sys.path:
-            sys.path.insert(0, path)
-            break
+REPO_ROOT = setup_python_env(__file__)
 
 import cv2
 import numpy as np
