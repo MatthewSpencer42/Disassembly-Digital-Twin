@@ -36,9 +36,12 @@ def launch_setup(context, *_args, **_kwargs):
     enable_joystick = LaunchConfiguration("enable_joystick").perform(context).lower() in {"true", "1", "yes"}
     use_rviz = LaunchConfiguration("use_rviz")
     cleanup_existing = LaunchConfiguration("cleanup_existing")
-    use_sim_time_arg = LaunchConfiguration("use_sim_time").perform(context).lower() in {"true", "1", "yes"}
-    use_sim_time_val = "true" if use_sim_time_arg else "false"
-    use_sim_time = use_sim_time_arg
+    use_sim_time_arg = LaunchConfiguration("use_sim_time").perform(context).lower()
+    if use_sim_time_arg in ("", "auto"):
+        use_sim_time = hardware_type == "isaac"
+    else:
+        use_sim_time = use_sim_time_arg in {"true", "1", "yes"}
+    use_sim_time_val = "true" if use_sim_time else "false"
     allow_fake_tool = hardware_type not in ("real", "twin")
 
     joint_commands_topic, joint_states_topic = joint_topics_for_hardware(hardware_type)
@@ -106,14 +109,10 @@ def launch_setup(context, *_args, **_kwargs):
         ],
     )
 
-    # In Isaac mode only: remap /joint_states → /filtered_joint_states inside
-    # rviz2 so that stale xamr5_* joint names from Isaac Sim never reach
-    # MoveIt's RobotState and cause a terminate(). The filter also applies the
-    # uf_slide_joint coordinate offset (Isaac 0-based → URDF 0.054-based).
-    # twin mode does NOT remap — the real robot already publishes clean
-    # URDF-coordinate joint states with no unknown joints.  Remapping twin
-    # to filtered_joint_states would inject the wrong +0.054 offset and corrupt
-    # MoveIt's planning scene, leading to an interactive-marker SIGSEGV.
+    # In Isaac mode only, remap /joint_states to /filtered_joint_states inside
+    # RViz so unexpected names cannot reach MoveIt's RobotState. The adapter
+    # has already normalized the USD joint names and coordinates. Twin mode
+    # does not need this final filter because real feedback uses model names.
     rviz_remappings = [("joint_states", "filtered_joint_states")] if filter_joint_states else []
     rviz_node = Node(
         package="rviz2",
@@ -152,6 +151,14 @@ def launch_setup(context, *_args, **_kwargs):
         executable="real_hardware.py",
         name="real_hardware_bridge",
         parameters=[{"use_sim_time": use_sim_time}],
+        output="screen",
+    )
+
+    isaac_joint_adapter_node = Node(
+        package="dual_arm_moveit_config",
+        executable="isaac_joint_adapter.py",
+        name="isaac_joint_adapter",
+        parameters=[{"publish_clock": True}],
         output="screen",
     )
 
@@ -217,7 +224,14 @@ def launch_setup(context, *_args, **_kwargs):
         output="screen",
     )
 
-    controller_manager_args = ["--controller-manager", "/controller_manager", "--controller-manager-timeout", "120"]
+    controller_manager_args = [
+        "--controller-manager",
+        "/controller_manager",
+        "--controller-manager-timeout",
+        "120",
+        "--service-call-timeout",
+        "60",
+    ]
     controller_spawners = [
         Node(package="controller_manager", executable="spawner", arguments=["joint_state_broadcaster", *controller_manager_args], output="screen"),
         Node(package="controller_manager", executable="spawner", arguments=["uf850_controller", *controller_manager_args], output="screen"),
@@ -233,6 +247,7 @@ def launch_setup(context, *_args, **_kwargs):
         "dual_arm_moveit_config/launch/exotica.launch.py",
         "dual_arm_moveit_config/hardware/real_hardware.py",
         "dual_arm_moveit_config/hardware/joint_state_filter.py",
+        "dual_arm_moveit_config/hardware/isaac_joint_adapter.py",
         "dual_arm_moveit_config/hardware/isaac_state_relay.py",
         "dual_arm_moveit_config/hardware/teleop_bridge.py",
         "dual_arm_moveit_config/dual_arm_moveit_config/exotica_ik_server_node.py",
@@ -283,15 +298,17 @@ def launch_setup(context, *_args, **_kwargs):
         LogInfo(msg="Cleaning up stale dual-arm ROS processes before launch", condition=IfCondition(cleanup_existing)),
         cleanup_existing_processes,
         LogInfo(msg=f"Starting dual-arm stack in {hardware_type} hardware mode"),
-        TimerAction(period=1.0, actions=[rsp_node, ros2_control_node]),
     ]
+    if hardware_type == "isaac":
+        actions.append(isaac_joint_adapter_node)
+    actions.append(TimerAction(period=1.0, actions=[rsp_node, ros2_control_node]))
 
     if hardware_type in ("real", "twin"):
         actions.append(TimerAction(period=1.0, actions=[real_hardware_bridge]))
 
     if hardware_type == "isaac":
-        # Filter strips unknown joint names (e.g. stale xamr5_* from Isaac Sim)
-        # and applies uf_slide_joint coordinate offset (Isaac→URDF).
+        # The adapter has already normalized USD names and coordinates.
+        # This final filter protects MoveIt from any unexpected joint names.
         # RViz is remapped to subscribe to /filtered_joint_states.
         actions.append(TimerAction(period=2.0, actions=[joint_state_filter_node]))
 
@@ -300,8 +317,7 @@ def launch_setup(context, *_args, **_kwargs):
         # the physical robot in real time.  No joint_state_filter here —
         # the real robot publishes URDF-coordinate joint states with no
         # unknown joints, so RViz subscribes to /joint_states directly.
-        # Adding the filter would apply the wrong +0.054 Isaac offset to
-        # real hardware data, corrupting MoveIt's planning scene → SIGSEGV.
+        # The real hardware state path does not require Isaac normalization.
         actions.append(TimerAction(period=2.0, actions=[isaac_state_relay_node]))
 
     # Staggered spawning to avoid swamping the controller manager service executor
@@ -359,7 +375,7 @@ def generate_launch_description():
     ld.add_action(DeclareBooleanLaunchArg("enable_servo", default_value=False))
     ld.add_action(DeclareBooleanLaunchArg("enable_joystick", default_value=False))
     ld.add_action(DeclareBooleanLaunchArg("cleanup_existing", default_value=True))
-    ld.add_action(DeclareLaunchArgument("use_sim_time", default_value="false"))
+    ld.add_action(DeclareLaunchArgument("use_sim_time", default_value="auto"))
     ld.add_action(DeclareLaunchArgument("hardware_type", default_value="fake"))
     ld.add_action(OpaqueFunction(function=launch_setup))
     return ld

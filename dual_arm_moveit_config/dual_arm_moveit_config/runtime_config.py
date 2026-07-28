@@ -14,9 +14,10 @@ def joint_topics_for_hardware(hardware_type: str) -> tuple[str, str]:
     normalized = normalize_xacro_hardware_type(hardware_type)
     if normalized == "real":
         return "/robot_joint_commands", "/robot_joint_states"
+    if normalized == "isaac":
+        return "/isaac_joint_commands_mapped", "/isaac_joint_states_mapped"
     return "/isaac_joint_commands", "/isaac_joint_states"
 
 
 def use_filtered_joint_states(hardware_type: str) -> bool:
     return hardware_type == "isaac"
-
